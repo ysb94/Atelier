@@ -160,7 +160,7 @@ try {
   await db.exec(await readFile('supabase/migrations/20261118102144_visual_category_comment_participants.sql', 'utf8'))
   assert.deepEqual(await commentFunctionAccess(), commentAccessBefore)
   const workflowAccessBefore = await functionAccess()
-  await db.exec(await readFile('supabase/migrations/20261118103538_visual_self_assigned_supervisor_review.sql', 'utf8'))
+  await db.exec(await readFile('supabase/migrations/20261118104037_visual_self_assigned_supervisor_review.sql', 'utf8'))
   assert.deepEqual(await functionAccess(), workflowAccessBefore)
   await db.exec('commit')
   delete historical.data.visualCategoryWorkflow.categories.banner.feedback
