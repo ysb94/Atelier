@@ -1,20 +1,28 @@
 import type { DraftSampleWorkOrder } from '../types'
 import { latestFilledSampleWorkOrder, newSampleWorkOrder } from './sample-work-order'
 
+export const PROMOTION_DESTINATION = 'PROMOTION [중국]'
+
 export function sampleCountry(country: string) {
+  if (/^promotion\s*\[(중국|china)\]$/i.test(country.trim())) return { code: 'PROMO', label: PROMOTION_DESTINATION }
   if (/중국|china/i.test(country)) return { code: 'CN', label: '중국' }
   if (/한국|국내|korea/i.test(country)) return { code: 'KO', label: '한국' }
   return { code: country.trim() || '국가 미정', label: country.trim() || '국가 미정' }
 }
 
-/** 차수에 국가가 있으면 그 값을, 없으면 기획안 제조국을 본다. 한국은 어디에도 보내지 않는다. */
+export function isSampleDestination(value: string) {
+  const { code } = sampleCountry(value)
+  return code === 'CN' || code === 'KO' || code === 'PROMO'
+}
+
+/** 차수의 진행처를 우선한다. KOREA와 PROMOTION은 기획안에만 기록한다. */
 export function sampleSentToChinaTeam(orderCountry: string | undefined, draftCountry: string) {
   const country = orderCountry?.trim() || draftCountry.trim()
   if (!country) return true
   return sampleCountry(country).code === 'CN'
 }
 
-/** 아직 중국팀이 발송하지 않은 최신 작업지시서에 제조국을 남긴다. 한국이면 중국 담당을 비운다. */
+/** 아직 중국팀이 발송하지 않은 최신 작업지시서에 제조국을 남긴다. 기획안에만 남기는 샘플은 중국 담당을 비운다. */
 export function applySampleOrigin(orders: readonly DraftSampleWorkOrder[], country: string) {
   const latest = latestFilledSampleWorkOrder(orders)
   const nextCountry = country.trim()

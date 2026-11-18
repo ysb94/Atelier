@@ -55,7 +55,7 @@ export function DraftSampleProgress({ orders, kind = 'sample', joined = false, o
           </div>
           {!order.receivedAt && <p className="draft-sample-dispatch">{country.code === 'CN'
             ? order.shipped ? `${sampleHistoryDay(order.returnedAt).slice(2) || '날짜 기록 없음'} 중국 발송 완료` : '중국팀 제작·발송 대기'
-            : '국내 샘플'}</p>}
+            : country.code === 'PROMO' ? '프로모션 샘플 · 기록용' : '국내 샘플'}</p>}
           {current && !order.passed && !order.receivedAt && <Button type="button" size="sm" variant="outline" className="draft-sample-receive" disabled={readOnly || saving || busy || !canReceiveSample(order, originCountry)}
             title="실물을 받은 뒤 수령일을 기록하세요." onClick={() => void run(() => onReceive(order.id))}>{busy ? '저장 중' : '수령 확인'}</Button>}
         </div>

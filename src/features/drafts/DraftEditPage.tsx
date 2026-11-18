@@ -53,7 +53,7 @@ import {
 import {
   colorWorkOrderFileName,
 } from '@/lib/drafts/draft-flow'
-import { applySampleOrigin, sampleCountry, sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
+import { applySampleOrigin, isSampleDestination, PROMOTION_DESTINATION, sampleCountry, sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
 import { sampleOrderLabel } from '@/lib/drafts/sample-registration'
 import {
   attachSampleWorkOrderFile,
@@ -456,9 +456,8 @@ export function DraftEditPage() {
 
   async function uploadBasicWorkOrder(file: File) {
     if (sampleUploadLocked) return
-    const country = sampleCountry(form.originCountry)
-    if (country.code !== 'CN' && country.code !== 'KO') {
-      setError('제조국을 먼저 선택해 주세요. 중국은 중국팀으로 전달되고, 한국은 기록만 남습니다.')
+    if (!isSampleDestination(form.originCountry)) {
+      setError('샘플 진행처를 먼저 선택해 주세요.')
       return
     }
     if (file.size > SAMPLE_WORK_ORDER_MAX_BYTES) {
@@ -883,8 +882,8 @@ export function DraftEditPage() {
                 <OptionSelect
                   className="h-11"
                   value={form.originCountry}
-                  options={DRAFT_ORIGIN_OPTIONS}
-                  placeholder="제조국 선택"
+                  options={[...DRAFT_ORIGIN_OPTIONS, PROMOTION_DESTINATION]}
+                  placeholder="샘플 진행처 선택"
                   onChange={(originCountry) => {
                     const sampleWorkOrders = applySampleOrigin(form.sampleWorkOrders, originCountry)
                     const nextForm = { ...form, originCountry, sampleWorkOrders, ...legacyWorkOrderFields(sampleWorkOrders) }
@@ -892,7 +891,7 @@ export function DraftEditPage() {
                     if (!isNew && latestFilledSampleWorkOrder(sampleWorkOrders)) saveMutation.mutate(nextForm)
                   }}
                 />
-                <p className="mt-1 text-xs text-muted-foreground">중국은 중국팀으로 전달되고, 한국은 전송하지 않고 기록만 남습니다.</p>
+                <p className="mt-1 text-xs text-muted-foreground">중국은 중국팀으로 전달되고, 한국과 PROMOTION [중국]은 기획안에 기록만 남습니다.</p>
               </div>
               <div className="flex min-h-16 items-center justify-center rounded-xl border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
                 {sampleFileName && currentSample?.url ? (

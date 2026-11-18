@@ -40,6 +40,8 @@ assert.equal(color.sampleDone,false,'다음 단계 등록이 기존 완료값을
 assert.equal(color.sampleWorkOrders.length,1,'컬러 지시서를 대표 차수에 섞지 않음')
 assert.equal(color.specs.colorSampleRounds!.length,1)
 assert.equal(color.specs.colorSampleRounds![0]!.originCountry,'한국')
+const promotionColor=registerDraftSampleStage(receivedInput,'color',file,'PROMOTION [중국]',at)
+assert.equal(promotionColor.specs.colorSampleRounds![0]!.originCountry,'PROMOTION [중국]')
 assert.equal(normalizeColorSampleRounds(JSON.parse(JSON.stringify(color.specs.colorSampleRounds)))[0]!.originCountry,'한국')
 assert.deepEqual(color.colors.map(c=>c.name),receivedInput.colors.map(c=>c.name))
 assert.ok(color.colors.every(c=>c.sampleWorkOrderUrl===file.url))
