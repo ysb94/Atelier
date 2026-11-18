@@ -161,7 +161,7 @@ try {
   assert.deepEqual(await scalar('select to_jsonb(s) from public.attendance_clock_ins s'),originalClock)
   assert.equal(oldStatement.late_minutes,40)
   assert.equal(await scalar('select late_minutes from public.late_arrival_statements'),3,'existing statement preserved after later exclusion and restore')
-  await db.exec(await readFile('supabase/migrations/20261118112932_attendance_incident_confirmations.sql', 'utf8'))
+  await db.exec(await readFile('supabase/migrations/20261118114458_attendance_incident_confirmations.sql', 'utf8'))
   const confirm = (employee, date, kind) => db.query('select public.confirm_attendance_incident($1,$2,$3)', [employee,date,kind])
   const confirmed = async () => (await db.query("select * from public.list_attendance_incident_confirmations('2026-11-01','2026-11-30') order by work_date")).rows
   await actingAs(staff)
