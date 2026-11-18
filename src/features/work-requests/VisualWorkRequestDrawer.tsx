@@ -8,6 +8,7 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { cn } from '@/lib/utils'
 import { VisualCategoryComments } from './VisualCategoryComments'
 import { VisualCategoryWorkflowPanel } from './VisualCategoryWorkflowPanel'
+import { useReadVisualWorkflowNotices } from './use-visual-workflow-notices'
 import type { VisualCategoryWorkflow } from './visual-category-workflow'
 import { visualFinalApprover } from './visual-final-approval'
 import type { ContentBlock, LocalTeamMember, WorkRequestRecord } from './work-request-types'
@@ -42,10 +43,11 @@ function ContentSection({ title, children }: { title: string; children: ReactNod
 }
 
 export function VisualWorkRequestDrawer({
-  requestId, title, detail, initialCategory, viewerId, canManage, isRequester, requesterView,
+  requestId, requestRevision, title, detail, initialCategory, viewerId, canManage, isRequester, requesterView,
   summary, onClose, headerActions, notice, mainReferences, management, legacyConversation, memberName, renderBody, renderAssignment, workflow,
 }: {
   requestId: string
+  requestRevision?: number
   title: string
   detail: VisualWorkDetail
   initialCategory: string | null
@@ -122,6 +124,7 @@ export function VisualWorkRequestDrawer({
     || (assigned?.assigneeId === viewerId && workflow?.members.some(member => member.id === viewerId))
   ))
   const requesterOnly = Boolean(workflow && isRequester && (requesterView || !workflowManager))
+  const contentNotice = useReadVisualWorkflowNotices(requestId, current?.id ?? '', requestRevision, !requesterOnly, 'content')
   const privateWorkflow = Boolean(step && !workflow?.data.legacyReceiptPending)
   const canDiscussWorkflow = (!requesterOnly && workflowManager)
     || (reviewRoundsReady && (isRequester || Boolean(viewerId && step?.workerId === viewerId)))
@@ -196,6 +199,10 @@ export function VisualWorkRequestDrawer({
             {linkStatus && <p role="status" className="mt-2 text-sm text-muted-foreground">{linkStatus}</p>}
             <div className="mt-6 space-y-5 sm:mt-8 sm:space-y-6 lg:mt-10">
               {notice}
+              {contentNotice.error && <div className="flex items-center gap-2" role="alert">
+                <span className="text-sm text-danger">수정 알림 읽음 상태를 저장하지 못했습니다.</span>
+                <Button type="button" size="sm" variant="outline" onClick={contentNotice.retry}>다시 시도</Button>
+              </div>}
               {!requesterOnly && manageOpen && <section id={managementId} aria-label="업무 관리" className="space-y-4">
                 {current && <p className="text-sm text-muted-foreground">
                   {current.label} · {assigned?.assigneeId ? '배정됨' : '미배정'}

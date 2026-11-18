@@ -61,6 +61,7 @@ import { DEFAULT_VISUAL_CATEGORIES, type VisualCategory, type VisualRequestValue
 import { WorkRequestCategoryAssignments } from './WorkRequestCategoryAssignments'
 import { VisualWorkRequestDrawer } from './VisualWorkRequestDrawer'
 import { VisualWorkflowNotificationList } from '@/features/settings/MyHomeNotificationList'
+import { useReadVisualWorkflowNotices } from './use-visual-workflow-notices'
 import { VisualFinalApprovalPanel } from './VisualFinalApprovalPanel'
 import { visualFinalPending, visualSummaryApprover, workRequestStatusMeta, type VisualFinalAction } from './visual-final-approval'
 import { downloadVisualWorkFile, visualWorkDetail } from './visual-work-detail'
@@ -113,6 +114,7 @@ import {
   REQUESTER_CHAT_ROOM,
   hasRequestBody,
   isClosedStatus,
+  canEditWorkRequestContent,
   isCompletionPending,
   nextCompletionStatus,
   needsLeadCompletionReview,
@@ -1960,7 +1962,7 @@ function RequestTitleAndDue({
   )
 }
 
-function VisualRequestFields({ blocks, onChange, brandPicker, beforeMain, error, requestKey, categories, visualValues, onVisualChange }: {
+function VisualRequestFields({ blocks, onChange, brandPicker, beforeMain, error, requestKey, categories, lockCategories = false, visualValues, onVisualChange }: {
   blocks: ContentBlock[]
   onChange: (blocks: ContentBlock[]) => void
   brandPicker: ReactNode
@@ -1968,10 +1970,14 @@ function VisualRequestFields({ blocks, onChange, brandPicker, beforeMain, error,
   error?: string
   requestKey: string
   categories: VisualCategory[]
+  lockCategories?: boolean
   visualValues?: VisualRequestValues
   onVisualChange: (values: VisualRequestValues) => void
 }) {
   const sections = splitVisualSections(blocks)
+  for (const category of visualValues?.categories ?? []) {
+    if (!sections.has(category.id)) sections.set(category.id, [])
+  }
   const visibleCategories = categories.filter(category => category.enabled || sections.has(category.id))
   for (const [id] of sections) {
     if (id !== 'main' && !visibleCategories.some(category => category.id === id)) {
@@ -1992,9 +1998,9 @@ function VisualRequestFields({ blocks, onChange, brandPicker, beforeMain, error,
         {brandPicker}
         <fieldset className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-3">
           <legend className="float-left mr-5 py-0.5 text-xs text-muted-foreground">분류</legend>
-          {visibleCategories.map((category) => (
+          {visibleCategories.filter(category => !lockCategories || sections.has(category.id)).map((category) => (
             <label key={category.id} className="flex cursor-pointer items-center gap-1.5 text-xs">
-              <input type="checkbox" className="size-3.5 accent-primary" checked={sections.has(category.id)} onChange={(event) => {
+              <input type="checkbox" className="size-3.5 accent-primary" disabled={lockCategories} checked={sections.has(category.id)} onChange={(event) => {
                 const content = sections.get(category.id)
                 const hasFields = Object.values(visualValues?.categories.find(item => item.id === category.id)?.fields ?? {}).some(value => value.trim())
                 if (!event.target.checked && ((content && hasRequestBody(content)) || hasFields) && !window.confirm(`${category.label}에 입력한 내용과 첨부를 지울까요?`)) return
@@ -2050,6 +2056,7 @@ type FormDraft = {
   formBrandId: string
   errors: FormErrors
   hasEdited: boolean
+  baseRevision?: number
 }
 
 export function WorkRequestForm({ owner, surface = 'department' }: {
@@ -2102,6 +2109,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
     screenKey: string
     draftKey: string | null
     baseBrandId: string
+    baseRevision?: number
   }>({ screenKey: '', draftKey: null, baseBrandId: '' })
   const [brandFilter, setBrandFilter] = useState<'all' | 'undecided' | string>(
     () => (searchParams.get('brand') === 'undecided' ? 'undecided' : 'all'),
@@ -2182,7 +2190,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
     if (!personal && !visible && !request.departmentReadable) return null
     return {
       needsReviewStart: auxiliary && canManage && request.status === 'requested' && !request.visualCategoryWorkflow,
-      editable: isSelfRequest && request.status === 'requested' && !noticeOnly,
+      editable: !noticeOnly && session?.user.id === selfId && canEditWorkRequestContent(request, selfId),
     }
   }
 
@@ -2255,6 +2263,10 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
   const selectedRequest = detailRequestId
     ? requests.find((request) => request.id === detailRequestId)
     : undefined
+  const selectedVisual = selectedRequest?.owner === 'design' ? visualWorkDetail(selectedRequest, visualCategories) : null
+  const visualDetail = selectedVisual?.sections.length ? selectedVisual : null
+  const legacyContentNotice = useReadVisualWorkflowNotices(selectedRequest?.id ?? '', '', selectedRequest?.revision,
+    Boolean(selectedRequest?.owner === 'design' && !visualDetail), 'content')
 
   function initialFormDraft(request?: WorkRequestRecord): FormDraft {
     return {
@@ -2268,6 +2280,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
       formBrandId: request?.brandId ?? '',
       errors: {},
       hasEdited: false,
+      baseRevision: request?.revision,
     }
   }
 
@@ -2279,7 +2292,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
     const switched = switchWorkRequestDraft(formDrafts, {
       fromKey: loadedScreen.draftKey,
       toKey: draftKey,
-      current: { values, formBrandId, errors, hasEdited },
+      current: { values, formBrandId, errors, hasEdited, baseRevision: loadedScreen.baseRevision },
       dirty: isWorkRequestDraftDirty({
         hasEdited,
         brandId: formBrandId,
@@ -2291,6 +2304,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
       screenKey,
       draftKey,
       baseBrandId: editingRequest?.brandId ?? '',
+      baseRevision: switched.loaded?.baseRevision ?? editingRequest?.revision,
     })
     setFormDrafts(switched.drafts)
     setAcceptRequestId(null)
@@ -2411,13 +2425,17 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
 
     const now = new Date().toISOString()
     if (editingRequest) {
+      if (editingRequest.revision !== loadedScreen.baseRevision) {
+        setErrors({ blocks: '다른 변경이 먼저 저장되었습니다. 입력한 내용을 확인한 뒤 상세를 다시 열어 주세요.' })
+        return
+      }
       setRequests((current) =>
         current.map((request) =>
           request.id === editingRequest.id
             ? {
                 ...request,
                 values: { ...values },
-                brandId: request.brandId || formBrandId,
+                brandId: request.status === 'requested' ? request.brandId || formBrandId : request.brandId,
                 updatedAt: now,
               }
             : request,
@@ -3759,7 +3777,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
       (finalApprovalEnabled && !isClosedStatus(selectedRequest.status)))
     const supervisorId = visualSummaryApprover(selectedRequest, activeSupervisorIds)
     const memberName = (id: string) => storage.directoryMembers.find(person => person.id === id)?.displayName?.trim() || '기존 직원'
-    const canEdit = isSelfRequest && selectedRequest.status === 'requested' && !noticeOnly
+    const canEdit = !noticeOnly && session?.user.id === selfId && canEditWorkRequestContent(selectedRequest, selfId)
     const chatRooms = visibleChatRooms(selectedRequest, {
       canManage: canManageSelected,
       isRequester: isSelfRequest,
@@ -3770,14 +3788,11 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
         selectedRequest.requesterDepartment,
       ),
     })
-    const visual = selectedRequest.owner === 'design' ? visualWorkDetail(selectedRequest, visualCategories) : null
-    const visualDetail = visual?.sections.length ? visual : null
     const initialCategory = searchParams.get('visualTab')
 
     const headerActions = (
       <>
-            {isSelfRequest && canEdit ? (
-              <>
+            {canEdit && (
                 <Button
                   type="button"
                   variant="outline"
@@ -3787,6 +3802,8 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
                   <Pencil className="size-4" />
                   수정
                 </Button>
+            )}
+            {isSelfRequest && selectedRequest.status === 'requested' && !noticeOnly && (
                 <Button
                   type="button"
                   variant="danger"
@@ -3796,8 +3813,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
                   <Trash2 className="size-4" />
                   삭제
                 </Button>
-              </>
-            ) : null}
+            )}
             {canManageSelected &&
             (selectedRequest.status === 'requested' ||
               selectedRequest.status === 'reviewing') ? (
@@ -3885,6 +3901,10 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
     )
 
     const notice = <>
+      {!visualDetail && legacyContentNotice.error && <div className="flex items-center gap-2" role="alert">
+        <span className="text-sm text-danger">수정 알림 읽음 상태를 저장하지 못했습니다.</span>
+        <Button type="button" size="sm" variant="outline" onClick={legacyContentNotice.retry}>다시 시도</Button>
+      </div>}
       {owner === 'design' && visualSettings.isError && <div className="flex flex-wrap items-center gap-2 text-sm text-danger">
         <p role="alert">총괄 관리자 설정을 불러오지 못했습니다.</p>
         <Button type="button" variant="outline" size="sm" onClick={() => void visualSettings.refetch()}>설정 다시 조회</Button>
@@ -4234,6 +4254,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
         {visualDetail ? <VisualWorkRequestDrawer
           key={`${selfId}:${selectedRequest.id}:${initialCategory ?? ''}`}
           requestId={selectedRequest.id}
+          requestRevision={selectedRequest.revision}
           title={selectedRequest.values.title}
           detail={visualDetail}
           initialCategory={initialCategory}
@@ -4289,7 +4310,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
               ? `${config.teamName} 작업 요청 수정`
               : owner === 'design' ? internal ? 'Visual Team 업무 등록' : 'Visual Team 작업 요청' : `${config.teamName} ${internal ? '업무' : '작업 요청'} 등록`
           }
-          description={owner === 'design' ? '작업 분류를 선택하시면 입력 창이 뜹니다. (다중 선택 가능)' : config.description}
+          description={owner === 'design' ? editingRequest && editingRequest.status !== 'requested' ? undefined : '작업 분류를 선택하시면 입력 창이 뜹니다. (다중 선택 가능)' : config.description}
           actions={
             <Button type="button" variant="outline" onClick={cancelEditing}>
               <ArrowLeft className="size-4" />
@@ -4321,6 +4342,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
               ...(editingRequest?.categoryAssignments ?? []).filter(saved => !visualCategories.some(category => category.id === saved.categoryId)).map(saved => ({ id: saved.categoryId, label: saved.label, enabled: false, assigneeId: saved.assigneeId, fields: saved.formFields ?? [] })),
             ]}
             visualValues={values.visualRequest}
+            lockCategories={Boolean(editingRequest && editingRequest.status !== 'requested')}
             onVisualChange={(visual) => updateValue('visualRequest', visual)}
             blocks={values.blocks}
             onChange={(blocks) => updateValue('blocks', blocks)}
@@ -4345,7 +4367,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
             brandPicker={
               <label className="flex flex-wrap items-center gap-4 text-xs">
                 <span className="text-muted-foreground">브랜드</span>
-                <Select className="h-8 w-44 text-xs" value={formBrandId} onChange={(event) => setFormBrandId(event.target.value)} disabled={Boolean(editingRequest?.brandId)}>
+                <Select className="h-8 w-44 text-xs" value={formBrandId} onChange={(event) => setFormBrandId(event.target.value)} disabled={Boolean(editingRequest && (editingRequest.brandId || editingRequest.status !== 'requested'))}>
                   <option value="">브랜드 미정</option>
                   {brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
                 </Select>
