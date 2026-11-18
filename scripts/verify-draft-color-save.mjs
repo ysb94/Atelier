@@ -22,7 +22,7 @@ try {
   for (const path of [
     'supabase/tests/department_work_fixture.sql',
     'supabase/migrations/20261027044909_department_work_access.sql',
-    'supabase/migrations/20261118064155_save_draft_colors.sql',
+    'supabase/migrations/20261118071459_save_draft_colors.sql',
   ]) await db.exec(await readFile(path, 'utf8'))
   const colorAssigneeMigration = await readFile('supabase/migrations/20261106130000_china_assignee_receipt.sql', 'utf8')
   const keepAssignee = colorAssigneeMigration.match(/create or replace function app\.keep_color_sample_assignee\(\)[\s\S]+?end \$\$;/)?.[0]
