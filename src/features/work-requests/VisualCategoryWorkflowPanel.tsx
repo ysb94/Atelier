@@ -62,8 +62,8 @@ export function VisualCategoryWorkflowPanel({
   const workReady = received || reviewRounds
   useEffect(() => { if (reviewRounds) onReviewRoundsReady(true) }, [onReviewRoundsReady, reviewRounds])
   const [note, setNote] = useState('')
-  const [link, setLink] = useState('')
   const [files, setFiles] = useState<File[]>([])
+  const hasResultFiles = reviewRounds && files.length > 0
   const fileInput = useRef<HTMLInputElement>(null)
   const [person, setPerson] = useState<string | null>(null)
   const [choosingWorker, setChoosingWorker] = useState(false)
@@ -116,8 +116,7 @@ export function VisualCategoryWorkflowPanel({
     if (!changeable || !request.revision || inFlight.current) return
     const revision = request.revision
     const writeNote = action === 'submit' || action === 'assign_worker' || action.endsWith('_return') || action.endsWith('_forward') ? note.trim() : ''
-    const resultUrl = action === 'submit' ? link.trim() : ''
-    const key = JSON.stringify([revision, action, target, writeNote, resultUrl])
+    const key = JSON.stringify([revision, action, target, writeNote])
     const id = command.current?.key === key ? command.current.id : crypto.randomUUID()
     command.current = { key, id }
     setError('')
@@ -128,17 +127,13 @@ export function VisualCategoryWorkflowPanel({
     try {
       await diagnosticOperation('app', 'visual_category_' + action, async trace => {
         trace.step('validate_input')
-        if (resultUrl && !/^https?:\/\/[^\s]+$/.test(resultUrl)) {
-          trace.block('invalid_result_link')
-          throw new Error('http:// 또는 https://로 시작하는 결과물 링크를 입력해 주세요.')
-        }
         const save = async () => {
           if (!sameSession()) throw new Error('업무 화면 또는 계정이 바뀌었습니다. 다시 확인해 주세요.')
           await trace.run('save', context => changeVisualCategoryWork({
-            request: request.id, category: category.id, revision, action, person: target, note: writeNote, resultUrl, command: id,
+            request: request.id, category: category.id, revision, action, person: target, note: writeNote, resultUrl: '', command: id,
           }, context))
         }
-        if (action === 'submit' && reviewRounds && files.length > 0) {
+        if (action === 'submit' && hasResultFiles) {
           await trace.run('attach_result', context => submitVisualWorkFiles(
             request.id, category.id, id, files, sameSession, save, context,
           ))
@@ -150,7 +145,6 @@ export function VisualCategoryWorkflowPanel({
       })
       command.current = null
       setNote('')
-      setLink('')
       setFiles([])
       if (fileInput.current) fileInput.current.value = ''
       setPerson(null)
@@ -219,9 +213,6 @@ export function VisualCategoryWorkflowPanel({
         {visibleNote && <label className="grid gap-1 text-sm">{canSubmit ? '결과 내용' : '수정 의견'}
           <Textarea rows={3} maxLength={canSubmit ? 10000 : 2000} value={note} disabled={!changeable} onChange={event => setNote(event.target.value)} />
         </label>}
-        {canSubmit && <label className="grid gap-1 text-sm">결과물 링크
-          <Input type="url" placeholder="https://" maxLength={2048} value={link} disabled={!changeable} onChange={event => setLink(event.target.value)} />
-        </label>}
         {canSubmit && reviewRounds && <label className="grid gap-1 text-sm">결과물 파일
           <Input ref={fileInput} type="file" multiple disabled={!changeable} onChange={event => {
             const selected = Array.from(event.currentTarget.files ?? [])
@@ -234,7 +225,7 @@ export function VisualCategoryWorkflowPanel({
           <span className="text-xs text-muted-foreground">최대 5개 · 파일당 20MB</span>
         </label>}
         <div className="flex flex-wrap gap-2">
-          {canSubmit && <Button type="button" disabled={!changeable || (!note.trim() && !link.trim() && !files.length)} onClick={() => void change('submit')}>결과물 제출</Button>}
+          {canSubmit && <Button type="button" disabled={!changeable || (!note.trim() && !hasResultFiles)} onClick={() => void change('submit')}>결과물 제출</Button>}
           {review && <>
             <Button type="button" disabled={!changeable || !currentResult} onClick={() => void change(review.approve)}>{review.label}</Button>
             {requesterReview && !requestingRevision ? <Button type="button" variant="outline" disabled={!changeable || !currentResult}

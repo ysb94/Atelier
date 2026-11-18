@@ -268,8 +268,12 @@ const checks = String.raw`
  await middleBadge.waitFor()
  await video.getByText('작업 중',{exact:true}).waitFor()
  await page.goto(visual('design','video'),{waitUntil:'domcontentloaded'})
- await video.getByLabel('결과물 링크',{exact:true}).fill('https://example.com/approved-video')
- await video.getByRole('button',{name:'결과물 제출',exact:true}).click()
+ const submitVideo=video.getByRole('button',{name:'결과물 제출',exact:true})
+ await submitVideo.waitFor()
+ assert.equal(await video.getByLabel('결과물 링크',{exact:true}).count(),0)
+ assert.equal(await submitVideo.isEnabled(),false)
+ await video.getByLabel(/결과물 파일/).setInputFiles({name:'영상 결과물.txt',mimeType:'text/plain',buffer:Buffer.from('video result')})
+ await submitVideo.click()
  await video.getByText('중간 검수 대기',{exact:true}).waitFor()
  await page.goto(visual('manager','video'),{waitUntil:'domcontentloaded'})
  await video.getByRole('button',{name:'중간 검수 통과',exact:true}).click()
@@ -280,9 +284,8 @@ const checks = String.raw`
  await page.setViewportSize({width:390,height:844})
  await page.goto(origin+'/settings/profile?actor=planner',{waitUntil:'domcontentloaded'})
  await browserNotice.getByRole('button',{name:/분류별 배정 브라우저 검증 · 영상/}).click()
- const approvedLink=video.getByRole('link',{name:'결과물 링크 열기',exact:true}).first()
- await approvedLink.waitFor()
- assert.equal(await approvedLink.getAttribute('href'),'https://example.com/approved-video')
+ await video.getByRole('region',{name:'검수 통과 결과물',exact:true})
+   .getByRole('button',{name:'영상 결과물.txt 다운로드',exact:true}).waitFor()
  await video.getByRole('button',{name:'이 분류 결과 확인',exact:true}).click()
  await video.getByText('전체 결과 확인 2/2',{exact:true}).waitFor()
  assert.equal((await record()).status,'completed')
@@ -293,19 +296,22 @@ const checks = String.raw`
    status:'requested',values:{title:'관리자 겸 요청자 검증',dueDate:'2030-01-01',referenceFiles:[],
      blocks:[{id:'body',type:'text',text:'동일 계정 역할 검증'}],visualRequest:{categories:[{id:'banner',fields:{}}]}},
  }})
- async function dualAction(actor,action,note='',person=null) {
+ async function dualAction(actor,action,note='',person=null,resultUrl='') {
    dualRevision=await command(actor,'change_visual_category_work',{p_request:dualId,p_category:'banner',p_revision:dualRevision,
-     p_action:action,p_person:person,p_note:note,p_result_url:'',p_command:crypto.randomUUID()})
+     p_action:action,p_person:person,p_note:note,p_result_url:resultUrl,p_command:crypto.randomUUID()})
  }
  await dualAction(supervisor,'receipt')
  await dualAction(middle,'assign_worker','',worker)
  await dualAction(worker,'submit','공개 전 시안')
  await dualAction(middle,'middle_return','관리자 화면 전용 의견')
- await dualAction(worker,'submit','승인된 시안')
+ const previousResultUrl='https://example.com/previous-result'
+ await dualAction(worker,'submit','승인된 시안',null,previousResultUrl)
  await dualAction(middle,'middle_approve')
  await dualAction(supervisor,'supervisor_approve')
  await page.goto(origin+'/settings/profile?actor=manager&visualReview=1&requestId='+dualId+'&visualTab=banner',{waitUntil:'domcontentloaded'})
- await banner.getByRole('region',{name:'검수 통과 결과물',exact:true}).getByText('승인된 시안',{exact:true}).waitFor()
+ const approvedBanner=banner.getByRole('region',{name:'검수 통과 결과물',exact:true})
+ await approvedBanner.getByText('승인된 시안',{exact:true}).waitFor()
+ assert.equal(await approvedBanner.getByRole('link',{name:'결과물 링크 열기',exact:true}).getAttribute('href'),previousResultUrl)
  assert.equal(await banner.getByText(/관리자 화면 전용 의견|공개 전 시안|중간 수정/).count(),0)
  await banner.getByRole('button',{name:'수정 요청',exact:true}).click()
  await banner.getByLabel('수정 의견',{exact:true}).fill('승인된 시안의 날짜 수정')
