@@ -3,6 +3,7 @@ import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Plus } from 'lucide-react'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
+import { Button } from '@/components/ui/button'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { startWorkflow, tracedInput, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 import { createSeason, deleteSeason, getCompanyProductDrafts, getSeasonsByBrand, updateProductDraft, updateSeason } from '@/lib/api'
@@ -501,31 +502,31 @@ export function CompanyDraftsPage() {
         onSelect={setBrandScope}
       />
 
-      <div className="mb-3 flex flex-col gap-3 border-b border-[#ead7b0] pb-3 lg:flex-row lg:items-end lg:justify-between">
-        <div className="flex flex-wrap items-center gap-1.5 lg:pb-2">
-          <BoardFilterChip
-            selected={boardFilter === 'all'}
-            onSelect={() => setBoardFilter('all')}
-            label="전체"
-            count={sheetCounts.total}
-          />
-          <BoardFilterChip
-            selected={boardFilter === 'unassigned'}
-            onSelect={() => setBoardFilter('unassigned')}
-            label="출시 미정"
-            count={sheetCounts.pending}
-          />
-          <BoardFilterChip
-            selected={boardFilter === 'scheduled'}
-            onSelect={() => setBoardFilter('scheduled')}
-            label="출시 폴더 지정"
-            count={sheetCounts.scheduled}
-          />
+      <div className="mb-3 border-b border-border pb-2">
+        <div className="mb-1 flex flex-wrap gap-x-3 text-[11px] leading-4 text-warning">
+          <span>미확정 : 기획 {formatNumber(sheetCounts.planningOpen)}건</span>
+          <span>미확정 : MD {formatNumber(sheetCounts.mdOpen)}건</span>
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="mb-1.5 text-[11px] leading-4 text-[#b8860b]">
-            <div>미확정 : 기획 {formatNumber(sheetCounts.planningOpen)}건</div>
-            <div>미확정 : MD {formatNumber(sheetCounts.mdOpen)}건</div>
+        <div className="flex min-w-0 flex-col gap-1.5 lg:flex-row lg:items-start lg:gap-4 xl:gap-6">
+          <div className="flex shrink-0 flex-wrap items-center gap-1" role="group" aria-label="기획안 출시 필터">
+            <BoardFilterChip
+              selected={boardFilter === 'all'}
+              onSelect={() => setBoardFilter('all')}
+              label="전체"
+              count={sheetCounts.total}
+            />
+            <BoardFilterChip
+              selected={boardFilter === 'unassigned'}
+              onSelect={() => setBoardFilter('unassigned')}
+              label="출시 미정"
+              count={sheetCounts.pending}
+            />
+            <BoardFilterChip
+              selected={boardFilter === 'scheduled'}
+              onSelect={() => setBoardFilter('scheduled')}
+              label="출시 폴더 지정"
+              count={sheetCounts.scheduled}
+            />
           </div>
           {brandScope !== 'all' && (
             <DraftFolderBar
@@ -544,14 +545,14 @@ export function CompanyDraftsPage() {
               }}
             />
           )}
+          {canWriteDraft(workAccess.access) && <Link
+            to={newHref}
+            className="inline-flex h-7 shrink-0 items-center gap-1 self-start rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus className="size-3" aria-hidden="true" />
+            기획안 추가
+          </Link>}
         </div>
-        {canWriteDraft(workAccess.access) && <Link
-          to={newHref}
-          className="inline-flex h-8 shrink-0 items-center gap-1.5 self-start rounded-md bg-[#c60920] px-3 text-xs font-medium text-white hover:bg-[#b30920] lg:mb-1 lg:self-end"
-        >
-          <Plus className="size-3.5" />
-          기획안 추가
-        </Link>}
       </div>
 
       {draftsQuery.isError ? (
@@ -849,20 +850,22 @@ function BoardFilterChip({
   count: number
 }) {
   return (
-    <button
+    <Button
+      variant="outline"
+      size="sm"
       type="button"
       aria-pressed={selected}
       onClick={onSelect}
       className={cn(
-        'rounded border px-2 py-1 text-[11px]',
+        'h-7 gap-1 rounded-sm px-1.5 text-[13px]! font-semibold! leading-none! shadow-none',
         selected
-          ? 'border-foreground bg-white font-semibold text-foreground'
-          : 'border-border bg-white/70 text-muted-foreground hover:text-foreground',
+          ? 'border-primary/45 text-primary hover:border-primary/65 hover:bg-primary/5'
+          : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
       )}
     >
       {label}{' '}
       <span className="tabular-nums">{formatNumber(count)}</span>
-    </button>
+    </Button>
   )
 }
 
