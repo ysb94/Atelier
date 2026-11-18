@@ -37,7 +37,7 @@ try {
   const before = await scalar('select to_jsonb(c) from public.attendance_clock_ins c')
   const migration = await readFile('supabase/migrations/20261110024519_quarter_leave_arrival.sql', 'utf8')
   await db.exec(migration.replaceAll('pg_catalog.clock_timestamp()', "'2026-11-10T12:00:00+09:00'::timestamptz"))
-  const arrivalMigration = await readFile('supabase/migrations/20261118110400_offsite_and_half_leave_arrival.sql', 'utf8')
+  const arrivalMigration = await readFile('supabase/migrations/20261118111222_offsite_and_half_leave_arrival.sql', 'utf8')
   await db.exec(arrivalMigration)
   const arrival = () => scalar("select app.attendance_arrival_start_for_date($1,'2026-11-10')", [staff])
   assert.equal(await arrival(), '11:00:00')
