@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FileText, Info, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { StatusPill } from '@/components/ui/status-pill'
+import { scheduledOffsiteArrival } from '@/features/operations-support/attendance-arrival'
 import { isWorkday } from '@/features/operations-support/monthly-attendance'
 import { getMyWorkdayBasis } from '@/lib/supabase/attendance-entry'
 import { confirmLateStatementHr, confirmLateStatementManager, downloadLateStatementFile, lateStatementReview, listLateArrivalStatements, listLateStatementFiles, loadCumulativeLate, removeLateStatementFile, saveMyLateStatement, uploadLateStatementFile, type LateArrivalStatement, type LateStatementFile } from '@/lib/supabase/late-arrival-statements'
@@ -294,7 +295,9 @@ export function LateArrivalHeaderButton() {
   const today = koreaDateKey()
   const userId = session?.user.id
   const active = useWorkspaceTabActivity()
-  const ready = profile?.status === 'active' && Boolean(userId) && Boolean(clock.todayClock) && isWorkday(today, {})
+  const actual = clock.todayRecord?.clockIn ?? ''
+  const ready = profile?.status === 'active' && Boolean(userId) && Boolean(actual) && !clock.exempt &&
+    !scheduledOffsiteArrival(clock.todayRecord) && isWorkday(today, {})
   const basis = useQuery({
     queryKey: ['my-workday-basis', userId, today, 'late-header'],
     queryFn: () => getMyWorkdayBasis(today),
@@ -307,7 +310,7 @@ export function LateArrivalHeaderButton() {
     enabled: ready,
   })
   const arrivalStart = basis.data?.quarterArrivalSupported ? basis.data.arrivalStart : basis.data?.start
-  const minutes = arrivalStart ? lateMinutes(arrivalStart, clock.todayClock) : 0
+  const minutes = arrivalStart ? lateMinutes(arrivalStart, actual) : 0
   const filed = statements.data?.find(item => item.date === today && item.employeeId === userId)
   const cumulative = useCumulativeLate(userId, today, ready && !basis.isPending && !statements.isPending && Boolean(basis.data?.start) && minutes > 0 && !filed)
   const [open, setOpen] = useState(false)
@@ -332,7 +335,7 @@ export function LateArrivalHeaderButton() {
   const preview: Preview = {
     date: today,
     start: arrivalStart,
-    actual: clock.todayClock,
+    actual,
     minutes,
     department: profile?.departmentName || '소속 없음',
     name: profile?.displayName || '이름 없음',

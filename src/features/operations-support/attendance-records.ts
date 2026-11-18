@@ -1,18 +1,18 @@
 import type { LeaveRequest } from '../../lib/supabase/leave-requests.ts'
 import { EMPTY_ATTENDANCE, type AttendanceRecord, type AttendanceRecords, type AttendanceStatus } from './monthly-attendance.ts'
 import { offsiteWorkdayStart } from './offsite-workday-start.ts'
-import { approvedQuarterIntervals, type ArrivalInterval } from './quarter-arrival.ts'
+import { approvedArrivalIntervals, isMorningHalf, scheduledOffsiteArrival, type ArrivalClock, type ArrivalInterval } from './attendance-arrival.ts'
 
 const STATUS_RANK: Partial<Record<LeaveRequest['kind'], number>> = {
   annual: 5, official: 4, half: 3, remote: 2, offsite: 1,
 }
 
-function leaveStatus(request: LeaveRequest): AttendanceStatus | null {
+function leaveStatus(request: LeaveRequest, lunch: ArrivalInterval | undefined): AttendanceStatus | null {
   if (request.kind === 'annual') return 'annual'
   if (request.kind === 'official') return 'official'
   if (request.kind === 'remote') return 'remote'
   if (request.kind === 'offsite') return 'offsite'
-  if (request.kind === 'half') return request.start < '13:00' ? 'half-am' : 'half-pm'
+  if (request.kind === 'half') return isMorningHalf(request.start, lunch) ? 'half-am' : 'half-pm'
   return null
 }
 
@@ -21,13 +21,13 @@ function withNote(record: AttendanceRecord, note: string): AttendanceRecord {
 }
 
 /** 회사 출근 기록과 대기·승인 신청을 월별 근태 칸으로 바꾼다. */
-export function buildAttendanceRecords(dates: readonly string[], clocks: readonly { employeeId: string; date: string; clockIn: string }[], leaves: readonly LeaveRequest[], lunch?: ArrivalInterval): AttendanceRecords {
+export function buildAttendanceRecords(dates: readonly string[], clocks: readonly (ArrivalClock & { employeeId: string; date: string })[], leaves: readonly LeaveRequest[], lunch?: ArrivalInterval): AttendanceRecords {
   const days = new Set(dates)
   const records: AttendanceRecords = {}
   for (const clock of clocks) {
     if (!days.has(clock.date)) continue
     const day = records[clock.date] ?? {}
-    day[clock.employeeId] = { ...EMPTY_ATTENDANCE, status: 'present', start: clock.clockIn }
+    day[clock.employeeId] = { ...EMPTY_ATTENDANCE, status: 'present', start: clock.clockIn, offsiteArrival: scheduledOffsiteArrival(clock) }
     records[clock.date] = day
   }
   const grouped = new Map<string, LeaveRequest[]>()
@@ -48,11 +48,11 @@ export function buildAttendanceRecords(dates: readonly string[], clocks: readonl
       (STATUS_RANK[right.kind] ?? 0) - (STATUS_RANK[left.kind] ?? 0) || Number(right.status === 'approved') - Number(left.status === 'approved'))
     const chosen = ranked[0]
     let record = records[date]?.[employeeId] ?? { ...EMPTY_ATTENDANCE }
-    record = { ...record, quarterIntervals: approvedQuarterIntervals(requests, date), lunch }
+    record = { ...record, arrivalIntervals: approvedArrivalIntervals(requests, date, lunch), lunch }
     const workStart = offsiteWorkdayStart(requests, date)
     if (workStart) record = { ...record, expectedStart: workStart }
     if (chosen) {
-      const status = leaveStatus(chosen)
+      const status = leaveStatus(chosen, lunch)
       if (status) record = { ...record, status, note: chosen.status === 'pending' ? '승인 대기' : record.note }
     }
     for (const quarter of requests.filter(request => request.kind === 'quarter')) {
