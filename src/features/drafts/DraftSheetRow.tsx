@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type MouseEventHandler, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { FileText, GripVertical, Heart, ImageOff, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { DRAFT_COLOR_PHOTO_ACCEPT, prepareDraftColorPhoto } from '@/lib/drafts/color-photo'
 import { MAX_DRAFT_COLORS } from '@/lib/drafts/empty-draft'
-import { resolveColorSpec } from '@/lib/drafts/color-spec'
+import { DRAFT_INFORMATION_LABELS, resolveColorSpec, type ColorSpecField } from '@/lib/drafts/color-spec'
 import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
 import { colorSampleLineStatus, resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
 import { sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
@@ -19,6 +19,7 @@ import './draft-board.css'
 import { DraftSampleProgress } from './DraftSampleProgress'
 import { DraftColorSampleProgress } from './DraftColorSampleProgress'
 import { DraftPriceRequestButton, type DraftPriceControls } from './DraftPriceRequestButton'
+import { DraftInformationPanel } from './DraftInformationPanel'
 
 const SAMPLE_WORK_ORDER_ACCEPT =
   'application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp,.xls,.xlsx'
@@ -650,98 +651,17 @@ function SheetInlineField({
   )
 }
 
-function EntryButton({
-  readOnly = false,
-  label,
-  value,
-  placeholder,
-  tone = 'neutral',
-  icon,
-  canApplyAll = false,
-  disabled = false,
-  onSave,
-}: {
-  readOnly?: boolean
-  label: string
-  value: string
-  placeholder: string
-  tone?: 'neutral' | 'pending' | 'done'
-  icon?: ReactNode
-  canApplyAll?: boolean
-  disabled?: boolean
-  onSave: (value: string, applyAll: boolean) => Promise<void>
+function InformationButton({ label, value, tone, expanded, panelId, disabled, icon, onClick }: {
+  label: string; value: string; tone: ReturnType<typeof specTone>; expanded: boolean
+  panelId: string; disabled: boolean; icon?: ReactNode; onClick: MouseEventHandler<HTMLButtonElement>
 }) {
-  const [open, setOpen] = useState(false)
-  const [text, setText] = useState(value)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const shown = value.trim()
-
-  useEffect(() => {
-    if (!open || readOnly) setText(value)
-  }, [open, value, readOnly])
-
-  function save(applyAll: boolean) {
-    if (readOnly) return
-    setBusy(true)
-    setError('')
-    void onSave(text.trim(), applyAll)
-      .then(() => setOpen(false))
-      .catch((err: unknown) => {
-        console.warn('[drafts] 시트 값 저장 실패', err)
-        setError(err instanceof Error ? err.message : '저장하지 못했습니다.')
-      })
-      .finally(() => setBusy(false))
-  }
-
   return (
-    <div className="draft-sheet-entry">
-      <button
-        type="button"
-        className={`draft-sheet-action is-${tone}`}
-        aria-expanded={open}
-        aria-label={label}
-        title={shown || label}
-        disabled={disabled}
-        onClick={() => {
-          setError('')
-          setText(value)
-          setOpen((current) => !current)
-        }}
-      >
-        {icon}
-        <span className="draft-sheet-entry-label">{label}</span>
-      </button>
-      {open ? (
-        <form
-          className="draft-sheet-entry-form"
-          onSubmit={(event) => {
-            event.preventDefault()
-            save(false)
-          }}
-        >
-          <input
-            aria-label={`${label} 값`}
-            placeholder={placeholder}
-            value={readOnly ? value : text}
-            readOnly={readOnly}
-            disabled={busy}
-            onChange={(event) => { if (!readOnly) setText(event.target.value) }}
-          />
-          <div className="draft-sheet-entry-actions">
-            <button type="submit" disabled={readOnly || busy}>
-              {busy ? '저장 중…' : '저장'}
-            </button>
-            {canApplyAll ? (
-              <button type="button" className="is-ghost" disabled={readOnly || busy} onClick={() => save(true)}>
-                전체 컬러에 적용
-              </button>
-            ) : null}
-          </div>
-          {error ? <p>{error}</p> : null}
-        </form>
-      ) : null}
-    </div>
+    <button type="button" className={`draft-sheet-action is-${tone}${expanded ? ' ring-2 ring-primary/40' : ''}`}
+      aria-expanded={expanded} aria-controls={expanded ? panelId : undefined}
+      aria-label={label} title={value.trim() || label} disabled={disabled} onClick={onClick}>
+      {icon}
+      {label}
+    </button>
   )
 }
 
@@ -807,7 +727,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
   onSaveColors: (colors: ColorFormValue[]) => Promise<void>
   onRenameProduct: (field: 'nameKo' | 'nameEn', name: string) => Promise<void>
   onRenameColor: (colorId: string, name: string) => Promise<void>
-  onSaveSheetValue: (colorId: string, field: 'size' | 'fabric' | 'weight' | 'specDoc', value: string, applyAll: boolean) => Promise<void>
+  onSaveSheetValue: (colorId: string, field: ColorSpecField, value: string, applyAll: boolean) => Promise<void>
   onUploadSampleWorkOrder: (file: { url: string; name: string }) => Promise<void>
   onReceiveSample: (id: string) => Promise<void>
   onRequestNextSampleRound: (file: { url: string; name: string }, country?: string) => Promise<void>
@@ -827,6 +747,9 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
   const colorSampleReceived = Boolean(latestColorRound?.receivedAt)
   const doneColorIds = new Set(latestColorRound ? draft.specs.colorSampleDone?.[latestColorRound.id] ?? [] : [])
   const [pendingDone, setPendingDone] = useState<Record<string, boolean>>({})
+  const informationId = useId()
+  const [information, setInformation] = useState<{ colorId: string; field: ColorSpecField } | null>(null)
+  const informationTrigger = useRef<HTMLButtonElement>(null)
   const name = draft.nameEn.trim() || draft.nameKo.trim() || '이름 미정'
   const named = Boolean(draft.nameEn.trim() || draft.nameKo.trim())
   const hasColor = draft.colors.length > 0
@@ -840,11 +763,6 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
   const registeredDay = sheetRegisteredDay(draft.createdAt)
   const specsConfirmed = draft.specs.size.confirmed && draft.specs.fabric.confirmed && draft.specs.weight.confirmed
   const colorRows: Array<DraftColorRow | null> = draft.colors.length ? draft.colors : [null]
-  const canApplyAll = draft.colors.length > 1
-
-  function saveColorSpec(colorId: string, field: 'size' | 'fabric' | 'weight' | 'specDoc') {
-    return (value: string, applyAll: boolean) => onSaveSheetValue(colorId, field, value, applyAll)
-  }
   function colorSampleDone(colorId: string) {
     return colorId in pendingDone ? pendingDone[colorId] : doneColorIds.has(colorId)
   }
@@ -869,7 +787,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
     })
   }
 
-  return <tr className="draft-sheet-row">
+  return <><tr className="draft-sheet-row">
     <td><div className="draft-sheet-image-cell">
       <strong className="draft-sheet-brand">{brand?.name ?? '브랜드 미정'}</strong>
       <DraftPhoto src={draft.imageUrl} name={name === '이름 미정' ? draft.draftNo : name} onOpen={onOpen} />
@@ -956,6 +874,22 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
         {colorRows.map((color, index) => {
           const spec = color ? resolveColorSpec(draft.specs, color.id) : null
           const specDocLabel = specsConfirmed && spec?.specDoc.trim() ? '스펙 확정' : '스펙 문서'
+          function informationButton(field: ColorSpecField) {
+            const value = spec?.[field] ?? ''
+            const expanded = information?.colorId === color?.id && information?.field === field
+            return (
+              <InformationButton key={field} label={field === 'specDoc' ? specDocLabel : DRAFT_INFORMATION_LABELS[field]}
+                value={field === 'size' ? formatSizeSpecLabel(value) : value}
+                tone={specTone(value, field === 'specDoc' ? specsConfirmed : draft.specs[field].confirmed)}
+                panelId={informationId} expanded={expanded} disabled={!color}
+                icon={field === 'specDoc' ? <FileText size={16} aria-hidden="true" /> : undefined}
+                onClick={event => {
+                  if (!color) return
+                  informationTrigger.current = event.currentTarget
+                  setInformation(expanded ? null : { colorId: color.id, field })
+                }} />
+            )
+          }
           return (
             <ColorLine key={color?.id ?? 'none'} index={index}>
               <div className="draft-sheet-info">
@@ -965,49 +899,10 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
                   onToggle={color ? () => toggleColorSampleDone(color.id, !colorSampleDone(color.id)) : undefined}
                 />
                 <div className="draft-sheet-specs">
-                  <EntryButton
-                    readOnly={readOnly}
-                    label="size"
-                    value={formatSizeSpecLabel(spec?.size ?? '')}
-                    placeholder="300×120×210"
-                    tone={specTone(spec?.size ?? '', draft.specs.size.confirmed)}
-                    canApplyAll={canApplyAll}
-                    disabled={!color}
-                    onSave={color ? saveColorSpec(color.id, 'size') : async () => undefined}
-                  />
-                  <EntryButton
-                    readOnly={readOnly}
-                    label="Fabric"
-                    value={spec?.fabric ?? ''}
-                    placeholder="원단"
-                    tone={specTone(spec?.fabric ?? '', draft.specs.fabric.confirmed)}
-                    canApplyAll={canApplyAll}
-                    disabled={!color}
-                    onSave={color ? saveColorSpec(color.id, 'fabric') : async () => undefined}
-                  />
-                  <EntryButton
-                    readOnly={readOnly}
-                    label="Weight"
-                    value={spec?.weight ?? ''}
-                    placeholder="무게"
-                    tone={specTone(spec?.weight ?? '', draft.specs.weight.confirmed)}
-                    canApplyAll={canApplyAll}
-                    disabled={!color}
-                    onSave={color ? saveColorSpec(color.id, 'weight') : async () => undefined}
-                  />
+                  {(['size', 'fabric', 'weight'] as const).map(informationButton)}
                 </div>
                 <div className="draft-sheet-actions">
-                  <EntryButton
-                    readOnly={readOnly}
-                    label={specDocLabel}
-                    value={spec?.specDoc ?? ''}
-                    placeholder="스펙 내용"
-                    tone={specTone(spec?.specDoc ?? '', specsConfirmed)}
-                    icon={<FileText size={16} />}
-                    canApplyAll={canApplyAll}
-                    disabled={!color}
-                    onSave={color ? saveColorSpec(color.id, 'specDoc') : async () => undefined}
-                  />
+                  {informationButton('specDoc')}
                 </div>
               </div>
             </ColorLine>
@@ -1034,4 +929,18 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
       </div>
     </div></td>
   </tr>
+    {information && (
+      <tr className="draft-information-row">
+        <td colSpan={6}>
+          <DraftInformationPanel id={informationId} draft={draft} field={information.field} colorId={information.colorId}
+            readOnly={readOnly} onSave={onSaveSheetValue}
+            onFieldChange={field => setInformation({ colorId: information.colorId, field })}
+            onClose={() => {
+              setInformation(null)
+              informationTrigger.current?.focus()
+            }} />
+        </td>
+      </tr>
+    )}
+  </>
 }

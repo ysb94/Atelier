@@ -2,6 +2,13 @@ import type { DraftColorSpec, DraftSpecKey, DraftSpecs } from '@/lib/types'
 
 export type ColorSpecField = 'size' | 'fabric' | 'weight' | 'specDoc'
 
+export const DRAFT_INFORMATION_LABELS = {
+  size: 'size',
+  fabric: 'Fabric',
+  weight: 'Weight',
+  specDoc: '스펙 문서',
+} satisfies Record<ColorSpecField, string>
+
 export function colorSpecFromProduct(
   specs: Pick<DraftSpecs, DraftSpecKey>,
 ): DraftColorSpec {

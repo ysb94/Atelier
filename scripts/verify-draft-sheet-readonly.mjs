@@ -1,17 +1,40 @@
 import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
 import path from 'node:path'
-import {createServer} from 'vite'
+import { build } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import {chromium} from 'playwright-core'
-const root=process.cwd(),origin='http://127.0.0.1:5197'
+const root=process.cwd()
 let server,browser
 try{
- server=await createServer({configFile:false,envDir:false,cacheDir:path.join(root,'node_modules/.cache/draft-sheet-verify'),logLevel:'error',plugins:[{name:'draft-sheet-fixture',configureServer(vite){vite.middlewares.use((req,res,next)=>{if(!req.headers.accept?.includes('text/html'))return next();void vite.transformIndexHtml(req.url,'<html><body><div id="root"></div><script type="module" src="/dev-tools/ai-workflow/browser-fixture/draft-sheet-entry.tsx"></script></body></html>').then(html=>{res.setHeader('Content-Type','text/html');res.end(html)}).catch(next)})}},react(),tailwindcss()],resolve:{alias:{'@':path.join(root,'src')}},server:{host:'127.0.0.1',port:5197,strictPort:true,hmr:false}})
- await server.listen();browser=await chromium.launch({executablePath:process.env.ATELIER_CHROMIUM_BIN||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true})
+ const bundle=await build({
+   root,configFile:false,envFile:false,logLevel:'error',plugins:[react(),tailwindcss()],
+   resolve:{alias:{'@':path.join(root,'src')}},
+   build:{write:false,cssCodeSplit:false,rollupOptions:{input:path.join(root,'dev-tools/ai-workflow/browser-fixture/draft-sheet-entry.tsx')}},
+ })
+ const {output}=Array.isArray(bundle)?bundle[0]:bundle
+ const entry=output.find(asset=>asset.type==='chunk'&&asset.isEntry)
+ const css=output.find(asset=>asset.fileName.endsWith('.css'))
+ assert.ok(entry&&css)
+ const files=new Map(output.map(asset=>['/'+asset.fileName,asset]))
+ server=createServer((req,res)=>{
+   const asset=files.get(req.url)
+   if(asset){
+     res.setHeader('Content-Type',asset.type==='chunk'?'text/javascript':asset.fileName.endsWith('.css')?'text/css':'application/octet-stream')
+     res.end(asset.type==='chunk'?asset.code:asset.source)
+   }else if(req.url==='/'){
+     res.setHeader('Content-Type','text/html; charset=utf-8')
+     res.end(`<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/${css.fileName}"><div id="root"></div><script type="module" src="/${entry.fileName}"></script>`)
+   }else{res.statusCode=404;res.end()}
+ })
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
+ const origin='http://127.0.0.1:'+server.address().port
+ browser=await chromium.launch({executablePath:process.env.ATELIER_CHROMIUM_BIN||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true})
  const page=await browser.newPage({viewport:{width:1800,height:950}}),errors=[]
  page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(15000)
- await page.goto(origin,{waitUntil:'domcontentloaded',timeout:45000});const row=page.locator('.draft-sheet-row');await row.waitFor()
+ await page.route('**/*',route=>route.request().url().startsWith(origin+'/')||route.request().url().startsWith('data:')?route.continue():route.abort())
+ await page.goto(origin,{waitUntil:'commit',timeout:45000});const row=page.locator('.draft-sheet-row');await row.waitFor({timeout:60000})
  const geometry=()=>row.locator(':scope > td').evaluateAll(cells=>cells.map(cell=>({x:Math.round(cell.getBoundingClientRect().x),width:Math.round(cell.getBoundingClientRect().width),height:Math.round(cell.getBoundingClientRect().height)})))
  const ownerGeometry=await geometry()
  const names=await row.locator('input,textarea').evaluateAll(fields=>fields.map(field=>field.value))
@@ -28,10 +51,27 @@ try{
  assert.equal(await row.getByRole('button',{name:'수령 확인',exact:true}).isDisabled(),true,'컬러샘플 수령도 작성자만 기록')
  assert.equal(await row.getByRole('button',{name:'컬러명확정',exact:true}).count(),0)
  await row.getByRole('button',{name:'Fabric',exact:true}).first().click()
- const popover=page.locator('.draft-sheet-entry-form');assert.equal(await popover.locator('input').inputValue(),'나일론');assert.equal(await popover.locator('input').getAttribute('readonly'),'');assert.equal(await popover.getByRole('button',{name:'저장',exact:true}).isDisabled(),true)
- await popover.evaluate(form=>form.requestSubmit());assert.equal(await page.getByTestId('writes').textContent(),'0')
- await row.getByRole('button',{name:'Fabric',exact:true}).first().click()
- await row.getByRole('button',{name:'스펙 문서',exact:true}).first().click();assert.equal(await page.locator('.draft-sheet-entry-form input').inputValue(),'공유 스펙 본문');await row.getByRole('button',{name:'스펙 문서',exact:true}).first().click()
+ const panel=page.getByRole('region',{name:'PL-TEST INFORMATION'})
+ const fields=panel.getByRole('group',{name:'INFORMATION 입력 항목'})
+ const fabric=panel.getByRole('form',{name:'블랙 Fabric'})
+ const triggers=row.locator('td').nth(4).getByRole('button',{name:/^(size|Fabric|Weight|스펙 문서)$/})
+ const panelBox=await panel.boundingBox()
+ for(const trigger of await triggers.all()) {
+   const triggerBox=await trigger.boundingBox()
+   assert.ok(triggerBox.y+triggerBox.height<=panelBox.y,'INFORMATION 입력 패널이 기존 버튼 아래에 표시된다')
+ }
+ assert.equal(await fabric.getByLabel('Fabric 값').inputValue(),'나일론')
+ assert.equal(await fabric.getByLabel('Fabric 값').getAttribute('readonly'),'')
+ assert.equal(await fabric.getByRole('button',{name:'저장',exact:true}).isDisabled(),true)
+ await fabric.evaluate(form=>form.requestSubmit());assert.equal(await page.getByTestId('writes').textContent(),'0')
+ await row.getByRole('button',{name:'스펙 문서',exact:true}).first().click()
+ assert.equal(await panel.getByRole('form',{name:'블랙 스펙 문서'}).getByLabel('스펙 문서 값').inputValue(),'공유 스펙 본문')
+ await fields.getByRole('button',{name:'Weight',exact:true}).click()
+ assert.equal(await panel.getByRole('form',{name:'아이보리 Weight'}).getByLabel('Weight 값').inputValue(),'240g')
+ await fields.getByRole('button',{name:'size',exact:true}).click()
+ assert.equal(await panel.getByRole('form',{name:'블랙 size'}).getByLabel(/가로 \(W\)/).inputValue(),'300')
+ await panel.getByRole('button',{name:'INFORMATION 닫기'}).click()
+ assert.equal(await panel.count(),0)
  await row.locator('button.draft-sheet-photo').click()
  await row.getByRole('button',{name:'PL-TEST 기획안 조회'}).click();assert.equal(await page.getByTestId('opened').textContent(),'3')
  await page.screenshot({path:'.tmp/draft-sheet-readonly-desktop.png',fullPage:true})
@@ -46,9 +86,24 @@ try{
  assert.equal(await page.getByTestId('opened').textContent(),'6')
  await row.getByRole('button',{name:'일정 수정',exact:true}).click()
  await page.getByTestId('writes').getByText('1',{exact:true}).waitFor()
- await row.getByRole('button',{name:'Fabric',exact:true}).first().click();await page.locator('.draft-sheet-entry-form input').fill('저장 전 임시 입력');await page.getByRole('button',{name:'다른 직원으로 전환'}).click();assert.equal(await page.locator('.draft-sheet-entry-form').getByRole('button',{name:'저장',exact:true}).isDisabled(),true)
- assert.equal(await page.locator('.draft-sheet-entry-form input').inputValue(),'나일론','Permission change restores saved spec value')
- await page.locator('.draft-sheet-entry-form').evaluate(form=>form.requestSubmit());assert.equal(await page.getByTestId('writes').textContent(),'1')
+ await row.getByRole('button',{name:'size',exact:true}).first().click()
+ const size=panel.getByRole('form',{name:'블랙 size'})
+ await size.getByLabel(/가로 \(W\)/).fill('320')
+ await panel.screenshot({path:'.tmp/draft-information-panel.png'})
+ await size.getByRole('button',{name:'다른 컬러에 적용',exact:true}).click()
+ assert.deepEqual(JSON.parse(await page.getByTestId('saved-spec').textContent()),['black','size','W=320;D=120;H=210;STRAP=;UNIT=mm',true])
+ await fields.getByRole('button',{name:'Fabric',exact:true}).click()
+ await fabric.getByLabel('Fabric 값').fill('저장 전 임시 입력')
+ await page.getByRole('button',{name:'다른 직원으로 전환'}).click()
+ assert.equal(await fabric.getByRole('button',{name:'저장',exact:true}).isDisabled(),true)
+ assert.equal(await fabric.getByLabel('Fabric 값').inputValue(),'나일론','Permission change restores saved spec value')
+ await fabric.evaluate(form=>form.requestSubmit());assert.equal(await page.getByTestId('writes').textContent(),'2')
+ await page.setViewportSize({width:800,height:950})
+ await row.getByRole('button',{name:'Weight',exact:true}).first().click()
+ const narrowBoard=await page.locator('.draft-board-scroll').boundingBox()
+ const narrowPanel=await panel.boundingBox()
+ assert.ok(narrowPanel.x>=narrowBoard.x&&narrowPanel.x+narrowPanel.width<=narrowBoard.x+narrowBoard.width,
+   `가로 스크롤 뒤에도 패널이 보이는 너비 안에 표시된다 ${JSON.stringify({board:narrowBoard,panel:narrowPanel})}`)
  assert.deepEqual(errors,[])
  console.log('draft-sheet-readonly: same layout/content, detail links, spec/confirm/schedule permissions and live permission transition; owner actions preserved')
 }finally{await browser?.close();await server?.close()}

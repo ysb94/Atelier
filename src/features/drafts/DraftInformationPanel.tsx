@@ -1,0 +1,189 @@
+import { useState, type ChangeEvent, type FormEvent } from 'react'
+import { FileText, ImagePlus, X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Input, Textarea } from '@/components/ui/input'
+import { DRAFT_INFORMATION_LABELS, resolveColorSpec, type ColorSpecField } from '@/lib/drafts/color-spec'
+import { formatSizeSpec, parseSizeSpec, type SizeParts } from '@/lib/drafts/spec-format'
+import type { DraftColorRow, ProductDraft } from '@/lib/types'
+import { cn } from '@/lib/utils'
+
+const FIELDS: readonly ColorSpecField[] = ['size', 'fabric', 'weight', 'specDoc']
+const DIMENSIONS = [
+  ['width', '가로', 'W'],
+  ['depth', '세로', 'D'],
+  ['height', '높이', 'H'],
+] as const
+
+type SaveColorSpec = (colorId: string, field: ColorSpecField, value: string, applyAll: boolean) => Promise<void>
+
+function InformationPhoto({ src, name, className }: { src?: string | null; name: string; className?: string }) {
+  return (
+    <div className={cn('grid aspect-square place-items-center overflow-hidden rounded-xl border border-border bg-muted/35', className)}>
+      {src
+        ? <img src={src} alt={name} loading="lazy" className="size-full object-contain" />
+        : <ImagePlus aria-label="등록된 사진 없음" role="img" className="size-7 text-muted-foreground" />}
+    </div>
+  )
+}
+
+function SizeFields({ text, locked, onChange }: { text: string; locked: boolean; onChange: (value: string) => void }) {
+  const size = parseSizeSpec(text)
+  const summary = DIMENSIONS.flatMap(([key, , symbol]) => size[key] ? [`[${symbol}]${size[key]}`] : []).join(' × ')
+  function change(key: keyof SizeParts, value: string) {
+    if (!/^\d*(?:\.\d*)?$/.test(value)) return
+    onChange(formatSizeSpec({ ...size, [key]: value }))
+  }
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-3 gap-2">
+        {DIMENSIONS.map(([key, label, symbol]) => (
+          <label key={key} className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+            {label} ({symbol})
+            <span className="relative">
+              <Input className="h-8 min-w-0 pl-2 pr-8 text-right tabular-nums" inputMode="decimal"
+                pattern="[0-9]+([.][0-9]+)?" value={size[key]} readOnly={locked}
+                onChange={event => change(key, event.target.value)} />
+              <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center">mm</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      <div className="space-y-1.5 rounded-lg border border-border bg-card p-2.5">
+        <p className="min-h-5 break-words text-sm tabular-nums">{summary ? `${summary} mm` : text || '사이즈 미입력'}</p>
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="shrink-0">스트랩 (mm)</span>
+          <Input className="h-7 max-w-32 px-2 tabular-nums" inputMode="decimal" pattern="[0-9]+([.][0-9]+)?"
+            value={size.strap} readOnly={locked} onChange={event => change('strap', event.target.value)} />
+        </label>
+      </div>
+    </div>
+  )
+}
+
+function ColorInformationForm({ color, photo, field, value, confirmed, readOnly, highlighted, canApplyAll, onSave }: {
+  color: DraftColorRow; photo?: string | null; field: ColorSpecField; value: string; confirmed: boolean
+  readOnly: boolean; highlighted: boolean; canApplyAll: boolean; onSave: SaveColorSpec
+}) {
+  const [edit, setEdit] = useState<{ source: string; text: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const text = !readOnly && edit?.source === value ? edit.text : value
+  const locked = readOnly || busy
+  const colorName = color.name.trim() || '컬러 미정'
+  const fieldLabel = DRAFT_INFORMATION_LABELS[field]
+  const inputProps = {
+    'aria-label': `${fieldLabel} 값`,
+    value: text,
+    readOnly: locked,
+    onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setEdit({ source: value, text: event.target.value }),
+  }
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (locked) return
+    setBusy(true)
+    setError('')
+    const applyAll = (event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'all'
+    try {
+      await onSave(color.id, field, text.trim(), applyAll)
+      setEdit(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '저장하지 못했습니다.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form aria-label={`${colorName} ${fieldLabel}`} onSubmit={save}
+      className={cn('grid min-w-0 gap-4 border-t border-border px-4 py-4 @[720px]:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)_auto] @[720px]:items-center', highlighted && 'bg-primary/5')}>
+      <div className="grid min-w-0 grid-cols-[4rem_minmax(0,1fr)] items-center gap-3 @[720px]:grid-cols-[minmax(4rem,6.5rem)_minmax(0,1fr)]">
+        <InformationPhoto src={photo} name={colorName} />
+        <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+          컬러명
+          <Input value={colorName} readOnly className="h-8 min-w-0 text-foreground" />
+        </label>
+      </div>
+      {field === 'size' ? <SizeFields text={text} locked={locked} onChange={next => setEdit({ source: value, text: next })} />
+        : field === 'fabric' || field === 'specDoc' ? (
+          <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+            {fieldLabel}
+            <Textarea {...inputProps} rows={3} className="min-h-20 text-foreground" />
+          </label>
+        ) : (
+          <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+            {fieldLabel}
+            <Input {...inputProps} className="min-w-0 text-foreground" />
+          </label>
+        )}
+      <div className="flex flex-wrap items-center gap-2 @[720px]:flex-col @[720px]:items-end">
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          {confirmed ? '확인 완료' : '미확인'}
+          <span aria-hidden="true" className={cn('size-3 rounded-sm border border-border', confirmed && 'border-primary bg-primary')} />
+        </span>
+        <Button size="sm" type="submit" disabled={locked}>{busy ? '저장 중…' : '저장'}</Button>
+        {canApplyAll && (
+          <Button size="sm" type="submit" value="all" variant="outline" disabled={locked}>다른 컬러에 적용</Button>
+        )}
+      </div>
+      {error && <p className="text-xs text-danger @[720px]:col-span-3" role="alert">{error}</p>}
+    </form>
+  )
+}
+
+export function DraftInformationPanel({ id, draft, field, colorId, readOnly, onFieldChange, onClose, onSave }: {
+  id: string; draft: ProductDraft; field: ColorSpecField; colorId: string; readOnly: boolean
+  onFieldChange: (field: ColorSpecField) => void; onClose: () => void; onSave: SaveColorSpec
+}) {
+  const selectedColor = draft.colors.find(color => color.id === colorId)
+  const colors = selectedColor ? [selectedColor, ...draft.colors.filter(color => color.id !== colorId)] : draft.colors
+  const specConfirmed = field === 'specDoc'
+    ? draft.specs.size.confirmed && draft.specs.fabric.confirmed && draft.specs.weight.confirmed
+    : draft.specs[field].confirmed
+
+  return (
+    <Card id={id} role="region" aria-label={`${draft.draftNo} INFORMATION`}
+      className="@container draft-information-panel overflow-hidden">
+      <div className="flex items-start gap-4 px-4 py-4">
+        <InformationPhoto src={draft.imageUrl} name={draft.nameKo || draft.nameEn || draft.draftNo}
+          className="w-20 shrink-0 @[560px]:w-36" />
+        <div className="grid min-w-0 max-w-sm flex-1 gap-2">
+          <div className="text-xs leading-5">
+            <p>Designer <strong>{draft.owner.trim() || '미정'}</strong></p>
+            <p className="font-semibold">No. {draft.draftNo}</p>
+          </div>
+          <label className="grid gap-1 text-xs text-muted-foreground">한글명
+            <Input value={draft.nameKo} readOnly placeholder="한글명 미정" className="h-8 text-foreground" />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">영문명
+            <Input value={draft.nameEn} readOnly placeholder="영문명 미정" className="h-8 text-foreground" />
+          </label>
+        </div>
+        <Button type="button" size="icon" variant="ghost" className="ml-auto shrink-0" aria-label="INFORMATION 닫기" onClick={onClose}>
+          <X size={16} aria-hidden="true" />
+        </Button>
+      </div>
+      <div className="mx-4 mb-4 overflow-hidden rounded-xl border border-border">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+          <span className="text-sm font-semibold">컬러 <span className="ml-1.5 font-normal text-muted-foreground">{colors.length}개</span></span>
+          <div role="group" aria-label="INFORMATION 입력 항목" className="flex flex-wrap gap-2">
+            {FIELDS.map(option => (
+              <Button key={option} type="button" size="sm" variant={field === option ? 'default' : 'outline'}
+                aria-pressed={field === option} onClick={() => onFieldChange(option)}>
+                {option === 'specDoc' && <FileText size={14} aria-hidden="true" />}
+                {DRAFT_INFORMATION_LABELS[option]}
+              </Button>
+            ))}
+          </div>
+        </div>
+        {colors.length ? colors.map(color => {
+          const value = resolveColorSpec(draft.specs, color.id)[field]
+          return <ColorInformationForm key={`${color.id}:${field}:${readOnly}`} color={color} field={field}
+            photo={draft.specs.colorPhotoUrls?.[color.id]} value={value} confirmed={specConfirmed && Boolean(value.trim())}
+            highlighted={color.id === colorId} readOnly={readOnly} canApplyAll={colors.length > 1} onSave={onSave} />
+        }) : <p className="border-t border-border px-4 py-3 text-sm text-muted-foreground">등록된 컬러가 없습니다.</p>}
+      </div>
+    </Card>
+  )
+}

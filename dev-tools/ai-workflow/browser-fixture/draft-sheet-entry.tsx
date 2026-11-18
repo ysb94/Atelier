@@ -10,6 +10,7 @@ function Fixture() {
   const [readOnly,setReadOnly]=useState(false)
   const [phase,setPhase]=useState('review')
   const [writes,setWrites]=useState(0)
+  const [savedSpec,setSavedSpec]=useState('')
   const [opened,setOpened]=useState(0)
   const [draft,setDraft]=useState<ProductDraft>(()=>{
     const base=emptyDraftInput()
@@ -22,7 +23,8 @@ function Fixture() {
   const shown={...draft,sampleWorkOrders:phase==='new'?[]:draft.sampleWorkOrders,specs:{...draft.specs,colorSampleRounds:phase==='review'?draft.specs.colorSampleRounds:[]}}
   const write=async()=>{setWrites(n=>n+1)}
   return <main className="p-6"><button onClick={()=>setReadOnly(v=>!v)}>{readOnly?'작성자로 전환':'다른 직원으로 전환'}</button><select aria-label="검증 단계" value={phase} onChange={event=>setPhase(event.target.value)}><option value="review">샘플 검토</option><option value="new">최초 지시서</option><option value="color-upload">컬러 지시서</option></select><output data-testid="writes">{writes}</output><output data-testid="opened">{opened}</output>
-    <div className="draft-board-scroll"><table className="draft-sheet"><thead><tr>{['BRAND','IMAGE','PRICE','COLOR','INFORMATION','MD TEAM'].map(label=><th key={label}>{label}</th>)}</tr></thead><tbody><DraftSheetRow draft={shown} readOnly={readOnly} brand={undefined} schedule={{group:{id:'group',brandId:'fixture-brand',name:'11월 출시',releaseTiming:''},targetDate:'2026-11-03',certainty:'confirmed',brandId:null,isPreview:false}}
-      onOpen={()=>setOpened(n=>n+1)} onSchedule={()=>{void write()}} onAddColor={write} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={write} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onToggleConfirm={write}/></tbody></table></div></main>
+    <output data-testid="saved-spec">{savedSpec}</output>
+    <div className="draft-board-scroll"><table className="draft-board-table"><colgroup>{Array.from({length:6},(_,index)=><col key={index}/>)}</colgroup><thead><tr>{['BRAND','IMAGE','PRICE','COLOR','INFORMATION','MD TEAM'].map(label=><th key={label}>{label}</th>)}</tr></thead><tbody><DraftSheetRow draft={shown} readOnly={readOnly} brand={undefined} schedule={{group:{id:'group',brandId:'fixture-brand',name:'11월 출시',releaseTiming:''},targetDate:'2026-11-03',certainty:'confirmed',brandId:null,isPreview:false}}
+      onOpen={()=>setOpened(n=>n+1)} onSchedule={()=>{void write()}} onSaveColors={write} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={async(...args)=>{setSavedSpec(JSON.stringify(args));await write()}} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/></tbody></table></div></main>
 }
 createRoot(document.getElementById('root')!).render(<Fixture/> )
