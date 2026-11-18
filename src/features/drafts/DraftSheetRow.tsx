@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type MouseEventHandler, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEventHandler, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { FileText, GripVertical, Heart, ImageOff, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -657,7 +657,7 @@ function InformationButton({ label, value, tone, expanded, panelId, disabled, ic
 }) {
   return (
     <button type="button" className={`draft-sheet-action is-${tone}${expanded ? ' ring-2 ring-primary/40' : ''}`}
-      aria-expanded={expanded} aria-controls={expanded ? panelId : undefined}
+      aria-haspopup="dialog" aria-expanded={expanded} aria-controls={expanded ? panelId : undefined}
       aria-label={label} title={value.trim() || label} disabled={disabled} onClick={onClick}>
       {icon}
       {label}
@@ -748,8 +748,8 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
   const doneColorIds = new Set(latestColorRound ? draft.specs.colorSampleDone?.[latestColorRound.id] ?? [] : [])
   const [pendingDone, setPendingDone] = useState<Record<string, boolean>>({})
   const informationId = useId()
-  const [information, setInformation] = useState<{ colorId: string; field: ColorSpecField } | null>(null)
-  const informationTrigger = useRef<HTMLButtonElement>(null)
+  const [information, setInformation] = useState<{ anchor: HTMLButtonElement; colorId: string; field: ColorSpecField } | null>(null)
+  const closeInformation = useCallback(() => setInformation(null), [])
   const name = draft.nameEn.trim() || draft.nameKo.trim() || '이름 미정'
   const named = Boolean(draft.nameEn.trim() || draft.nameKo.trim())
   const hasColor = draft.colors.length > 0
@@ -885,8 +885,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
                 icon={field === 'specDoc' ? <FileText size={16} aria-hidden="true" /> : undefined}
                 onClick={event => {
                   if (!color) return
-                  informationTrigger.current = event.currentTarget
-                  setInformation(expanded ? null : { colorId: color.id, field })
+                  setInformation(expanded ? null : { anchor: event.currentTarget, colorId: color.id, field })
                 }} />
             )
           }
@@ -928,19 +927,13 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
         <button type="button" className="draft-sheet-schedule-button" disabled={readOnly} onClick={onSchedule}>{schedule?.group ? '일정 수정' : '일정 정하기'}</button>
       </div>
     </div></td>
-  </tr>
+    </tr>
     {information && (
-      <tr className="draft-information-row">
-        <td colSpan={6}>
-          <DraftInformationPanel id={informationId} draft={draft} field={information.field} colorId={information.colorId}
-            readOnly={readOnly} onSave={onSaveSheetValue}
-            onFieldChange={field => setInformation({ colorId: information.colorId, field })}
-            onClose={() => {
-              setInformation(null)
-              informationTrigger.current?.focus()
-            }} />
-        </td>
-      </tr>
+      <DraftInformationPanel id={informationId} anchor={information.anchor}
+        draft={draft} field={information.field} colorId={information.colorId} readOnly={readOnly}
+        onSave={onSaveSheetValue}
+        onFieldChange={field => setInformation(current => current && { ...current, field })}
+        onClose={closeInformation} />
     )}
   </>
 }

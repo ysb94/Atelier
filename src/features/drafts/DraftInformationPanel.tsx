@@ -1,5 +1,7 @@
-import { useState, type ChangeEvent, type FormEvent } from 'react'
+import { useLayoutEffect, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { FileText, ImagePlus, X } from 'lucide-react'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Textarea } from '@/components/ui/input'
@@ -16,6 +18,46 @@ const DIMENSIONS = [
 ] as const
 
 type SaveColorSpec = (colorId: string, field: ColorSpecField, value: string, applyAll: boolean) => Promise<void>
+
+function informationPanelPosition(anchor: HTMLButtonElement): CSSProperties | null {
+  const margin = 12
+  const gap = 10
+  const maxWidth = 992
+  const { clientWidth: width, clientHeight: height } = document.documentElement
+  const trigger = anchor.getBoundingClientRect()
+  const board = anchor.closest('.draft-board-scroll')?.getBoundingClientRect()
+  if (!anchor.isConnected || trigger.bottom <= 0 || trigger.top >= height ||
+    trigger.right <= Math.max(0, board?.left ?? 0) || trigger.left >= Math.min(width, board?.right ?? width)) return null
+
+  const column = anchor.closest('.draft-color-lines')?.getBoundingClientRect() ?? trigger
+  const leftSpace = column.left - gap - margin
+  const rightSpace = width - margin - column.right - gap
+  const sideWidth = Math.max(leftSpace, rightSpace)
+  if (sideWidth >= 640) {
+    const panelWidth = Math.min(maxWidth, sideWidth)
+    const top = Math.max(margin, Math.min(column.top - 16, height - 640))
+    return {
+      left: leftSpace >= rightSpace ? column.left - gap - panelWidth : column.right + gap,
+      top,
+      width: panelWidth,
+      maxHeight: height - top - margin,
+    }
+  }
+
+  const line = anchor.closest('.draft-sheet-info')?.getBoundingClientRect() ?? trigger
+  // 좁은 화면에서도 선택한 컬러의 버튼 줄을 피하고, 컬러가 많을 때는 입력창 내부를 스크롤한다.
+  const columnFits = Math.max(column.top, height - column.bottom) >= 240
+  const keepVisible = columnFits ? column : line
+  const above = Math.max(0, keepVisible.top - gap - margin)
+  const below = Math.max(0, height - margin - keepVisible.bottom - gap)
+  const panelWidth = Math.min(maxWidth, width - 2 * margin)
+  return {
+    left: Math.max(margin, Math.min(trigger.right - panelWidth, width - margin - panelWidth)),
+    ...(below >= above ? { top: keepVisible.bottom + gap } : { bottom: height - keepVisible.top + gap }),
+    width: panelWidth,
+    maxHeight: Math.max(above, below),
+  }
+}
 
 function InformationPhoto({ src, name, className }: { src?: string | null; name: string; className?: string }) {
   return (
@@ -132,19 +174,63 @@ function ColorInformationForm({ color, photo, field, value, confirmed, readOnly,
   )
 }
 
-export function DraftInformationPanel({ id, draft, field, colorId, readOnly, onFieldChange, onClose, onSave }: {
-  id: string; draft: ProductDraft; field: ColorSpecField; colorId: string; readOnly: boolean
+export function DraftInformationPanel({ id, anchor, draft, field, colorId, readOnly, onFieldChange, onClose, onSave }: {
+  id: string; anchor: HTMLButtonElement; draft: ProductDraft; field: ColorSpecField; colorId: string; readOnly: boolean
   onFieldChange: (field: ColorSpecField) => void; onClose: () => void; onSave: SaveColorSpec
 }) {
+  const active = useWorkspaceTabActivity()
+  const overlay = useRef<HTMLDivElement>(null)
+  const lastFocusedAnchor = useRef<HTMLButtonElement>(null)
+  const [position, setPosition] = useState<CSSProperties | null>(null)
+  useLayoutEffect(() => {
+    if (!active) return
+    let frame = 0
+    function place() {
+      const next = informationPanelPosition(anchor)
+      if (next) setPosition(next)
+      else onClose()
+    }
+    function reposition(event: Event) {
+      if (event.target instanceof Node && overlay.current?.contains(event.target)) return
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(place)
+    }
+    function dismissOutside(event: PointerEvent) {
+      if (event.target instanceof Node &&
+        !overlay.current?.contains(event.target) && !anchor.closest('td')?.contains(event.target)) onClose()
+    }
+    place()
+    window.addEventListener('resize', reposition)
+    window.addEventListener('scroll', reposition, true)
+    document.addEventListener('pointerdown', dismissOutside)
+    return () => {
+      cancelAnimationFrame(frame)
+      window.removeEventListener('resize', reposition)
+      window.removeEventListener('scroll', reposition, true)
+      document.removeEventListener('pointerdown', dismissOutside)
+    }
+  }, [active, anchor, onClose])
+  useLayoutEffect(() => {
+    if (!active || !position || lastFocusedAnchor.current === anchor) return
+    lastFocusedAnchor.current = anchor
+    overlay.current?.focus({ preventScroll: true })
+  }, [active, anchor, position])
+
+  function closeAndFocus() {
+    onClose()
+    anchor.focus({ preventScroll: true })
+  }
+
   const selectedColor = draft.colors.find(color => color.id === colorId)
   const colors = selectedColor ? [selectedColor, ...draft.colors.filter(color => color.id !== colorId)] : draft.colors
   const specConfirmed = field === 'specDoc'
     ? draft.specs.size.confirmed && draft.specs.fabric.confirmed && draft.specs.weight.confirmed
     : draft.specs[field].confirmed
 
-  return (
-    <Card id={id} role="region" aria-label={`${draft.draftNo} INFORMATION`}
-      className="@container draft-information-panel overflow-hidden">
+  if (!active) return null
+
+  const content = (
+    <Card className="@container overflow-hidden">
       <div className="flex items-start gap-4 px-4 py-4">
         <InformationPhoto src={draft.imageUrl} name={draft.nameKo || draft.nameEn || draft.draftNo}
           className="w-20 shrink-0 @[560px]:w-36" />
@@ -160,7 +246,7 @@ export function DraftInformationPanel({ id, draft, field, colorId, readOnly, onF
             <Input value={draft.nameEn} readOnly placeholder="영문명 미정" className="h-8 text-foreground" />
           </label>
         </div>
-        <Button type="button" size="icon" variant="ghost" className="ml-auto shrink-0" aria-label="INFORMATION 닫기" onClick={onClose}>
+        <Button type="button" size="icon" variant="ghost" className="ml-auto shrink-0" aria-label="INFORMATION 닫기" onClick={closeAndFocus}>
           <X size={16} aria-hidden="true" />
         </Button>
       </div>
@@ -185,5 +271,18 @@ export function DraftInformationPanel({ id, draft, field, colorId, readOnly, onF
         }) : <p className="border-t border-border px-4 py-3 text-sm text-muted-foreground">등록된 컬러가 없습니다.</p>}
       </div>
     </Card>
+  )
+
+  return createPortal(
+    <div ref={overlay} id={id} role="dialog" aria-label={`${draft.draftNo} INFORMATION`} tabIndex={-1}
+      className="fixed z-[70] overflow-y-auto overscroll-contain rounded-xl shadow-xl outline-none"
+      style={position ?? { visibility: 'hidden' }}
+      onKeyDown={event => {
+        if (event.key !== 'Escape') return
+        event.stopPropagation()
+        closeAndFocus()
+      }}>
+      {content}
+    </div>, document.body,
   )
 }

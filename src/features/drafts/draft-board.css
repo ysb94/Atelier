@@ -1,4 +1,4 @@
-.draft-board-scroll{container-type:inline-size;overflow-x:auto;border:1px solid #e5e5e2;border-radius:16px 16px 0 0;background:white}
+.draft-board-scroll{overflow-x:auto;border:1px solid #e5e5e2;border-radius:16px 16px 0 0;background:white}
 .draft-folder-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0}
 .draft-folder-list{display:flex;align-items:center;gap:8px;min-width:0;overflow-x:auto;padding:3px 2px 7px;scrollbar-width:thin}
 .draft-folder-chip{display:inline-flex;align-items:center;gap:6px;flex:none;white-space:nowrap;border:1px solid #e8d7ae;border-radius:20px;background:#faf5e9;color:#7b663c;padding:4px 11px;font-size:11px;cursor:pointer}
@@ -29,7 +29,7 @@
 .draft-folder-editor button:disabled{cursor:not-allowed;opacity:.6}
 .draft-folder-editor p{flex-basis:100%;margin:0;font-size:11px;color:#c60920}
 .draft-folder-chip:focus-visible{outline:2px solid #b89952;outline-offset:2px}
-.draft-board-table{width:100%;min-width:1670px;table-layout:fixed;border-collapse:collapse;font-size:12px;line-height:1.6;color:#343a40}
+.draft-board-table{width:100%;min-width:1260px;table-layout:fixed;border-collapse:collapse;font-size:12px;line-height:1.6;color:#343a40}
 .draft-board-table col:nth-child(1){width:210px}
 .draft-board-table col:nth-child(2){width:350px}
 .draft-board-table col:nth-child(3){width:100px}
@@ -174,8 +174,6 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-color-tools .draft-sheet-action{padding:4px;border-color:transparent}
 .draft-sheet-color-tools .draft-sheet-color-heart{color:#ec526a}
 .draft-sheet-color-tools .draft-sheet-color-heart.is-confirmed{color:#c60920}
-.draft-information-row>td{padding:12px;border-bottom:1px solid var(--color-border)}
-.draft-information-panel{position:sticky;left:12px;width:min(62rem,calc(100cqw - 24px))}
 .draft-sheet-info{display:flex;align-items:center;flex-flow:row wrap;gap:7px;width:100%;overflow:visible}
 .draft-sheet-md{display:grid;grid-template-columns:minmax(180px,.8fr) minmax(130px,1fr);gap:18px;align-items:start}
 .draft-sheet-release{border-left:1px solid #e8e8e5;padding-left:18px}
