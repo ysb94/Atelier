@@ -17,6 +17,7 @@ import { sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
 import { sheetRegisteredDay } from '@/lib/drafts/sample-work-order'
 import { readFileAsDataUrl } from '@/lib/images'
 import type { DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
+import type { DraftColorEdit } from '@/lib/supabase/product-drafts'
 import { DRAFT_STATUS_LABEL, type Brand, type DraftColorImageChoice, type DraftColorRow, type DraftSpecs, type ProductDraft } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
 import { RELEASE_CERTAINTY_LABEL, formatReleaseGroupLabel, formatTargetDate, type ResolvedReleaseSchedule } from './release-schedule-preview'
@@ -147,15 +148,8 @@ function SheetConfirmButton({
 
 const COLOR_IMAGE_CHOICES: readonly DraftColorImageChoice[] = ['Image', 'None']
 
-type ColorPhotoChange = { choice: 'Image'; url: string } | { choice: 'None'; url: null }
-
-type ColorFormValue = {
-  id: string | null
-  name: string
-  photoChange?: ColorPhotoChange
-}
-
-type ColorFormRow = ColorFormValue & { key: number }
+type ColorPhotoChange = NonNullable<DraftColorEdit['photoChange']>
+type ColorFormRow = DraftColorEdit & { key: number }
 
 function colorImageConfigured(choice?: DraftColorImageChoice, photoUrl?: string | null) {
   return choice === 'None' || (choice === 'Image' && Boolean(photoUrl))
@@ -196,13 +190,15 @@ function ColorDocumentButton({
   colors,
   imageChoices,
   photoUrls,
+  revision,
   onSaveColors,
 }: {
   readOnly?: boolean
   colors: DraftColorRow[]
   imageChoices: DraftSpecs['colorImageChoices']
   photoUrls: DraftSpecs['colorPhotoUrls']
-  onSaveColors: (colors: ColorFormValue[]) => Promise<void>
+  revision: string
+  onSaveColors: (colors: DraftColorEdit[], revision: string) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
   const [rows, setRows] = useState<ColorFormRow[]>([{ key: 1, id: null, name: '' }])
@@ -214,6 +210,7 @@ function ColorDocumentButton({
   const photoInputRef = useRef<HTMLInputElement>(null)
   const photoTargetKey = useRef<number | null>(null)
   const nextKey = useRef(1)
+  const openedRevision = useRef(revision)
   const layoutTops = useRef(new Map<number, number>())
   const shiftRef = useRef(0)
   const dragRef = useRef<{ key: number; pointerId: number; startY: number; y: number } | null>(null)
@@ -377,6 +374,7 @@ function ColorDocumentButton({
         onClick={() => {
           setError('')
           if (!open) {
+            openedRevision.current = revision
             layoutTops.current.clear()
             setRows(freshRows(colors))
           }
@@ -408,7 +406,7 @@ function ColorDocumentButton({
             }
             setBusy(true)
             setError('')
-            void onSaveColors(next)
+            void onSaveColors(next, openedRevision.current)
               .then(() => setOpen(false))
               .catch((err: unknown) => {
                 setError(err instanceof Error ? err.message : '컬러를 저장하지 못했습니다.')
@@ -729,7 +727,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
   onOpen: () => void
   onNextSample?: () => void
   onSchedule: () => void
-  onSaveColors: (colors: ColorFormValue[]) => Promise<void>
+  onSaveColors: (colors: DraftColorEdit[], revision: string) => Promise<void>
   onRenameProduct: (field: 'nameKo' | 'nameEn', name: string) => Promise<void>
   onRenameColor: (colorId: string, name: string) => Promise<void>
   onSaveSheetValue: SaveColorSpec
@@ -854,6 +852,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
           colors={draft.colors}
           imageChoices={draft.specs.colorImageChoices}
           photoUrls={draft.specs.colorPhotoUrls}
+          revision={draft.updatedAt}
           onSaveColors={onSaveColors}
         />
         <SheetConfirmButton

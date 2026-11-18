@@ -4,7 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Plus } from 'lucide-react'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { useRenderWatch } from '@/lib/diagnostics'
-import { startWorkflow, tracedInput } from '@/lib/diagnostics/workflow-trace'
+import { startWorkflow, tracedInput, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 import { createSeason, deleteSeason, getCompanyProductDrafts, getSeasonsByBrand, updateProductDraft, updateSeason } from '@/lib/api'
 import {
   DEFAULT_COMPANY_ID,
@@ -18,7 +18,6 @@ import {
   type DraftBrandScope,
   type DraftOwnerScope,
 } from '@/lib/drafts/company-draft'
-import { MAX_DRAFT_COLORS, newColorRow } from '@/lib/drafts/empty-draft'
 import { receiveColorSample, resolveColorSampleRounds, setColorSampleDone } from '@/lib/drafts/draft-flow'
 import { registerDraftSampleStage } from '@/lib/drafts/sample-registration'
 import { draftToInput, attachSampleWorkOrderFile, latestFilledSampleWorkOrder, legacyWorkOrderFields } from '@/lib/drafts/sample-work-order'
@@ -27,8 +26,8 @@ import { writeColorSpec } from '@/lib/drafts/color-spec'
 import { useAuth } from '@/lib/supabase/auth'
 import { useBasicWorkAccess, canWriteDraft } from '@/lib/supabase/basic-work-access'
 import { draftPriceError, type DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
+import { saveDraftColors } from '@/lib/supabase/product-drafts'
 import {
-  type DraftColorImageChoice,
   type ProductDraft,
   type ProductDraftInput,
   type Season,
@@ -146,11 +145,10 @@ export function CompanyDraftsPage() {
     return saved.updatedAt >= listed.updatedAt ? saved : listed
   }
 
-  function saveDraftChange(
+  function queueDraftSave(
     draftId: string,
-    change: (current: ProductDraft) => ProductDraftInput,
-    action = 'draft_save',
-    temporaryInformationRevision?: string,
+    action: string,
+    save: (current: ProductDraft, context: DiagnosticContext) => Promise<ProductDraft>,
   ) {
     const previous = saveChainRef.current.get(draftId) ?? Promise.resolve()
     // 앞선 저장 실패는 그 호출을 기다린 쪽에 이미 전달됐다. 다음 수정은 이어서 저장한다.
@@ -162,10 +160,7 @@ export function CompanyDraftsPage() {
         if (!current) throw new Error('기획안을 찾지 못했습니다.')
         if (!canWriteDraft(workAccess.access,current)) throw new Error('작성자만 기획안을 수정할 수 있습니다.')
         trace.step('validate_input')
-        const input = change(current)
-        const updated = await trace.run('save', (context) =>
-          updateProductDraft(draftId, tracedInput(input, context), temporaryInformationRevision),
-        )
+        const updated = await trace.run('save', (context) => save(current, context))
         await trace.run('refresh_queries', async () => {
           savedDraftRef.current.set(draftId, updated)
           queryClient.setQueryData<ProductDraft[]>(
@@ -191,6 +186,16 @@ export function CompanyDraftsPage() {
       ),
     )
     return task
+  }
+
+  function saveDraftChange(
+    draftId: string,
+    change: (current: ProductDraft) => ProductDraftInput,
+    action = 'draft_save',
+    temporaryInformationRevision?: string,
+  ) {
+    return queueDraftSave(draftId, action, (current, context) =>
+      updateProductDraft(draftId, tracedInput(change(current), context), temporaryInformationRevision))
   }
 
   const ownerFillRef = useRef(new Set<string>())
@@ -634,30 +639,9 @@ export function CompanyDraftsPage() {
                     onOpen={() => navigate(draftDetailPath(draft.id))}
                     onNextSample={() => navigate(`${draftDetailPath(draft.id)}#next-sample`)}
                     onSchedule={() => setScheduleDraftId(draft.id)}
-                    onSaveColors={async (rows) => {
-                      await saveDraftChange(draft.id, (current) => {
-                        const input = draftToInput(current)
-                        if (rows.length > MAX_DRAFT_COLORS) {
-                          throw new Error(`최대 ${MAX_DRAFT_COLORS}컬러까지 추가할 수 있습니다.`)
-                        }
-                        const byId = new Map(input.colors.map((color) => [color.id, color]))
-                        const colorImageChoices: Record<string, DraftColorImageChoice> = {}
-                        const colorPhotoUrls: Record<string, string> = {}
-                        const colors = rows.map(({ id, name, photoChange }) => {
-                          const existing = id ? byId.get(id) : undefined
-                          const color = { ...(existing ?? newColorRow(crypto.randomUUID())), name: name.trim() }
-                          const choice = photoChange?.choice ?? input.specs.colorImageChoices?.[color.id]
-                          const photoUrl = photoChange ? photoChange.url : input.specs.colorPhotoUrls?.[color.id]
-                          if (choice) colorImageChoices[color.id] = choice
-                          if (choice === 'Image' && photoUrl) colorPhotoUrls[color.id] = photoUrl
-                          return color
-                        })
-                        return {
-                          ...input,
-                          colors,
-                          specs: { ...input.specs, colorImageChoices, colorPhotoUrls },
-                        }
-                      }, 'draft_save_colors')
+                    onSaveColors={async (rows, revision) => {
+                      await queueDraftSave(draft.id, 'draft_save_colors', (current, context) =>
+                        saveDraftColors(current, rows, revision, context))
                     }}
                     onRenameProduct={async (field, name) => {
                       await saveDraftChange(draft.id, (current) => {

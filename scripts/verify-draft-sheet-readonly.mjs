@@ -7,9 +7,25 @@ import tailwindcss from '@tailwindcss/vite'
 import {chromium} from 'playwright-core'
 const root=process.cwd()
 let server,browser
+const fixtureClient={
+ name:'draft-color-fixture-client',
+ enforce:'pre',
+ resolveId(source,importer) {
+   if(/\/lib\/supabase\/client(?:\.ts)?$/.test(source.replaceAll('\\','/')) &&
+      importer?.replaceAll('\\','/').endsWith('/product-drafts.ts')) return '\0draft-color-client'
+ },
+ load(id) {
+   if(id==='\0draft-color-client') return `export const getSupabase = () => ({
+     async rpc(name, args) {
+       const response = await fetch('/rpc/'+name, {method:'POST',body:JSON.stringify(args)})
+       return response.json()
+     }
+   })`
+ },
+}
 try{
  const bundle=await build({
-   root,configFile:false,envFile:false,logLevel:'error',plugins:[react(),tailwindcss()],
+   root,configFile:false,envFile:false,logLevel:'error',plugins:[react(),tailwindcss(),fixtureClient],
    resolve:{alias:{'@':path.join(root,'src')}},
    build:{write:false,cssCodeSplit:false,rollupOptions:{input:path.join(root,'dev-tools/ai-workflow/browser-fixture/draft-sheet-entry.tsx')}},
  })
@@ -392,6 +408,30 @@ try{
  await fields.getByRole('button',{name:'스펙 문서',exact:true}).click()
  await expectCopy(specDocument,'스펙 문서','상품 공통 스펙 본문')
  assert.equal(await page.getByTestId('writes').textContent(),writesBeforeCopy)
+ await panel.getByRole('button',{name:'INFORMATION 닫기'}).click()
+ let colorPayload
+ await page.route('**/rpc/save_draft_colors', async route => {
+   colorPayload=route.request().postDataJSON()
+   await route.fulfill({json:{data:'2026-11-18T06:45:00+00:00',error:null}})
+ })
+ await row.getByRole('button',{name:'컬러 문서',exact:true}).click()
+ const colorForm=row.locator('.draft-color-add-form')
+ await colorForm.getByRole('button',{name:'컬러 추가',exact:true}).click()
+ await colorForm.getByRole('textbox',{name:'컬러 이름 3',exact:true}).fill('흰색')
+ await colorForm.getByRole('button',{name:'None',exact:true}).last().click()
+ await colorForm.getByRole('button',{name:'저장',exact:true}).click()
+ const addedColor=row.getByRole('textbox',{name:'PL-TEST 컬러 3 이름',exact:true})
+ const saveError=colorForm.getByRole('alert')
+ await addedColor.or(saveError).first().waitFor()
+ assert.deepEqual(await saveError.allTextContents(),[], '컬러 저장 오류')
+ assert.equal(await addedColor.inputValue(),'흰색')
+ assert.equal(await colorForm.count(),0)
+ assert.deepEqual(Object.keys(colorPayload).sort(),['p_colors','p_draft_id','p_expected_updated_at'])
+ assert.equal(colorPayload.p_draft_id,'fixture')
+ assert.equal(colorPayload.p_expected_updated_at,'2026-10-01')
+ assert.deepEqual(colorPayload.p_colors.slice(0,2),[{id:'black',name:'블랙'},{id:'ivory',name:'아이보리'}])
+ assert.match(colorPayload.p_colors[2].id,/^[0-9a-f-]{36}$/)
+ assert.deepEqual({...colorPayload.p_colors[2],id:'new'}, {id:'new',name:'흰색',imageChoice:'None',photoUrl:null})
  assert.deepEqual(errors,[])
  console.log('draft-sheet-readonly: existing actions, INFORMATION temporary save and reload, private visibility, confirmation and reopening passed')
 }finally{await browser?.close();await server?.close()}

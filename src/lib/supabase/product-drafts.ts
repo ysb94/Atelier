@@ -6,10 +6,10 @@ import type {
   ProductDraft,
   ProductDraftInput,
 } from '@/lib/types'
-import { inputDiagnosticContext, tracedQuery } from '@/lib/diagnostics/workflow-trace'
+import { inputDiagnosticContext, tracedQuery, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 import { normalizeColorPhotoUrls } from '@/lib/drafts/color-photo'
 import { normalizeColorSpecs } from '@/lib/drafts/color-spec'
-import { emptyDraftInput } from '@/lib/drafts/empty-draft'
+import { emptyDraftInput, MAX_DRAFT_COLORS, newColorRow } from '@/lib/drafts/empty-draft'
 import { normalizeDraftBrandId, parseDraftNo } from '@/lib/drafts/company-draft'
 import { sanitizeColorWorkOrder, normalizeColorSampleRounds, normalizeColorSampleDone } from '@/lib/drafts/draft-flow'
 import {
@@ -518,6 +518,69 @@ export async function createProductDraft(
     throw new ProductDraftStoreError('기획안을 저장하지 못했습니다.', 'invalid')
   }
   return created
+}
+
+export type DraftColorEdit = {
+  id: string | null
+  name: string
+  photoChange?: { choice: 'Image'; url: string } | { choice: 'None'; url: null }
+}
+
+export async function saveDraftColors(
+  draft: ProductDraft,
+  edits: readonly DraftColorEdit[],
+  expectedUpdatedAt: string,
+  context?: DiagnosticContext,
+): Promise<ProductDraft> {
+  if (draft.updatedAt !== expectedUpdatedAt) {
+    throw new Error('다른 곳에서 기획안을 수정했습니다. 컬러 문서를 다시 열어 주세요.')
+  }
+  if (edits.length > MAX_DRAFT_COLORS) {
+    throw new Error(`최대 ${MAX_DRAFT_COLORS}컬러까지 추가할 수 있습니다.`)
+  }
+  const existing = new Map(draft.colors.map(color => [color.id, color]))
+  const choices: Record<string, DraftColorImageChoice> = {}
+  const photos: Record<string, string> = {}
+  const colors: DraftColorRow[] = []
+  const changes = edits.map(({ id, name, photoChange }) => {
+    const previous = id ? existing.get(id) : undefined
+    if (id && !previous) throw new Error('컬러를 찾지 못했습니다. 컬러 문서를 다시 열어 주세요.')
+    const color = { ...(previous ?? newColorRow(crypto.randomUUID())), name: name.trim() }
+    colors.push(color)
+    const previousChoice = draft.specs.colorImageChoices?.[color.id]
+    const previousPhoto = draft.specs.colorPhotoUrls?.[color.id]
+    const choice = photoChange?.choice ?? previousChoice
+    const photo = photoChange ? photoChange.url : previousPhoto
+    if (choice) choices[color.id] = choice
+    if (choice === 'Image' && photo) photos[color.id] = photo
+    const change = { id: color.id, name: color.name }
+    if (!photoChange || (choice === previousChoice && (photo ?? undefined) === previousPhoto)) return change
+    return { ...change, imageChoice: photoChange.choice, photoUrl: photoChange.url }
+  })
+
+  const request = getSupabase().rpc('save_draft_colors', {
+    p_draft_id: draft.id,
+    p_expected_updated_at: expectedUpdatedAt,
+    p_colors: changes,
+  })
+  const { data, error } = await tracedQuery(request, context)
+  if (error || typeof data !== 'string') {
+    const message = error?.code === 'PGRST202'
+      ? '컬러 전용 저장 기능을 사용하려면 DB 마이그레이션 적용이 필요합니다.'
+      : error?.code === '57014' ? '컬러 저장 시간이 초과되었습니다. 다시 시도해 주세요.'
+      : errorMessage(error, '컬러를 저장하지 못했습니다.')
+    throw new ProductDraftStoreError(message, 'invalid')
+  }
+  return {
+    ...draft,
+    updatedAt: data,
+    colors,
+    specs: {
+      ...draft.specs,
+      colorImageChoices: choices,
+      colorPhotoUrls: Object.keys(photos).length ? photos : undefined,
+    },
+  }
 }
 
 export async function updateProductDraft(

@@ -8,6 +8,7 @@ import { newSampleWorkOrder } from '@/lib/drafts/sample-work-order'
 import type { ProductDraft } from '@/lib/types'
 import type { DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
 import type { DraftInformationTemporary, DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
+import { saveDraftColors, type DraftColorEdit } from '@/lib/supabase/product-drafts'
 import '@/index.css'
 
 const temporaryKey = 'atelier-fixture-information-temporary'
@@ -52,6 +53,10 @@ function Fixture() {
   })
   const shown={...draft,sampleWorkOrders:phase==='new'?[]:draft.sampleWorkOrders,specs:{...draft.specs,colorSampleRounds:phase==='review'?draft.specs.colorSampleRounds:[]}}
   const write=async()=>{setWrites(n=>n+1)}
+  const saveColors = async (rows: DraftColorEdit[], revision: string) => {
+    setDraft(await saveDraftColors(draft, rows, revision))
+    await write()
+  }
   const saveDocument = async (note: string, revision?: string) => {
     setDraft(current => ({ ...current, specs: { ...current.specs, specDocumentConfirmed: true, coating: { ...current.specs.coating, note } } }))
     clearTemporary(revision)
@@ -92,6 +97,6 @@ function Fixture() {
           ...current, specs: { ...current.specs, confirmedPriceRequestId: reply.id },
         })),
       }}
-      onOpen={()=>setOpened(n=>n+1)} onSchedule={()=>{void write()}} onSaveColors={write} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={saveSpec} onSaveSpecDocument={saveDocument} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/></tbody></table></div></main>
+      onOpen={()=>setOpened(n=>n+1)} onSchedule={()=>{void write()}} onSaveColors={saveColors} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={saveSpec} onSaveSpecDocument={saveDocument} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/></tbody></table></div></main>
 }
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={new QueryClient()}><Fixture /></QueryClientProvider>)
