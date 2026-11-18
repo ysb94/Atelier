@@ -13,6 +13,33 @@ export type AttendanceIncidentAdjustment = {
 }
 
 export const attendanceIncidentQueryKey = ['attendance-incident-adjustments'] as const
+export const attendanceIncidentConfirmationKey = ['attendance-incident-confirmations'] as const
+
+type AttendanceIncidentConfirmation = Pick<AttendanceIncidentAdjustment, 'employee_id' | 'work_date' | 'kind'> & {
+  confirmed_at: string
+}
+
+export function useAttendanceIncidentConfirmations(from: string, to: string) {
+  const { session, profile } = useAuth()
+  const userId = session?.user.id
+  return useQuery({
+    queryKey: [...attendanceIncidentConfirmationKey, userId, profile?.id, from, to],
+    enabled: Boolean(userId && from && to),
+    queryFn: async () => {
+      const { data, error } = await getSupabase().rpc('list_attendance_incident_confirmations', { p_from: from, p_to: to })
+      if (error && ['PGRST202', '42883'].includes(error.code)) return { supported: false, rows: [] as AttendanceIncidentConfirmation[] }
+      if (error) throw new Error('근태 확인 기록을 불러오지 못했습니다.')
+      return { supported: true, rows: (data ?? []) as AttendanceIncidentConfirmation[] }
+    },
+  })
+}
+
+export async function confirmAttendanceIncident(employeeId: string, date: string, kind: AttendanceIncidentKind) {
+  const { error } = await getSupabase().rpc('confirm_attendance_incident', {
+    p_employee: employeeId, p_date: date, p_kind: kind,
+  })
+  if (error) throw new Error(error.message || '확인 상태를 저장하지 못했습니다.')
+}
 
 export async function listAttendanceIncidentAdjustments(from: string, to: string, employeeId?: string) {
   const { data, error } = await getSupabase().rpc('list_attendance_incident_adjustments', {

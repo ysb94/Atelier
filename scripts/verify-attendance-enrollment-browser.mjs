@@ -19,7 +19,16 @@ window.clockRows=[...['03','04','05'].map(day=>({employeeId:'new',date:'2026-11-
 export const listDepartments=async()=>[{id:'office',name:'테스트 부서'}];
 export const listOrgChartMembers=async()=>window.actor==='peer'?[{id:'peer-member',displayName:'다른 회사 직원',departmentId:'office',hireDate:'2020-01-01'}]:window.people;
 const adjustments=new Map();let revision=0;
+const confirmations=new Map();
 export const getSupabase=()=>({rpc:async (name,args)=>{
+ if(name==='list_attendance_incident_confirmations')return{data:window.actor==='hr'?[...confirmations.values()]:[],error:null};
+ if(name==='confirm_attendance_incident'){
+  if(window.actor!=='hr')return{error:{message:'권한 없음'}};
+  if(window.confirmationFailure)return{error:{message:'확인 저장 실패'}};
+  const key=args.p_employee+':'+args.p_date+':'+args.p_kind;
+  confirmations.set(key,{employee_id:args.p_employee,work_date:args.p_date,kind:args.p_kind,confirmed_at:'2026-11-06T09:30:00Z'});
+  return{error:null};
+ }
  if(name==='list_attendance_incident_adjustments')return{data:window.actor==='hr'?[...adjustments.values()]:[],error:null};
  if(name==='save_attendance_incident_adjustment'){
   const key=args.p_employee+':'+args.p_date+':'+args.p_kind;
@@ -110,7 +119,7 @@ try {
   assert.match(await newRow.innerText(), /지각/)
   assert.equal(await page.evaluate(() => window.summary.exceeded), 1, 'normal assessment resumes from enrollment')
   assert.equal(await page.evaluate(() => JSON.stringify(window.people) === window.originalMembers), true)
-  assert.deepEqual((await page.getByRole('columnheader').allTextContents()).slice(-2), ['수정','사유서'])
+  assert.deepEqual((await page.getByRole('columnheader').allTextContents()).slice(-3), ['수정','사유서','확인'])
   const saveAdjustment = async (row, mode, minutes) => {
     await row.getByRole('button',{name:'수정',exact:true}).click()
     const dialog=page.getByRole('dialog')
@@ -134,6 +143,27 @@ try {
   await absentRow.getByText('결근 제외',{exact:true}).waitFor()
   await saveAdjustment(absentRow,'restore')
   await absentRow.getByText('결근',{exact:true}).first().waitFor()
+  const confirmButton = row => row.getByRole('button',{name:'확인',exact:true})
+  const showConfirmed = page.getByLabel('확인된 기록 포함',{exact:true})
+  await page.evaluate(() => { window.confirmationFailure=true })
+  await confirmButton(newRow).click()
+  await page.getByRole('alert').getByText('확인 저장 실패',{exact:true}).waitFor()
+  assert.equal(await newRow.isVisible(),true)
+  await page.evaluate(() => { window.confirmationFailure=false })
+  await confirmButton(newRow).click()
+  await newRow.waitFor({state:'hidden'})
+  await showConfirmed.check()
+  await newRow.getByText('확인됨',{exact:true}).waitFor()
+  await confirmButton(absentRow).click()
+  await absentRow.getByText('확인됨',{exact:true}).waitFor()
+  await page.evaluate(() => window.advanceDay())
+  await showConfirmed.waitFor()
+  assert.equal(await showConfirmed.isChecked(),false)
+  await newRow.waitFor({state:'hidden'})
+  await absentRow.waitFor({state:'hidden'})
+  await showConfirmed.check()
+  await newRow.getByText('확인됨',{exact:true}).waitFor()
+  await absentRow.getByText('확인됨',{exact:true}).waitFor()
   const readsBeforeActivation = await page.evaluate(() => window.enrollmentReads)
   await page.evaluate(() => window.activateMember())
   await page.waitForFunction(() => window.visibleMembers.find(row => row.id === 'added')?.attendanceTrackedFrom === '2026-11-09')
