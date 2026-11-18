@@ -18,7 +18,7 @@ import type { RequestKind } from '@/features/settings/personal-requests'
 import { ATTENDANCE_GRACE_MINUTES } from './attendance-start-settings'
 import { attendanceTrackingStart } from './attendance-period'
 import { resolveWorkdayStart } from './offsite-workday-start'
-import { approvedQuarterIntervals, quarterArrivalStart } from './quarter-arrival'
+import { attendanceArrivalStart } from './attendance-arrival'
 import { deferredClockOutViews } from './deferred-clock-outs'
 import { loadCompanyLunch } from '@/lib/supabase/company-work-hours'
 import { MemberCell, memberLabel } from './OpsStat'
@@ -126,7 +126,7 @@ export function AttendanceLatePanel({ directory, schedules, initialKind = 'all',
       if (!member || member.attendanceExempt || clock.date < attendanceTrackingStart(member.hireDate, member.attendanceTrackedFrom) || !isWorkday(clock.date, {})) continue
       const schedule = resolveWorkdayStart(schedules.index, member.id, member.departmentId, clock.date, leaveRows)
       const actual = timeSeconds(clock.clockIn)
-      const arrivalStart = quarterArrivalStart(schedule.start, approvedQuarterIntervals(leaveRows.filter(r => r.employeeId === member.id), clock.date), lunch.data)
+      const arrivalStart = attendanceArrivalStart(schedule.start, leaveRows.filter(r => r.employeeId === member.id), clock.date, lunch.data, clock)
       const baseline = timeSeconds(arrivalStart)
       if (actual == null || baseline == null || actual <= baseline + schedule.grace * 60) continue
       const team = directory.departmentName(member.departmentId)
