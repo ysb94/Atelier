@@ -135,6 +135,10 @@ do $migration$
 declare definition text; boundary text;
 begin
   definition := pg_get_functiondef('app.list_my_visual_workflow_notices()'::regprocedure);
+  boundary := 'and (w.requester_id=auth.uid() or app.department_work_read(w.id))';
+  if strpos(definition, boundary)=0 then raise exception 'Visual 알림 조회 권한 정의가 변경되었습니다.'; end if;
+  execute replace(definition, boundary, boundary||$legacy$ and n.kind<>'content_updated'$legacy$);
+  definition := replace(definition, 'app.list_my_visual_workflow_notices()', 'app.list_my_visual_workflow_notices_with_content()');
   boundary := 'n.resolved_at is null and exists (';
   if strpos(definition, boundary)=0 then raise exception 'Visual 알림 조회 함수 정의가 변경되었습니다.'; end if;
   definition := replace(definition, boundary, $new$n.resolved_at is null and case when n.kind='content_updated' then
@@ -145,6 +149,18 @@ begin
   execute replace(definition,boundary,') end as current');
 end $migration$;
 
+create function public.list_my_visual_workflow_notices_with_content() returns jsonb
+language sql stable security invoker set search_path='' as $$
+  select app.list_my_visual_workflow_notices_with_content()
+$$;
+
+revoke all on function app.list_my_visual_workflow_notices_with_content(),
+  public.list_my_visual_workflow_notices_with_content() from public,anon;
+grant execute on function app.list_my_visual_workflow_notices_with_content(),
+  public.list_my_visual_workflow_notices_with_content() to authenticated;
+
 revoke all on function app.visual_request_content_sections(jsonb),app.guard_sent_visual_request_content(),
   app.visual_request_edit_recipients(public.work_requests,text),app.notify_sent_visual_request_edit()
   from public,anon,authenticated;
+
+notify pgrst,'reload schema';

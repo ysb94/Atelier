@@ -11,7 +11,7 @@ const migrations = [
   '20261109062457_visual_work_final_approval',
   '20261109074836_visual_department_work_role_columns',
   '20261109074511_visual_category_workflow',
-  '20261118104500_sent_visual_request_content_edits',
+  '20261118103641_sent_visual_request_content_edits',
 ]
 const db = await createWorkTestDb()
 const company = 'e0000000-0000-4000-8000-000000000001'
@@ -37,7 +37,7 @@ const initial = {
     text('visual-request-section:video','영상'), text('video','영상 본문')],
   visualRequest: { categories: [{ id: 'banner', fields: {} }, { id: 'video', fields: {} }] },
 }
-const contentNotices = async (actor, version) => (await rpc(actor, 'list_my_visual_workflow_notices'))
+const contentNotices = async (actor, version) => (await rpc(actor, 'list_my_visual_workflow_notices_with_content'))
   .filter(row => row.requestId === request && row.kind === 'content_updated' && (version === undefined || row.version === version))
 const detail = async () => (await rpc(ids.planner, 'get_department_work', [request])).requests[0]
 const save = (actor, revision, values, command = crypto.randomUUID()) => rpc(actor, 'save_work_request', [request, revision, { values }, command])
@@ -78,6 +78,7 @@ try {
     assert.equal(rows[0].categoryId, '')
     assert.equal(rows[0].readAt, null)
   }
+  assert.ok((await rpc(worker, 'list_my_visual_workflow_notices')).every(row => row.kind !== 'content_updated'))
   assert.deepEqual(await contentNotices(ids.outsider), [])
   assert.deepEqual(await contentNotices(ids.planner), [])
   await assert.rejects(() => save(worker, mainRevision, mainEdit), { code: '42501' })

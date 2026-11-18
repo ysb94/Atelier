@@ -28,12 +28,20 @@ export function getVisualWorkflowReview(request: string, category: string) {
 }
 
 export async function listMyVisualWorkflowNotices(): Promise<{ available: boolean; rows: VisualWorkflowNotice[] }> {
-  try {
-    const rows = await diagnosticQuery<VisualWorkflowNotice[]>('notification', 'visual_category_notice_list', getSupabase().rpc('list_my_visual_workflow_notices'))
-    return { available: true, rows }
-  } catch (error) {
+  const missing = (error: unknown) => {
     const code = (error as Error & { cause?: { code?: string } }).cause?.code
-    if (code === 'PGRST202' || code === '42883') return { available: false, rows: [] }
+    return code === 'PGRST202' || code === '42883'
+  }
+  const list = (name: string) => diagnosticQuery<VisualWorkflowNotice[]>('notification', 'visual_category_notice_list', getSupabase().rpc(name))
+  try {
+    return { available: true, rows: await list('list_my_visual_workflow_notices_with_content') }
+  } catch (error) {
+    if (!missing(error)) throw error
+  }
+  try {
+    return { available: true, rows: await list('list_my_visual_workflow_notices') }
+  } catch (error) {
+    if (missing(error)) return { available: false, rows: [] }
     throw error
   }
 }

@@ -17,7 +17,7 @@ const checks = String.raw`
  await db.exec('begin')
  for (const name of ['20261102114206_work_request_cancellation','20261109192913_visual_assignment_history_visibility',
    '20261109202708_visual_worker_feedback_counts','20261109210739_visual_workflow_review_rounds',
-   '20261118104500_sent_visual_request_content_edits']) {
+   '20261118103641_sent_visual_request_content_edits']) {
    await db.exec(await fs.readFile('supabase/migrations/'+name+'.sql','utf8'))
  }
  await db.exec('commit')
@@ -55,7 +55,7 @@ const checks = String.raw`
  await page.goto(origin+'/work-requests/design?actor=design',{waitUntil:'domcontentloaded'})
  const alerts=page.getByRole('region',{name:'이 탭의 알림',exact:true})
  await alerts.getByText('메인 내용이 수정되었습니다.',{exact:true}).waitFor()
- const pending=(await command(worker,'list_my_visual_workflow_notices')).find(row=>row.kind==='content_updated'&&row.requestId===requestId&&row.categoryId==='banner')
+ const pending=(await command(worker,'list_my_visual_workflow_notices_with_content')).find(row=>row.kind==='content_updated'&&row.requestId===requestId&&row.categoryId==='banner')
  assert.ok(pending && !pending.readAt)
  const acknowledgement=page.waitForResponse(response=>{
    if(!response.url().endsWith('/__work-test/rpc'))return false
@@ -69,7 +69,7 @@ const checks = String.raw`
  await drawer.getByText('수정한 배너 내용',{exact:true}).waitFor()
  assert.equal((await (await acknowledgement).json()).error,null)
  await alerts.getByText('배너 업무 내용이 수정되었습니다.',{exact:true}).waitFor({state:'hidden'})
- const seen=(await command(worker,'list_my_visual_workflow_notices')).filter(row=>row.kind==='content_updated'&&row.requestId===requestId)
+ const seen=(await command(worker,'list_my_visual_workflow_notices_with_content')).filter(row=>row.kind==='content_updated'&&row.requestId===requestId)
  assert.equal(seen.length,2)
  assert.ok(seen.every(row=>row.readAt))
  assert.deepEqual(errors,[])
@@ -77,6 +77,8 @@ const checks = String.raw`
 `
 
 const harness=(visualHarness.slice(0,start)+mark+checks+visualHarness.slice(end))
+  .replace("'list_my_visual_workflow_notices','read_my_visual_workflow_notices'", "'list_my_visual_workflow_notices','list_my_visual_workflow_notices_with_content','read_my_visual_workflow_notices'")
+  .replace("'list_visual_workflow_entries','list_my_visual_workflow_notices']", "'list_visual_workflow_entries','list_my_visual_workflow_notices','list_my_visual_workflow_notices_with_content']")
   .replaceAll('5204','5216')
   .replaceAll('visual-category-','sent-visual-edit-')
 const runner='node_modules/.tmp/sent-visual-edit-wrapper.mjs'
