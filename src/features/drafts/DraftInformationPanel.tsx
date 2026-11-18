@@ -1,11 +1,12 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileText, ImagePlus, X } from 'lucide-react'
+import { Check, FileText, ImagePlus, X } from 'lucide-react'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Textarea } from '@/components/ui/input'
+import { copyText } from '@/lib/clipboard'
 import {
   DRAFT_INFORMATION_LABELS, colorInformationEditKey, documentEditKey, informationEditText, isColorInformationConfirmed,
   isSpecDocumentConfirmed, resolveColorSpec, type ColorInformationField, type ColorSpecField, type ColorSpecValues,
@@ -81,6 +82,27 @@ function InformationPhoto({ src, name, className }: { src?: string | null; name:
   )
 }
 
+function InformationCopyButton({ label, text, className }: { label: string; text: string; className?: string }) {
+  const [result, setResult] = useState<{ text: string; copied: boolean }>()
+  useEffect(() => {
+    if (!result) return
+    const timer = window.setTimeout(() => setResult(undefined), 1800)
+    return () => window.clearTimeout(timer)
+  }, [result])
+
+  const copied = result?.text === text ? result.copied : undefined
+  const message = copied === true ? '복사했습니다.' : copied === false ? '복사하지 못했습니다.' : ''
+  return <>
+    <Button type="button" variant="ghost" size="icon"
+      className={cn('size-5 rounded-sm bg-foreground text-[10px] font-semibold text-background hover:bg-foreground/85', className)}
+      aria-label={`${label} 복사`} title={message || `${label} 복사`} disabled={!text.trim()}
+      onClick={async () => setResult({ text, copied: await copyText(text) })}>
+      {copied === true ? <Check size={12} aria-hidden="true" /> : copied === false ? <X size={12} aria-hidden="true" /> : 'C'}
+    </Button>
+    <span className="sr-only" role="status">{message ? `${label} ${message}` : ''}</span>
+  </>
+}
+
 function SizeFields({ text, weight, note, locked, onChange }: {
   text: string; weight: string; note: string; locked: boolean
   onChange: (field: typeof SIZE_FIELDS[number], value: string) => void
@@ -88,13 +110,15 @@ function SizeFields({ text, weight, note, locked, onChange }: {
   const size = parseSizeSpec(text)
   const summary = DIMENSIONS.flatMap(([key, , symbol]) => size[key] ? [`[${symbol}]${size[key]}`] : []).join(' × ')
   const strapSummary = size.strap ? `스트랩 ${size.strap} mm` : ''
+  const dimensions = summary ? `${summary} mm` : strapSummary || text
+  const sizeText = [dimensions, summary && strapSummary, note].filter(Boolean).join('\n')
   function change(key: keyof SizeParts, value: string) {
     if (!/^\d*(?:\.\d*)?$/.test(value)) return
     onChange('size', formatSizeSpec({ ...size, [key]: value }))
   }
   return (
     <div className="space-y-2">
-      <div className="grid grid-cols-[minmax(0,3fr)_minmax(3.25rem,1fr)] items-end gap-2 @[560px]:gap-4">
+      <div className="grid grid-cols-[minmax(0,3fr)_minmax(3.75rem,1fr)] items-end gap-2 @[560px]:gap-4">
         <div className="grid grid-cols-3 gap-1.5">
           {DIMENSIONS.map(([key, label, symbol]) => (
             <label key={key} className="grid min-w-0 gap-1 text-xs text-muted-foreground">
@@ -108,21 +132,25 @@ function SizeFields({ text, weight, note, locked, onChange }: {
             </label>
           ))}
         </div>
-        <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
-          Weight
-          <Input aria-label="Weight 값" value={weight} readOnly={locked}
-            className="h-8 min-w-0 px-2 text-right tabular-nums text-foreground"
-            onChange={event => onChange('weight', event.target.value)} />
-        </label>
+        <div className="relative min-w-0">
+          <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+            <span className="flex min-h-5 items-center">Weight</span>
+            <Input aria-label="Weight 값" value={weight} readOnly={locked}
+              className="h-8 min-w-0 px-2 text-right tabular-nums text-foreground"
+              onChange={event => onChange('weight', event.target.value)} />
+          </label>
+          <InformationCopyButton label="중량" text={weight} className="absolute right-0 top-0" />
+        </div>
       </div>
-      <div className="space-y-1.5 rounded-lg border border-border bg-card p-2.5">
+      <div className="relative space-y-1.5 rounded-lg border border-border bg-card p-2.5">
         <p className="min-h-5 break-words text-sm tabular-nums">
-          {summary ? `${summary} mm` : strapSummary || text || '사이즈 미입력'}
+          {dimensions || '사이즈 미입력'}
           {summary && strapSummary && <span className="text-xs text-muted-foreground"> · {strapSummary}</span>}
         </p>
         <Textarea aria-label="사이즈 메모" value={note} readOnly={locked} rows={3}
-          className="min-h-16 border-0 px-0 py-1 text-sm shadow-none"
+          className="min-h-16 border-0 px-0 py-1 pr-9 text-sm shadow-none"
           onChange={event => onChange('sizeNote', event.target.value)} />
+        <InformationCopyButton label="사이즈와 메모" text={sizeText} className="absolute bottom-2 right-5" />
       </div>
     </div>
   )
@@ -211,27 +239,36 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
       className={cn('grid min-w-0 gap-4 border-t border-border px-4 py-4 @[720px]:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)_9.5rem] @[720px]:items-center', highlighted && 'bg-primary/5')}>
       <div className="grid min-w-0 grid-cols-[4rem_minmax(0,1fr)] items-center gap-3 @[720px]:grid-cols-[minmax(4rem,6.5rem)_minmax(0,1fr)]">
         <InformationPhoto src={photo} name={colorName} />
-        <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
-          컬러명
-          <Input value={colorName} readOnly className="h-8 min-w-0 text-foreground" />
-        </label>
+        <div className="relative min-w-0">
+          <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+            컬러명
+            <Input value={colorName} readOnly className="h-8 min-w-0 pr-8 text-foreground" />
+          </label>
+          <InformationCopyButton label="컬러명" text={color.name.trim()} className="absolute bottom-1.5 right-1.5" />
+        </div>
       </div>
       {field === 'size' ? (
         <SizeFields text={valueFor('size')} weight={valueFor('weight')} note={valueFor('sizeNote')}
           locked={locked || showModify} onChange={editField} />
       ) : (
         <div className="grid min-w-0 gap-3">
-          <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
-            {fieldLabel}
-            <Textarea aria-label={`${fieldLabel} 값`} value={valueFor('fabric')} readOnly={locked || showModify}
-              rows={3} className="min-h-20 text-foreground"
-              onChange={event => editField('fabric', event.target.value)} />
-          </label>
-          <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
-            Water-resistant coated · 생활 발수 코팅
-            <Input value={valueFor('coating')} readOnly={locked || showModify}
-              className="h-8 min-w-0 text-foreground" onChange={event => editField('coating', event.target.value)} />
-          </label>
+          <div className="relative">
+            <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+              {fieldLabel}
+              <Textarea aria-label={`${fieldLabel} 값`} value={valueFor('fabric')} readOnly={locked || showModify}
+                rows={3} className="min-h-20 pr-12 text-foreground"
+                onChange={event => editField('fabric', event.target.value)} />
+            </label>
+            <InformationCopyButton label="Fabric" text={valueFor('fabric')} className="absolute bottom-2 right-5" />
+          </div>
+          <div className="relative">
+            <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+              Water-resistant coated · 생활 발수 코팅
+              <Input value={valueFor('coating')} readOnly={locked || showModify}
+                className="h-8 min-w-0 pr-8 text-foreground" onChange={event => editField('coating', event.target.value)} />
+            </label>
+            <InformationCopyButton label="생활 발수 코팅" text={valueFor('coating')} className="absolute bottom-1.5 right-1.5" />
+          </div>
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2 @[720px]:flex-col @[720px]:items-end">
@@ -312,11 +349,14 @@ function SpecDocumentForm({ draft, readOnly, edits, saved, onEditChange, onSave,
           setBusy(false)
         }
       }}>
-      <Textarea aria-label="스펙 문서 값" value={text}
-        rows={7} readOnly={locked || showModify} onChange={event => {
-          const next = event.target.value
-          onEditChange(() => ({ specDoc: { source: value, text: next } }))
-        }} />
+      <div className="relative">
+        <Textarea aria-label="스펙 문서 값" value={text} className="pr-12"
+          rows={7} readOnly={locked || showModify} onChange={event => {
+            const next = event.target.value
+            onEditChange(() => ({ specDoc: { source: value, text: next } }))
+          }} />
+        <InformationCopyButton label="스펙 문서" text={text} className="absolute bottom-2 right-5" />
+      </div>
       {legacy.length > 0 && (
         <details className="rounded-lg border border-border px-3 py-2 text-sm">
           <summary className="cursor-pointer text-muted-foreground">이전 컬러별 스펙 문서</summary>
