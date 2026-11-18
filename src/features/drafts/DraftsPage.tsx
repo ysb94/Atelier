@@ -65,12 +65,14 @@ const folderViewTabs: FilterTab<FolderView>[] = [
 
 function emptyMessage(
   hasAny: boolean,
+  myOnly: boolean,
   folderFilter: string,
   boardFilter: BoardFilter,
   brandScope: DraftBrandScope,
   ownerScope: DraftOwnerScope,
 ) {
   if (hasAny) return '조건에 맞는 기획안이 없습니다.'
+  if (myOnly) return '내가 만든 기획안이 없습니다.'
   if (ownerScope === UNASSIGNED_DRAFT_OWNER) {
     return '담당 미정 기획안이 없습니다.'
   }
@@ -100,6 +102,7 @@ export function CompanyDraftsPage() {
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const [boardFilter, setBoardFilter] = useState<BoardFilter>('all')
+  const [myOnly, setMyOnly] = useState(false)
   const [completedFolderId, setCompletedFolderId] = useState<string | null>(null)
   const [tempGroups, setTempGroups] = useState<PreviewReleaseGroup[]>([])
   const [assignments, setAssignments] = useState<
@@ -114,6 +117,7 @@ export function CompanyDraftsPage() {
     canViewByOwner ? (searchParams.get('owner') ?? 'all') : 'all'
   ) as DraftOwnerScope
   const companyId = profile?.companyId ?? DEFAULT_COMPANY_ID
+  const profileId = profile?.id
   const brandIdBySlug = useMemo(
     () => new Map(brands.map((item) => [item.slug, item.id])),
     [brands],
@@ -263,26 +267,21 @@ export function CompanyDraftsPage() {
     return [...byId.values()]
   }, [seasons, tempGroups])
 
-  const scopedDrafts = useMemo(() => {
-    return drafts.filter((draft) =>
-      matchesDraftBrandScope(draft.brandId, brandScope, brandIdBySlug),
-    )
-  }, [brandIdBySlug, brandScope, drafts])
-
   const ownerAllDrafts = useMemo(
     () =>
       drafts.filter((draft) =>
-        matchesDraftOwnerScope(draft.owner, ownerScope),
+        matchesDraftOwnerScope(draft.owner, ownerScope) &&
+        (!myOnly || (profileId != null && draft.createdBy === profileId)),
       ),
-    [ownerScope, drafts],
+    [drafts, myOnly, ownerScope, profileId],
   )
 
   const ownerDrafts = useMemo(
     () =>
-      scopedDrafts.filter((draft) =>
-        matchesDraftOwnerScope(draft.owner, ownerScope),
+      ownerAllDrafts.filter((draft) =>
+        matchesDraftBrandScope(draft.brandId, brandScope, brandIdBySlug),
       ),
-    [ownerScope, scopedDrafts],
+    [brandIdBySlug, brandScope, ownerAllDrafts],
   )
 
   const scopedBrand =
@@ -545,6 +544,16 @@ export function CompanyDraftsPage() {
               label="출시 폴더 지정"
               count={sheetCounts.scheduled}
             />
+            <label className="ml-1 inline-flex h-7 cursor-pointer items-center gap-1.5 px-1 text-xs font-medium">
+              <input
+                type="checkbox"
+                className="size-3.5 accent-primary"
+                checked={myOnly}
+                disabled={!profileId}
+                onChange={(event) => setMyOnly(event.currentTarget.checked)}
+              />
+              my<span className="sr-only"> 내가 만든 기획안만 보기</span>
+            </label>
           </div>
           {brandScope !== 'all' && (
             <DraftFolderBar
@@ -565,7 +574,7 @@ export function CompanyDraftsPage() {
           )}
           {canWriteDraft(workAccess.access) && <Link
             to={newHref}
-            className="inline-flex h-7 shrink-0 items-center gap-1 self-start rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+            className="ml-auto inline-flex h-7 shrink-0 items-center gap-1 self-end rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 lg:self-start"
           >
             <Plus className="size-3" aria-hidden="true" />
             기획안 추가
@@ -665,6 +674,7 @@ export function CompanyDraftsPage() {
                 >
                   {emptyMessage(
                     folderDrafts.length > 0,
+                    myOnly,
                     folderFilter,
                     boardFilter,
                     brandScope,
