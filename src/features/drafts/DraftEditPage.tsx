@@ -31,13 +31,14 @@ import { readFileAsDataUrl, readImageFile } from '@/lib/images'
 import { SampleWorkOrderRegistration } from './SampleWorkOrderRegistration'
 import { RegisteredSampleCard } from './RegisteredSampleCard'
 import { RegisteredColorSampleCards } from './RegisteredColorSampleCards'
+import { DraftProposerPicker } from './DraftProposerPicker'
+import { SampleDestinationSelect } from './SampleDestinationSelect'
 import { resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
 import { registerDraftSampleStage, updateDraftColorSample } from '@/lib/drafts/sample-registration'
 import {
   COST_CURRENCY_LABEL,
   DRAFT_OPEN_DETAIL_OPTIONS,
   DRAFT_OPEN_TYPE_OPTIONS,
-  DRAFT_ORIGIN_OPTIONS,
   DRAFT_REGISTER_TYPE_OPTIONS,
   DRAFT_SPEC_LABEL,
   type CostCurrency,
@@ -450,7 +451,7 @@ export function DraftEditPage() {
     if (sampleUploadLocked) return
     const country = sampleCountry(form.originCountry)
     if (country.code !== 'CN' && country.code !== 'KO') {
-      setError('제조국을 먼저 선택해 주세요. 중국은 중국팀으로 전달되고, 한국은 기록만 남습니다.')
+      setError('샘플 진행처를 먼저 선택해 주세요.')
       return
     }
     if (file.size > SAMPLE_WORK_ORDER_MAX_BYTES) {
@@ -544,8 +545,8 @@ export function DraftEditPage() {
       patch({ specs: nextForm.specs })
       if (!isNew) saveMutation.mutate(nextForm)
     } catch (cause) {
-      console.warn('[drafts] 컬러샘플 제조국 저장 실패', cause)
-      setError(cause instanceof Error ? cause.message : '제조국을 바꾸지 못했습니다.')
+      console.warn('[drafts] 컬러샘플 진행처 저장 실패', cause)
+      setError(cause instanceof Error ? cause.message : '샘플 진행처를 바꾸지 못했습니다.')
     }
   }
 
@@ -782,6 +783,7 @@ export function DraftEditPage() {
               </div>
               <Field label="한글명">
                 <Input
+                  aria-label="한글명"
                   className="h-9"
                   value={form.nameKo}
                   readOnly={Boolean(form.specs.nameConfirmed)}
@@ -849,73 +851,90 @@ export function DraftEditPage() {
               else void uploadBasicWorkOrder(file)
             }}
           />
-          {savedSamples.length === 0 ? <div className="mt-2 border-t border-border pt-5"><p className="text-center">
-              <span className="inline-flex rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">{sampleStatus}</span>
-            </p>
-            <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-              <span />
-              <p className="text-sm text-muted-foreground">{sampleRound}차샘플 작업지시서 업로드</p>
-              <div className="justify-self-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={!editable || sampleUploadLocked || saveMutation.isPending}
-                  onClick={() => basicWorkOrderInputRef.current?.click()}
-                >
-                  <Upload className="size-3.5" />
-                  올리기
-                </Button>
-              </div>
+          <div className="mt-2 grid gap-5 border-t border-border pt-5 sm:grid-cols-[12rem_minmax(0,1fr)]">
+            <div className="space-y-2">
+              <Select aria-label="브랜드 선택" className="h-8 w-full text-xs" value={form.brandId ?? ''}
+                disabled={!isNew || !editable || saveMutation.isPending}
+                onChange={event => {
+                  setSeasonPrefillDone(true)
+                  setSeasonFromQueryDone(true)
+                  patch({ brandId: event.target.value || null, seasonId: null })
+                }}>
+                <option value="">브랜드 미정</option>
+                {brands.map(brand => <option key={brand.id} value={brand.id}
+                  disabled={isNew && !canWriteDraft(workAccess.access, null, brand.id)}>{brand.name}</option>)}
+              </Select>
+              {savedSamples.length === 0 && <SampleDestinationSelect value={form.originCountry}
+                disabled={!editable || saveMutation.isPending} onChange={originCountry => {
+                  const sampleWorkOrders = applySampleOrigin(form.sampleWorkOrders, originCountry)
+                  const nextForm = { ...form, originCountry, sampleWorkOrders, ...legacyWorkOrderFields(sampleWorkOrders) }
+                  patch({ originCountry, sampleWorkOrders, ...legacyWorkOrderFields(sampleWorkOrders) })
+                  if (!isNew && latestFilledSampleWorkOrder(sampleWorkOrders)) saveMutation.mutate(nextForm)
+                }} />}
+              <DraftProposerPicker actorId={profile?.id} value={form.specs.proposer}
+                readOnly={!editable || saveMutation.isPending}
+                onChange={proposer => patch({ specs: { ...form.specs, proposer } })} />
+              {savedSamples.length === 0 && <p className="text-xs text-muted-foreground">
+                CHINA와 PROMOTION [중국]의 지시서는 중국팀에 전달됩니다. KOREA는 기록만 남습니다.
+              </p>}
             </div>
-            <div className="mt-4 grid items-center gap-4 sm:grid-cols-[240px_minmax(0,1fr)]">
-              <div>
-                <OptionSelect
-                  className="h-11"
-                  value={form.originCountry}
-                  options={DRAFT_ORIGIN_OPTIONS}
-                  placeholder="제조국 선택"
-                  onChange={(originCountry) => {
-                    const sampleWorkOrders = applySampleOrigin(form.sampleWorkOrders, originCountry)
-                    const nextForm = { ...form, originCountry, sampleWorkOrders, ...legacyWorkOrderFields(sampleWorkOrders) }
-                    patch({ originCountry, sampleWorkOrders, ...legacyWorkOrderFields(sampleWorkOrders) })
-                    if (!isNew && latestFilledSampleWorkOrder(sampleWorkOrders)) saveMutation.mutate(nextForm)
-                  }}
-                />
-                <p className="mt-1 text-xs text-muted-foreground">중국은 중국팀으로 전달되고, 한국은 전송하지 않고 기록만 남습니다.</p>
-              </div>
-              <div className="flex min-h-16 items-center justify-center rounded-xl border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
-                {sampleFileName && currentSample?.url ? (
-                  <a href={currentSample.url} download={sampleFileName} className="max-w-full truncate text-foreground underline-offset-2 hover:underline">
-                    {sampleFileName}
-                  </a>
-                ) : (
-                  '올린 파일이 없습니다.'
-                )}
-              </div>
+            <div className="min-w-0">
+              {savedSamples.length === 0 ? (
+                <div>
+                  <p className="text-center">
+                    <span className="inline-flex rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">{sampleStatus}</span>
+                  </p>
+                  <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+                    <span />
+                    <p className="text-sm text-muted-foreground">{sampleRound}차샘플 작업지시서 업로드</p>
+                    <div className="justify-self-end">
+                      <Button type="button" variant="outline" size="sm"
+                        disabled={!editable || sampleUploadLocked || saveMutation.isPending}
+                        onClick={() => basicWorkOrderInputRef.current?.click()}>
+                        <Upload className="size-3.5" />
+                        올리기
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex min-h-16 items-center justify-center rounded-xl border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
+                    {sampleFileName && currentSample?.url ? (
+                      <a href={currentSample.url} download={sampleFileName} className="max-w-full truncate text-foreground underline-offset-2 hover:underline">
+                        {sampleFileName}
+                      </a>
+                    ) : '올린 파일이 없습니다.'}
+                  </div>
+                </div>
+              ) : savedSamples.map((order) => (
+                <RegisteredSampleCard key={order.id} id={order.id} label={sampleOrderLabel(order, savedSamples)}
+                  status={order.receivedAt ? '수령' : order.shipped ? '발송' : '진행'}
+                  country={order.originCountry || form.originCountry} url={order.url} name={sampleWorkOrderFileName(order)}
+                  locked={Boolean(order.shipped || order.receivedAt || order.passed)} readOnly={!editable} saving={saveMutation.isPending}
+                  onUpload={file => { void replaceSavedSampleFile(order.id, file) }} onCountry={country => updateSavedSampleCountry(order.id, country)} />
+              ))}
+              <RegisteredColorSampleCards rounds={savedColorSamples} originCountry={form.originCountry} readOnly={!editable} saving={saveMutation.isPending}
+                onUpload={(id, file) => { void replaceSavedColorSampleFile(id, file) }} onCountry={updateSavedColorSampleCountry} />
+              {savedSamples.length > 0 && (
+                <div id="next-sample">
+                  <SampleWorkOrderRegistration originCountry={form.originCountry}
+                    nextRound={(latestFilledSampleWorkOrder(form.sampleWorkOrders)?.round ?? 1) + 1}
+                    nextColorRound={Math.max(0, ...savedColorSamples.map(round => round.round)) + 1}
+                    latestIsFinal={savedSamples.at(-1)?.sampleStage === 'final'}
+                    finalCount={savedSamples.filter((order) => order.sampleStage === 'final').length}
+                    readOnly={!editable} saving={saveMutation.isPending}
+                    onRegister={async (stage, file, country) => {
+                      if (isNew || !draftId) throw new Error('1차 작업지시서를 먼저 저장해 주세요.')
+                      const current = await getProductDraftById(draftId)
+                      if (!current) throw new Error('기획안을 다시 조회해 주세요.')
+                      const nextForm = registerDraftSampleStage(draftToInput(current), stage, file, country)
+                      const saved = await saveMutation.mutateAsync({ ...nextForm, expectedUpdatedAt: current.updatedAt })
+                      setForm(draftToInput(saved))
+                      const registeredId = stage === 'color' ? resolveColorSampleRounds(saved).at(-1)?.id : latestFilledSampleWorkOrder(saved.sampleWorkOrders)?.id
+                      if (registeredId) window.requestAnimationFrame(() => document.getElementById(`sample-history-${registeredId}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
+                    }} />
+                </div>
+              )}
             </div>
-          </div> : savedSamples.map((order) => (
-            <RegisteredSampleCard key={order.id} id={order.id} label={sampleOrderLabel(order, savedSamples)}
-              status={order.receivedAt ? '수령' : order.shipped ? '발송' : '진행'}
-              country={order.originCountry || form.originCountry} url={order.url} name={sampleWorkOrderFileName(order)}
-              locked={Boolean(order.shipped || order.receivedAt || order.passed)} readOnly={!editable} saving={saveMutation.isPending}
-              onUpload={file => { void replaceSavedSampleFile(order.id, file) }} onCountry={country => updateSavedSampleCountry(order.id, country)} />
-          ))}
-          <RegisteredColorSampleCards rounds={savedColorSamples} originCountry={form.originCountry} readOnly={!editable} saving={saveMutation.isPending}
-            onUpload={(id, file) => { void replaceSavedColorSampleFile(id, file) }} onCountry={updateSavedColorSampleCountry} />
-          {savedSamples.length > 0 ? <div id="next-sample">
-          <SampleWorkOrderRegistration originCountry={form.originCountry} nextRound={(latestFilledSampleWorkOrder(form.sampleWorkOrders)?.round ?? 1) + 1} nextColorRound={Math.max(0, ...savedColorSamples.map(round => round.round)) + 1} latestIsFinal={savedSamples.at(-1)?.sampleStage === 'final'} finalCount={savedSamples.filter((order) => order.sampleStage === 'final').length} readOnly={!editable} saving={saveMutation.isPending}
-            onRegister={async (stage, file, country) => {
-              if (isNew || !draftId) throw new Error('1차 작업지시서를 먼저 저장해 주세요.')
-              const current = await getProductDraftById(draftId)
-              if (!current) throw new Error('기획안을 다시 조회해 주세요.')
-              const nextForm = registerDraftSampleStage(draftToInput(current), stage, file, country)
-              const saved = await saveMutation.mutateAsync({ ...nextForm, expectedUpdatedAt: current.updatedAt })
-              setForm(draftToInput(saved))
-              const registeredId = stage === 'color' ? resolveColorSampleRounds(saved).at(-1)?.id : latestFilledSampleWorkOrder(saved.sampleWorkOrders)?.id
-              if (registeredId) window.requestAnimationFrame(() => document.getElementById(`sample-history-${registeredId}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
-            }} />
-          </div> : null}
+          </div>
 
         </SectionCard>
         ) : (
@@ -1199,14 +1218,9 @@ export function DraftEditPage() {
                 }
               />
             </Field>
-            <Field label="제조국">
-              <OptionSelect
-                className="h-8"
-                value={form.originCountry}
-                options={DRAFT_ORIGIN_OPTIONS}
-                placeholder="제조국 선택"
-                onChange={(originCountry) => patch({ originCountry })}
-              />
+            <Field label="샘플 진행처">
+              <SampleDestinationSelect value={form.originCountry} disabled={!editable}
+                onChange={originCountry => patch({ originCountry })} />
             </Field>
             <Field label="등록유형">
               <OptionSelect

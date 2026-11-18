@@ -1,7 +1,15 @@
 import type { DraftSampleWorkOrder } from '../types'
 import { latestFilledSampleWorkOrder, newSampleWorkOrder } from './sample-work-order'
 
+const PROMOTION_DESTINATION = 'PROMOTION [중국]'
+export const SAMPLE_DESTINATIONS = [
+  { value: '중국', label: 'CHINA' },
+  { value: '한국', label: 'KOREA' },
+  { value: PROMOTION_DESTINATION, label: PROMOTION_DESTINATION },
+] as const
+
 export function sampleCountry(country: string) {
+  if (/^promotion\s*\[(중국|china)\]$/i.test(country.trim())) return { code: 'CN', label: PROMOTION_DESTINATION }
   if (/중국|china/i.test(country)) return { code: 'CN', label: '중국' }
   if (/한국|국내|korea/i.test(country)) return { code: 'KO', label: '한국' }
   return { code: country.trim() || '국가 미정', label: country.trim() || '국가 미정' }
@@ -62,7 +70,7 @@ export function registerNextReceivedSample(
   const latest = latestFilledSampleWorkOrder(orders)
   if (!sampleReadyForNextStage(latest)) throw new Error('실물 수령을 확인한 뒤 다음 작업지시서를 등록해 주세요.')
   if (!file.url.trim() || !file.name.trim()) throw new Error('새 작업지시서 파일을 선택해 주세요.')
-  if (!country.trim()) throw new Error('제조국을 선택해 주세요.')
+  if (!country.trim()) throw new Error('샘플 진행처를 선택해 주세요.')
   const round = Math.max(0, ...orders.filter(order => order.url?.trim()).map(order => order.round)) + 1
   return [
     ...orders.filter(order => order.url?.trim()).map(order => ({ ...order, originCountry: order.originCountry || previousCountry })),

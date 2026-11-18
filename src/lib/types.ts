@@ -325,6 +325,7 @@ export type DraftColorSpec = {
 export type DraftSpecs = Record<DraftSpecKey, DraftSpec> & {
   colorSpecs: Record<string, DraftColorSpec>
   specDocumentConfirmed?: boolean
+  proposer?: { id: string; name: string }
   confirmedPriceRequestId?: string
   colorImageChoices?: Record<string, DraftColorImageChoice>
   colorPhotoUrls?: Record<string, string>
@@ -458,11 +459,6 @@ export const DRAFT_OWNER_OPTIONS = [
   '이디자인',
   '박MD',
   '최물류',
-] as const
-
-export const DRAFT_ORIGIN_OPTIONS = [
-  '중국',
-  '한국',
 ] as const
 
 export const DRAFT_REGISTER_TYPE_OPTIONS = [

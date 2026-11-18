@@ -208,6 +208,9 @@ function normalizeSpecs(raw: ProductDraft['specs'] | null | undefined, colors: D
   }
   base.colorSpecs = normalizeColorSpecs(raw?.colorSpecs)
   if (typeof raw?.specDocumentConfirmed === 'boolean') base.specDocumentConfirmed = raw.specDocumentConfirmed
+  if (typeof raw?.proposer?.id === 'string' && raw.proposer.id && typeof raw.proposer.name === 'string' && raw.proposer.name.trim()) {
+    base.proposer = { id: raw.proposer.id, name: raw.proposer.name.trim() }
+  }
   if (typeof raw?.confirmedPriceRequestId === 'string') base.confirmedPriceRequestId = raw.confirmedPriceRequestId
   const colorImageChoices: Record<string, DraftColorImageChoice> = {}
   for (const { id } of colors) {
