@@ -313,6 +313,7 @@ export type DraftSpecKey = 'size' | 'weight' | 'fabric' | 'coating'
 /** 시트 INFORMATION 칸의 컬러 한 줄. 상품 공통 스펙과 따로 저장한다. */
 export type DraftColorSpec = {
   size: string
+  sizeNote: string
   fabric: string
   weight: string
   specDoc: string

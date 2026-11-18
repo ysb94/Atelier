@@ -656,12 +656,13 @@ export function CompanyDraftsPage() {
                     onSaveSheetValue={async (colorId, changes, applyAll) => {
                       await saveDraftChange(draft.id, (current) => {
                         const input = draftToInput(current)
-                        const ids = applyAll
-                          ? input.colors.map((color) => color.id)
-                          : [colorId]
-                        if (!ids.length || (!applyAll && !input.colors.some((color) => color.id === colorId))) {
+                        if (!input.colors.some((color) => color.id === colorId)) {
                           throw new Error('컬러를 찾지 못했습니다.')
                         }
+                        if (applyAll && input.colors[0]?.id !== colorId) {
+                          throw new Error('컬러 순서가 변경됐습니다. 맨 위 컬러를 확인하고 다시 적용해 주세요.')
+                        }
+                        const ids = applyAll ? input.colors.map(color => color.id) : [colorId]
                         return {
                           ...input,
                           specs: writeColorSpec(input.specs, ids, changes),

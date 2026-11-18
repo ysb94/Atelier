@@ -2,7 +2,7 @@ import type { DraftColorSpec, DraftSpecKey, DraftSpecs } from '@/lib/types'
 import { parseSizeSpecInput } from './spec-format'
 
 export type ColorSpecField = keyof DraftColorSpec
-export type DraftInformationField = Exclude<ColorSpecField, 'weight'>
+export type DraftInformationField = Exclude<ColorSpecField, 'weight' | 'sizeNote'>
 export type SaveColorSpec = (colorId: string, changes: Partial<DraftColorSpec>, applyAll: boolean) => Promise<void>
 
 export const DRAFT_INFORMATION_LABELS = {
@@ -16,6 +16,7 @@ export function colorSpecFromProduct(
 ): DraftColorSpec {
   return {
     size: specs.size.value,
+    sizeNote: '',
     fabric: specs.fabric.value,
     weight: specs.weight.value,
     specDoc: specs.coating.note,
@@ -53,6 +54,7 @@ export function normalizeColorSpecs(raw: unknown): Record<string, DraftColorSpec
     const item = value as Record<string, unknown>
     specs[id] = {
       size: typeof item.size === 'string' ? item.size : '',
+      sizeNote: typeof item.sizeNote === 'string' ? item.sizeNote : '',
       fabric: typeof item.fabric === 'string' ? item.fabric : '',
       weight: typeof item.weight === 'string' ? item.weight : '',
       specDoc: typeof item.specDoc === 'string' ? item.specDoc : '',
