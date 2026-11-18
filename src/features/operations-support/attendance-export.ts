@@ -26,7 +26,7 @@ export async function exportAttendance(month: string, rows: AttendanceRow[], rec
     const record = records[date]?.[row.member.id] ?? EMPTY_ATTENDANCE
     if (record.status === 'unset' && !record.note) continue
     const timing = recordTiming(record, row.schedule)
-    detailSheet.addRow([date, row.member.displayName || '이름 없음', row.team, ATTENDANCE_STATUSES.find(item => item.id === record.status)?.label, record.start, record.end, record.expectedStart || (record.status === 'half-am' ? '' : row.schedule.start), timing.baseline == null ? '집계 제외' : timing.after ? '해당' : '', timing.baseline == null ? '집계 제외' : timing.exceeded ? '해당' : '', record.reviewed ? '확인 완료' : '', record.note])
+    detailSheet.addRow([date, row.member.displayName || '이름 없음', row.team, ATTENDANCE_STATUSES.find(item => item.id === record.status)?.label, record.start, record.end, timing.baseline == null ? '' : formatTime(timing.baseline).slice(0, 5), timing.baseline == null ? '집계 제외' : timing.after ? '해당' : '', timing.baseline == null ? '집계 제외' : timing.exceeded ? '해당' : '', record.reviewed ? '확인 완료' : '', record.note])
   }
   detailSheet.columns.forEach(column => { column.width = 18 })
   detailSheet.views = [{ state: 'frozen', ySplit: 1 }]

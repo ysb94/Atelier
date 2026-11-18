@@ -14,8 +14,9 @@ import React,{createContext,useContext,useMemo,useState}from'react';
 const Auth=createContext(null);
 export function FixtureAuth({children}){const[actor,setActor]=useState('employee');window.fixtureActor=actor;window.switchActor=setActor;const value=useMemo(()=>({profile:{id:actor,status:'active',displayName:'검증 직원',departmentName:'기획팀'},session:{user:{id:actor}}}),[actor]);return <Auth.Provider value={value}>{children}</Auth.Provider>}
 export const useAuth=()=>useContext(Auth);
-export const useMyClockIn=()=>({todayClock:'09:07'});
-export const getMyWorkdayBasis=async()=>({start:'09:00'});
+const scenario=new URLSearchParams(window.location.search).get('arrival');
+export const useMyClockIn=()=>({todayClock:'09:07',todayRecord:scenario==='overnight'?undefined:{clockIn:scenario==='offsite'?'10:00':scenario==='half'?'14:39':'09:07',clockInSource:scenario==='offsite'?'offsite':'manual'}});
+export const getMyWorkdayBasis=async()=>scenario==='half'?{start:'10:00',arrivalStart:'14:00',quarterArrivalSupported:true}:{start:'09:00'};
 `)
 await writeFile(path.join(dir, 'entry.tsx'), `
 import React,{useState}from'react';import{createRoot}from'react-dom/client';import{QueryClient,QueryClientProvider,useQuery}from'@tanstack/react-query';
@@ -26,7 +27,16 @@ const query=new QueryClient({defaultOptions:{queries:{retry:false,refetchOnWindo
 getSupabase().auth.getSession=async()=>({data:{session:{user:{id:window.fixtureActor},access_token:'fixture-'+window.fixtureActor}},error:null});
 window.fixture={setActor:actor=>{query.clear();window.switchActor(actor)},upload:uploadLateStatementFile,refresh:()=>query.invalidateQueries()};
 window.fixture.empty=async()=>{const run=createDiagnosticFetch('https://api.fixture.invalid',createSupabaseFetch('https://api.fixture.invalid'));const out=[];for(const [method,status]of[['POST',204],['GET',204],['GET',205],['GET',304],['HEAD',200]]){const r=await run('https://api.fixture.invalid/rest/v1/empty/'+status,{method});out.push({method,status:r.status,text:await r.text(),marker:r.headers.get('x-fixture')})}return out};
-function App(){const[review,setReview]=useState(false);const{session}=useAuth();window.fixture.review=()=>setReview(true);const rows=useQuery({queryKey:['review-fixture',session.user.id],queryFn:()=>listLateArrivalStatements('2026-11-05','2026-11-05'),enabled:review});return review?rows.isPending?<p>조회 중</p>:rows.data?.length?<LateArrivalStatementDocument statement={rows.data[0]} review={session.user.id==='hr'?'hr':'view'} onClose={()=>setReview(false)}/>:<p>열람할 수 없습니다.</p>:<LateArrivalHeaderButton/>}
+function App(){
+  const[review,setReview]=useState(false);
+  const{session}=useAuth();
+  window.fixture.review=()=>setReview(true);
+  const rows=useQuery({queryKey:['review-fixture',session.user.id],queryFn:()=>listLateArrivalStatements('2026-11-05','2026-11-05'),enabled:review});
+  if(!review)return <div data-testid="late-header"><LateArrivalHeaderButton/></div>;
+  if(rows.isPending)return <p>조회 중</p>;
+  if(!rows.data?.length)return <p>열람할 수 없습니다.</p>;
+  return <LateArrivalStatementDocument statement={rows.data[0]} review={session.user.id==='hr'?'hr':'view'} onClose={()=>setReview(false)}/>;
+}
 createRoot(document.getElementById('root')).render(<QueryClientProvider client={query}><FixtureAuth><App/></FixtureAuth></QueryClientProvider>);
 `)
 const mocked = ['lib/supabase/auth', 'features/home/use-my-clock-in', 'lib/supabase/attendance-entry'].map(p => path.join(root, 'src', p).replaceAll('\\', '/'))
@@ -40,7 +50,7 @@ const browser = await chromium.launch({ executablePath: process.env.ATELIER_CHRO
 const errors = [], unexpected = []
 const row = () => ({ id: 'statement-a', employee_id: 'employee', work_date: '2026-11-05', department_name: '기획팀', employee_name: '검증 직원', position_name: '직원', baseline_time: '09:00', actual_time: '09:07', late_minutes: 7, prior_approval: '무', reason_kind: '교통 통제', detail: '기존 사유 본문', prevention: '출근 경로 확인', written_on: '2026-11-05', manager_name: null, manager_confirmed_at: null, hr_name: null, hr_confirmed_at: null })
 const image = name => ({ name, mimeType: name.endsWith('.jpeg') ? 'image/jpeg' : 'image/png', buffer: Buffer.from('isolated image fixture') })
-async function fixturePage(existing = false) {
+async function fixturePage(existing = false, arrival = '') {
   const model = { statement: existing ? row() : null, files: [], objects: new Set(), calls: [], finishFailure: '', uploadFailure: '', denyVerification: false, blockReadAfterFinish: false, serial: 0, deletes: 0, saves: 0 }
   const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } })
   await context.addInitScript(() => {
@@ -114,8 +124,11 @@ async function fixturePage(existing = false) {
   })
   const page = await context.newPage()
   page.on('pageerror', error => errors.push(error.message))
-  await page.goto('https://late.fixture.invalid/')
-  await page.getByRole('button', { name: existing ? '지각 사유서 확인' : '지각 사유서 작성', exact: true }).waitFor()
+  await page.goto(`https://late.fixture.invalid/?arrival=${arrival}`)
+  await page.getByTestId('late-header').waitFor({ state: 'attached' })
+  if (arrival !== 'offsite' && arrival !== 'overnight') {
+    await page.getByRole('button', { name: existing ? '지각 사유서 확인' : '지각 사유서 작성', exact: true }).waitFor()
+  }
   return { page, model, context }
 }
 async function fill(page, files) {
@@ -127,6 +140,19 @@ async function fill(page, files) {
   await page.getByLabel('첨부파일', { exact: true }).setInputFiles(files)
 }
 try {
+  for (const arrival of ['offsite', 'overnight']) {
+    const run = await fixturePage(false, arrival)
+    assert.equal(await run.page.getByRole('button', { name: '지각 사유서 작성', exact: true }).count(), 0)
+    assert.equal(run.model.calls.length, 0, `${arrival}: 사유서 조회 불필요`)
+    await run.context.close()
+  }
+  const half = await fixturePage(false, 'half')
+  await half.page.getByText('오늘 39분 지각', { exact: true }).waitFor()
+  await half.page.getByRole('button', { name: '지각 사유서 작성', exact: true }).click()
+  await half.page.getByRole('cell', { name: '14:00', exact: true }).waitFor()
+  await half.page.getByRole('cell', { name: '14:39', exact: true }).waitFor()
+  await half.context.close()
+
   const normal = await fixturePage()
   const protocol = await normal.page.evaluate(() => window.fixture.empty())
   assert.deepEqual(protocol.map(r => [r.method, r.status, r.text, r.marker]), [['POST',204,'','preserved'],['GET',204,'','preserved'],['GET',205,'','preserved'],['GET',304,'','preserved'],['HEAD',200,'','preserved']])
