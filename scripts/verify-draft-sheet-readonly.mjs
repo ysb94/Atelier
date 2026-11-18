@@ -142,9 +142,11 @@ try{
  assert.equal(await blackSizeButton.getAttribute('aria-description'),'기입 중')
  assert.deepEqual(await blackSizeButton.evaluate(el=>[
    getComputedStyle(el).backgroundColor,
-   getComputedStyle(el,'::after').borderTopStyle,
-   getComputedStyle(el,'::after').borderRightStyle,
- ]),['rgb(255, 255, 255)','solid','solid'])
+   getComputedStyle(el,'::after').borderTopWidth,
+   getComputedStyle(el,'::after').borderLeftWidth,
+   getComputedStyle(el,'::after').borderRightWidth,
+   getComputedStyle(el,'::after').left,
+ ]),['rgb(255, 255, 255)','3px','3px','0px','-1px'])
  assert.equal(await page.getByTestId('writes').textContent(),'1','입력만 하면 저장하지 않는다')
  await panel.press('Escape')
  assert.equal(await blackSizeButton.getAttribute('aria-description'),'기입 중')

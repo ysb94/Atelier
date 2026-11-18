@@ -125,7 +125,7 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-action.is-done{background:#eef5ee;border-color:#cbdccc;color:#43734e}
 .draft-sheet-action.is-pending{background:#c60920;border-color:#c60920;color:#fff}
 .draft-information-action.is-editing{position:relative}
-.draft-information-action.is-editing::after{content:"";position:absolute;top:-1px;right:-1px;width:11px;height:11px;border-top:3px solid var(--color-primary);border-right:3px solid var(--color-primary);border-top-right-radius:6px;pointer-events:none}
+.draft-information-action.is-editing::after{content:"";position:absolute;top:-1px;left:-1px;width:11px;height:11px;border-top:3px solid var(--color-primary);border-left:3px solid var(--color-primary);border-top-left-radius:6px;pointer-events:none}
 .draft-sheet-row>td.draft-sheet-md-cell{position:relative}
 .draft-sheet-edit{position:absolute;top:14px;right:16px;z-index:1;display:inline-flex;gap:5px;align-items:center;margin:0;padding:4px 0;border:0;background:transparent;font:inherit;font-size:11px;color:#555b61;cursor:pointer}
 .draft-sheet-edit:hover{text-decoration:underline;color:#b30920}
