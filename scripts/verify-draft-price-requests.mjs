@@ -52,6 +52,7 @@ export async function installDraftPriceFixture(db) {
     values ($1,$3,$4,'Black',1),($2,$3,$4,'Yellow',2),($5,$6,$4,'Ivory',1)`, [black, yellow, id, company, fixtureId(5), incompleteId])
   const baseline = await originalState(db)
   await db.exec(await migration('20261109044448_draft_price_requests'))
+  await db.exec(await migration('20261118051922_china_draft_price_request_history'))
   assert.deepEqual(await originalState(db), baseline, 'Migration preserves existing data, policies and grants')
   return baseline
 }
@@ -145,10 +146,16 @@ async function verify() {
     assert.equal((await list(ids.manager, 'china')).filter(row => !row.answeredAt).length, 1)
     const secondReply = await reply(ids.manager, second.id, { ...amounts, [black]: 18 })
     assert.deepEqual(await list(ids.requester, 'planning'), [secondReply])
-    assert.equal((await list(ids.manager, 'china')).filter(row => !row.answeredAt).length, 0)
-    assert.equal((await db.query('select count(*)::int as total from app.draft_price_requests')).rows[0].total, 2)
+    assert.deepEqual(await list(ids.manager, 'china'), [sent, secondReply])
+    const third = await request(ids.requester, id, second.id)
+    assert.equal(third.round, 3)
+    assert.equal(third.amounts, null)
+    assert.deepEqual(await list(ids.requester, 'planning'), [third, secondReply])
+    assert.deepEqual(await list(ids.manager, 'china'), [sent, third, secondReply])
+    assert.deepEqual(await list(ids.outside, 'china'), [])
+    assert.equal((await db.query('select count(*)::int as total from app.draft_price_requests')).rows[0].total, 3)
     assert.deepEqual(await originalState(db), baseline, 'Requests and replies preserve existing draft cost, content and access')
-    console.log('Draft price SQL: request/reply and retry, revision conflict, immutable colors/photos, roles and company isolation, original data and access passed')
+    console.log('Draft price SQL: request/reply, China round history, planning latest reply, immutable snapshots, roles and company isolation passed')
   } finally {
     await db.close()
   }

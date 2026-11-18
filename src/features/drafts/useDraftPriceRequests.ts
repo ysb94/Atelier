@@ -50,7 +50,8 @@ export function useDraftPriceRequests(scope: DraftPriceScope) {
             ))
             if (alreadyNewer) return rows
             return [...rows.filter(row => row.id !== saved.id && (
-              row.draftId !== saved.draftId || row.round > saved.round || (!saved.answeredAt && row.answeredAt)
+              row.draftId !== saved.draftId || row.round > saved.round
+              || ((scope === 'china' || !saved.answeredAt) && row.answeredAt)
             )), saved]
           })
           await cache.invalidateQueries({ queryKey: account }, { throwOnError: true })
