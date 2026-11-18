@@ -2,6 +2,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { HomeAttendanceSummary } from '@/features/home/HomeAttendanceSummary'
 import { LateArrivalHeaderButton } from '@/features/home/LateArrivalClockIn'
 import { LateStatementApprovalList, LateStatementNoticeDialog } from '@/features/home/LateStatementReview'
+import { LateArrivalAppealNoticeDialog } from '@/features/home/LateArrivalAppeal'
 import {
   Card,
   CardContent,
@@ -140,6 +141,7 @@ function ProfileSettingsContent() {
         <HolidayWorkPanel key={profile?.id} scope="review" />
       </div>}
       <LateStatementNoticeDialog />
+      <LateArrivalAppealNoticeDialog />
       {release.scope.unrestricted && <div id="personal-profile-panel" role="tabpanel" aria-labelledby="personal-profile-tab" hidden={visiblePart !== 'profile'}>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Card>

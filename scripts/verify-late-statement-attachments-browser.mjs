@@ -20,7 +20,9 @@ export const getMyWorkdayBasis=async()=>scenario==='half'?{start:'10:00',arrival
 `)
 await writeFile(path.join(dir, 'entry.tsx'), `
 import React,{useState}from'react';import{createRoot}from'react-dom/client';import{QueryClient,QueryClientProvider,useQuery}from'@tanstack/react-query';
+import{BrowserRouter}from'react-router-dom';
 import{FixtureAuth,useAuth}from'./fixture';import{LateArrivalHeaderButton,LateArrivalStatementDocument}from'../../src/features/home/LateArrivalClockIn';
+import{LateArrivalAppealNoticeDialog}from'../../src/features/home/LateArrivalAppeal';
 import{getSupabase}from'../../src/lib/supabase/client';import{listLateArrivalStatements,uploadLateStatementFile}from'../../src/lib/supabase/late-arrival-statements';
 import{createSupabaseFetch}from'../../src/lib/supabase/request-policy';import{createDiagnosticFetch}from'../../src/lib/diagnostics/request-watch';
 const query=new QueryClient({defaultOptions:{queries:{retry:false,refetchOnWindowFocus:false}}});
@@ -32,12 +34,12 @@ function App(){
   const{session}=useAuth();
   window.fixture.review=()=>setReview(true);
   const rows=useQuery({queryKey:['review-fixture',session.user.id],queryFn:()=>listLateArrivalStatements('2026-11-05','2026-11-05'),enabled:review});
-  if(!review)return <div data-testid="late-header"><LateArrivalHeaderButton/></div>;
+  if(!review)return <div data-testid="late-header"><LateArrivalHeaderButton/><LateArrivalAppealNoticeDialog/></div>;
   if(rows.isPending)return <p>조회 중</p>;
   if(!rows.data?.length)return <p>열람할 수 없습니다.</p>;
   return <LateArrivalStatementDocument statement={rows.data[0]} review={session.user.id==='hr'?'hr':'view'} onClose={()=>setReview(false)}/>;
 }
-createRoot(document.getElementById('root')).render(<QueryClientProvider client={query}><FixtureAuth><App/></FixtureAuth></QueryClientProvider>);
+createRoot(document.getElementById('root')).render(<QueryClientProvider client={query}><FixtureAuth><BrowserRouter><App/></BrowserRouter></FixtureAuth></QueryClientProvider>);
 `)
 const mocked = ['lib/supabase/auth', 'features/home/use-my-clock-in', 'lib/supabase/attendance-entry'].map(p => path.join(root, 'src', p).replaceAll('\\', '/'))
 await build({ entryPoints: [path.join(dir, 'entry.tsx')], outfile: path.join(dir, 'app.js'), bundle: true, format: 'esm', jsx: 'automatic', loader: { '.css': 'empty' }, alias: { '@': path.join(root, 'src') },
@@ -51,7 +53,7 @@ const errors = [], unexpected = []
 const row = () => ({ id: 'statement-a', employee_id: 'employee', work_date: '2026-11-05', department_name: '기획팀', employee_name: '검증 직원', position_name: '직원', baseline_time: '09:00', actual_time: '09:07', late_minutes: 7, prior_approval: '무', reason_kind: '교통 통제', detail: '기존 사유 본문', prevention: '출근 경로 확인', written_on: '2026-11-05', manager_name: null, manager_confirmed_at: null, hr_name: null, hr_confirmed_at: null })
 const image = name => ({ name, mimeType: name.endsWith('.jpeg') ? 'image/jpeg' : 'image/png', buffer: Buffer.from('isolated image fixture') })
 async function fixturePage(existing = false, arrival = '') {
-  const model = { statement: existing ? row() : null, files: [], objects: new Set(), calls: [], finishFailure: '', uploadFailure: '', denyVerification: false, blockReadAfterFinish: false, serial: 0, deletes: 0, saves: 0 }
+  const model = { statement: existing ? row() : null, appeal: null, appealReads: new Set(), files: [], objects: new Set(), calls: [], finishFailure: '', uploadFailure: '', denyVerification: false, blockReadAfterFinish: false, serial: 0, deletes: 0, saves: 0 }
   const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } })
   await context.addInitScript(() => {
     const NativeDate = Date
@@ -81,6 +83,22 @@ async function fixturePage(existing = false, arrival = '') {
     }
     if (url.pathname.startsWith('/rest/v1/rpc/')) {
       const name = url.pathname.split('/').pop(), body = req.postDataJSON() ?? {}
+      if (name === 'list_late_arrival_appeals') {
+        if (!model.appeal || !['employee', 'hr'].includes(actor)) return json([])
+        const key = actor === 'hr' ? 'late-appeal-review:appeal-a' : model.appeal.status === 'pending' ? null : 'late-appeal-result:appeal-a'
+        return json([{ ...model.appeal, can_review: actor === 'hr', event_key: key, read_at: model.appealReads.has(key) ? '2026-11-05T02:00:00Z' : null }])
+      }
+      if (name === 'submit_late_arrival_appeal') {
+        model.appeal ??= { id: 'appeal-a', employee_name: '검증 직원', work_date: body.p_date, baseline: '09:00', actual: '09:07', minutes: 7, reason: body.p_reason, status: 'pending', created_at: '2026-11-05T01:30:00Z' }
+        return json(model.appeal.id)
+      }
+      if (name === 'read_late_arrival_appeal') { model.appealReads.add(body.p_event_key); return json(null) }
+      if (name === 'review_late_arrival_appeal') {
+        assert.equal(actor, 'hr')
+        assert.equal(body.p_id, 'appeal-a')
+        model.appeal = { ...model.appeal, status: body.p_exclude ? 'corrected' : 'kept', review_note: body.p_note, reviewed_at: '2026-11-05T03:00:00Z' }
+        return json(null)
+      }
       if (name === 'save_my_late_statement') {
         if (actor !== 'employee') return json({ code: '42501', message: '본인만 제출' }, 403)
         model.saves++; model.statement ??= { ...row(), prior_approval: body.p_prior, reason_kind: body.p_reason, detail: body.p_detail, prevention: body.p_prevention }
@@ -152,6 +170,28 @@ try {
   await half.page.getByRole('cell', { name: '14:00', exact: true }).waitFor()
   await half.page.getByRole('cell', { name: '14:39', exact: true }).waitFor()
   await half.context.close()
+
+  const appeal = await fixturePage()
+  await appeal.page.getByRole('button', { name: '지각 사유서 작성', exact: true }).click()
+  await appeal.page.getByRole('button', { name: '이의신청', exact: true }).click()
+  await appeal.page.getByLabel('이의신청 사유', { exact: true }).fill('외근 업무 후 출근했습니다.')
+  await appeal.page.getByRole('button', { name: '이의신청 제출', exact: true }).click()
+  await appeal.page.getByText('지각 이의신청 · 처리 대기 · 운영지원에 전달했습니다.', { exact: true }).waitFor()
+  assert.equal(appeal.model.saves, 0, '이의신청은 사유서 제출과 별개')
+  await appeal.page.getByRole('button', { name: '취소', exact: true }).click()
+  await appeal.page.goto('https://late.fixture.invalid/?lateAppeal=appeal-a')
+  await appeal.page.evaluate(() => window.fixture.setActor('hr'))
+  const appealDetail = appeal.page.getByRole('dialog', { name: '지각 이의신청 상세' })
+  await appealDetail.getByText('외근 업무 후 출근했습니다.', { exact: true }).waitFor()
+  await appealDetail.getByRole('button', { name: '수정', exact: true }).click()
+  assert.equal(await appealDetail.getByLabel('처리 사유', { exact: true }).inputValue(), '외근 업무 후 출근했습니다.')
+  await appealDetail.getByRole('button', { name: '지각 제외 저장', exact: true }).click()
+  await appealDetail.getByText(/검증 직원 .*지각 제외/).waitFor()
+  assert.ok(appeal.model.appealReads.has('late-appeal-review:appeal-a'))
+  await appeal.page.evaluate(() => window.fixture.setActor('employee'))
+  await appealDetail.getByText('운영지원 처리 사유', { exact: true }).waitFor()
+  assert.equal(await appealDetail.getByRole('button', { name: '수정', exact: true }).count(), 0)
+  await appeal.context.close()
 
   const normal = await fixturePage()
   const protocol = await normal.page.evaluate(() => window.fixture.empty())

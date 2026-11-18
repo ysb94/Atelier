@@ -12,6 +12,7 @@ import { useAttendanceIncidentAdjustments } from '@/lib/supabase/attendance-inci
 import { koreaDateKey } from '@/features/settings/my-attendance'
 import { LATE_ATTACHMENT_LIMIT, lateAttachmentError, lateConfirmStamp, lateMinutes } from './late-arrival'
 import { useMyClockIn } from './use-my-clock-in'
+import { LateArrivalAppealEntry } from './LateArrivalAppeal'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import './late-arrival-form.css'
 
@@ -424,7 +425,10 @@ export function LateArrivalHeaderButton() {
       {submitted && <span role="status" className="max-w-72 text-center text-xs text-success">{submitted}</span>}
     </div>
     {open && <div className="fixed inset-0 z-[70] grid place-items-center bg-background/75 p-4" role="dialog" aria-label="지각 사유서">
-      {filed && !savedId ? <LateArrivalStatementDocument statement={filed} onClose={() => setOpen(false)} /> : <StatementFields preview={preview} prior={prior} reason={reason} detail={detail} prevention={prevention} files={files} cumulative={cumulative} error={error} saving={saving} bodySaved={Boolean(savedId)} submitLabel="사유서 제출" note="제출하면 오늘 지각 기록에 사유서가 첨부됩니다." onPrior={setPrior} onReason={setReason} onDetail={setDetail} onPrevention={setPrevention} onAddFiles={addFiles} onRemoveFile={file => void removeFile(file)} onSubmit={event => void submit(event)} onCancel={() => { if (!saving) setOpen(false) }} />}
+      <div className="max-h-[92dvh] w-full max-w-[820px] overflow-auto rounded-xl bg-card">
+        <LateArrivalAppealEntry key={`${userId}:${today}`} date={today} />
+        {filed && !savedId ? <LateArrivalStatementDocument statement={filed} onClose={() => setOpen(false)} /> : <StatementFields preview={preview} prior={prior} reason={reason} detail={detail} prevention={prevention} files={files} cumulative={cumulative} error={error} saving={saving} bodySaved={Boolean(savedId)} submitLabel="사유서 제출" note="제출하면 오늘 지각 기록에 사유서가 첨부됩니다." onPrior={setPrior} onReason={setReason} onDetail={setDetail} onPrevention={setPrevention} onAddFiles={addFiles} onRemoveFile={file => void removeFile(file)} onSubmit={event => void submit(event)} onCancel={() => { if (!saving) setOpen(false) }} />}
+      </div>
     </div>}
   </>
 }
