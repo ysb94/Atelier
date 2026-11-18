@@ -1,10 +1,12 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Heart } from 'lucide-react'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
 import { elapsedMaterialRequestDays } from '@/features/planning/material-request-days'
 import { draftPriceError, type DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
-import { formatNumber } from '@/lib/utils'
+import type { DraftColorRow } from '@/lib/types'
+import { cn, formatNumber } from '@/lib/utils'
 
 export type DraftPriceControls = {
   latest?: DraftPriceRequest
@@ -26,12 +28,13 @@ const requestClock = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: true,
 })
 
-export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, controls, confirmedRequestId }: {
+export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, controls, confirmedRequestId, colors }: {
   readOnly: boolean
   hasColors: boolean
   missingColors: string[]
   controls?: DraftPriceControls
   confirmedRequestId?: string
+  colors?: readonly Pick<DraftColorRow, 'id' | 'name'>[]
 }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -110,11 +113,39 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   }
 
   return <>
-    <div className="grid justify-items-center gap-2.5 text-center">
+    {amounts && colors?.length ? <>
+      <div className="draft-color-pad justify-center">
+        {confirmed && <span role="img" aria-label="단가 확정" className="text-primary">
+          <Heart size={20} fill="currentColor" aria-hidden="true" />
+        </span>}
+      </div>
+      <div className="draft-color-lines draft-price-amounts">
+        {colors.map((color, index) => {
+          const amount = amounts[color.id]
+          const amountLabel = typeof amount === 'number' ? formatNumber(amount) : '—'
+          return (
+            <div key={color.id} className={cn('draft-color-line', index % 2 === 1 && 'is-alt')}>
+              <span className="group/price relative inline-grid place-items-center px-1 text-sm font-semibold tabular-nums text-blue-700">
+                <span title={`${color.name} 단가 (위안)`}>{amountLabel}</span>
+                {confirmed && !readOnly && typeof amount === 'number' && (
+                  <Button type="button" size="sm" variant="ghost"
+                    className="pointer-events-none absolute inset-y-0 left-1/2 z-10 my-auto h-7 -translate-x-1/2 bg-blue-700 px-1.5 text-white opacity-0 hover:bg-blue-800 group-hover/price:pointer-events-auto group-hover/price:opacity-100 group-focus-within/price:pointer-events-auto group-focus-within/price:opacity-100"
+                    aria-label={`${color.name} 단가 ${amountLabel}위안 재요청`}
+                    disabled={busy || controls?.loading} onClick={sendAgain}>
+                    단가 재요청
+                  </Button>
+                )}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </> : null}
+    {(!confirmed || (error && !visible)) && <div className="grid justify-items-center gap-2.5 text-center">
       {sentAt && <time dateTime={latest?.requestedAt} className="whitespace-nowrap text-xs leading-snug text-muted-foreground">
         {requestDay.format(sentAt)}<br />{requestClock.format(sentAt)} 발송
       </time>}
-      {waitingForRepeat
+      {!confirmed && (waitingForRepeat
         ? <span role="status" className="inline-flex h-7 items-center whitespace-nowrap rounded-md bg-neutral-500 px-2.5 text-xs font-medium text-white">
           재요청중
         </span>
@@ -123,9 +154,8 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
           disabled={busy || (readOnly && !latest) || (showReplyActions && controls?.loading)}
           aria-haspopup={showReplyActions ? undefined : 'dialog'} onClick={showReplyActions ? sendAgain : openDetails}>
           {waiting ? '단가 계산중' : showReplyActions ? '단가 재요청' : reply ? '단가 확인' : '단가 요청'}
-        </Button>}
-      {confirmed ? <span className="text-xs font-medium text-primary">단가 확정</span>
-        : showReplyActions && confirm && <Button type="button" size="sm" className="h-7"
+        </Button>)}
+      {!confirmed && showReplyActions && confirm && <Button type="button" size="sm" className="h-7"
           disabled={busy || controls?.loading || Boolean(controls?.error)} onClick={() => void confirmReply()}>
           확정
         </Button>}
@@ -133,7 +163,7 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
       {sentAt && <p className="whitespace-nowrap text-sm font-semibold tabular-nums text-primary">
         + {elapsedMaterialRequestDays(sentAt.getTime(), Date.now())}days
       </p>}
-    </div>
+    </div>}
     {visible && createPortal(
       <dialog ref={dialog} aria-labelledby={titleId} onCancel={event => { event.preventDefault(); if (!busy) setOpen(false) }}
         className="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm overflow-y-auto rounded-xl border border-border bg-card p-5 text-left text-card-foreground shadow-xl backdrop:bg-black/40">
