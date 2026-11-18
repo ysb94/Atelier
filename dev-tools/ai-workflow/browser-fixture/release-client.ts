@@ -31,6 +31,7 @@ export function getSupabase(){
   }}
   return chain
  },rpc(name:string,args?:Record<string,unknown>){
+  if(name==='list_work_requests')return Promise.resolve({data:{requests:[],files:[],timers:[],managerAvailable:true},error:null})
   if(name==='is_my_attendance_exempt')return Promise.resolve({data:hasPermission(fixtureProfile(),'attendance.exempt'),error:null})
   if(name==='clock_in_today'){releaseFixture.writes.push(name);return Promise.resolve({data:'09:00:00',error:null})}
   return base.rpc(name,args)
