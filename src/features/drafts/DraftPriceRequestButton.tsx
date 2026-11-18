@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
+import { elapsedMaterialRequestDays } from '@/features/planning/material-request-days'
 import { draftPriceError, type DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
 import { formatNumber } from '@/lib/utils'
 
@@ -16,6 +17,12 @@ export type DraftPriceControls = {
 
 const replyDate = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', dateStyle: 'short', timeStyle: 'short',
+})
+const requestDay = new Intl.DateTimeFormat('ko-KR', {
+  timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric',
+})
+const requestClock = new Intl.DateTimeFormat('ko-KR', {
+  timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: true,
 })
 
 export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, controls }: {
@@ -34,6 +41,8 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   const reply = controls?.reply
   const amounts = reply?.amounts
   const waiting = Boolean(latest && !latest.answeredAt)
+  const requestedAt = waiting && latest ? new Date(latest.requestedAt) : null
+  const sentAt = requestedAt && Number.isFinite(requestedAt.getTime()) ? requestedAt : null
   const ready = hasColors && missingColors.length === 0
   const canSend = Boolean(controls && ready && !readOnly && !waiting && !controls.loading && !controls.error)
   const visible = open && active && (!readOnly || Boolean(latest))
@@ -59,10 +68,19 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   }
 
   return <>
-    <Button type="button" size="sm" variant={ready && !waiting && !readOnly ? 'default' : 'outline'} className="h-7 px-2.5"
-      disabled={readOnly && !latest} aria-haspopup="dialog" onClick={() => { setError(''); setOpen(true) }}>
-      {waiting ? '단가 회신 대기' : reply ? '단가 확인' : '단가 요청'}
-    </Button>
+    <div className="grid justify-items-center gap-2.5 text-center">
+      {sentAt && <time dateTime={latest?.requestedAt} className="whitespace-nowrap text-xs leading-snug text-muted-foreground">
+        {requestDay.format(sentAt)}<br />{requestClock.format(sentAt)} 발송
+      </time>}
+      <Button type="button" size="sm" variant={waiting ? 'ghost' : ready && !readOnly ? 'default' : 'outline'}
+        className={waiting ? 'h-7 bg-blue-700 px-1.5 text-white hover:bg-blue-800' : 'h-7 px-2.5'}
+        disabled={readOnly && !latest} aria-haspopup="dialog" onClick={() => { setError(''); setOpen(true) }}>
+        {waiting ? '단가 계산중' : reply ? '단가 확인' : '단가 요청'}
+      </Button>
+      {sentAt && <p className="whitespace-nowrap text-sm font-semibold tabular-nums text-primary">
+        + {elapsedMaterialRequestDays(sentAt.getTime(), Date.now())}days
+      </p>}
+    </div>
     {visible && createPortal(
       <dialog ref={dialog} aria-labelledby={titleId} onCancel={event => { event.preventDefault(); if (!busy) setOpen(false) }}
         className="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm overflow-y-auto rounded-xl border border-border bg-card p-5 text-left text-card-foreground shadow-xl backdrop:bg-black/40">

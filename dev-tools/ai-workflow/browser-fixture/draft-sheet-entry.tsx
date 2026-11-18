@@ -5,9 +5,11 @@ import { emptyDraftInput, newColorRow } from '@/lib/drafts/empty-draft'
 import { normalizeColorSpecs, writeColorSpec, type SaveColorSpec } from '@/lib/drafts/color-spec'
 import { newSampleWorkOrder } from '@/lib/drafts/sample-work-order'
 import type { ProductDraft } from '@/lib/types'
+import type { DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
 import '@/index.css'
 
 function Fixture() {
+  const [priceRequest, setPriceRequest] = useState<DraftPriceRequest>()
   const [readOnly,setReadOnly]=useState(false)
   const [phase,setPhase]=useState('review')
   const [writes,setWrites]=useState(0)
@@ -44,7 +46,20 @@ function Fixture() {
   }
   return <main className="p-6"><button onClick={()=>setReadOnly(v=>!v)}>{readOnly?'작성자로 전환':'다른 직원으로 전환'}</button><select aria-label="검증 단계" value={phase} onChange={event=>setPhase(event.target.value)}><option value="review">샘플 검토</option><option value="new">최초 지시서</option><option value="color-upload">컬러 지시서</option></select><output data-testid="writes">{writes}</output><output data-testid="opened">{opened}</output>
     <output data-testid="saved-spec">{savedSpec}</output>
+    <button type="button" onClick={() => setPriceRequest(current => current && {
+      ...current, answeredAt: '2026-11-02T10:00:00Z', amounts: { black: 15, ivory: 16 },
+    })}>단가 회신 반영</button>
     <div className="draft-board-scroll"><table className="draft-board-table"><colgroup>{Array.from({length:6},(_,index)=><col key={index}/>)}</colgroup><thead><tr>{['BRAND','IMAGE','PRICE','COLOR','INFORMATION','MD TEAM'].map(label=><th key={label}>{label}</th>)}</tr></thead><tbody><DraftSheetRow draft={shown} readOnly={readOnly} brand={undefined} schedule={{group:{id:'group',brandId:'fixture-brand',name:'11월 출시',releaseTiming:''},targetDate:'2026-11-03',certainty:'confirmed',brandId:null,isPreview:false}}
+      price={{
+        latest: priceRequest, reply: priceRequest?.answeredAt ? priceRequest : undefined,
+        loading: false, error: '', retry: () => {},
+        request: async () => setPriceRequest({
+          id: 'fixture-price', draftId: draft.id, draftNo: draft.draftNo, round: 1, requestedAt: '2026-10-29T07:46:00Z',
+          answeredAt: null, amounts: null, colors: [
+            { id: 'black', name: '블랙', hasPhoto: true }, { id: 'ivory', name: '아이보리', hasPhoto: false },
+          ],
+        }),
+      }}
       onOpen={()=>setOpened(n=>n+1)} onSchedule={()=>{void write()}} onSaveColors={write} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={saveSpec} onSaveSpecDocument={saveDocument} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/></tbody></table></div></main>
 }
 createRoot(document.getElementById('root')!).render(<Fixture/> )
