@@ -124,7 +124,7 @@ function ChinaPriceRequestRow({ request, earlier, draft, brandName, amounts, dis
           const first = round.round === 1
           const days = sampleElapsedDays(round.requestedAt, round.answeredAt ? new Date(round.answeredAt) : undefined)
           return <li key={round.id} aria-current={current ? 'step' : undefined} className="space-y-1.5 py-2 first:pt-0 last:pb-0">
-            <p className="text-xs text-muted-foreground"><time dateTime={round.requestedAt}>{requestDate.format(new Date(round.requestedAt))}</time> 발송</p>
+            <p className="whitespace-nowrap text-[10px] text-muted-foreground"><time dateTime={round.requestedAt}>{requestDate.format(new Date(round.requestedAt))}</time> 발송</p>
             <Badge variant={!current ? 'muted' : first ? 'default' : 'warning'}
               className={cn('rounded-md', current && first && 'border-transparent bg-primary text-primary-foreground')}>
               {first ? '1차 요청' : `단가 재요청 · ${round.round}차`}
