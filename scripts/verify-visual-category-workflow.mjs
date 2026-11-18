@@ -157,7 +157,7 @@ try {
       'app.save_visual_work_category_content(uuid,text,uuid,text,uuid,jsonb,boolean,boolean)'::regprocedure
     ) order by oid`)).rows
   const commentAccessBefore = await commentFunctionAccess()
-  await db.exec(await readFile('supabase/migrations/20261118101456_visual_category_comment_participants.sql', 'utf8'))
+  await db.exec(await readFile('supabase/migrations/20261118102144_visual_category_comment_participants.sql', 'utf8'))
   assert.deepEqual(await commentFunctionAccess(), commentAccessBefore)
   await db.exec('commit')
   delete historical.data.visualCategoryWorkflow.categories.banner.feedback

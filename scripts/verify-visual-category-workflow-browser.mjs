@@ -33,7 +33,7 @@ const checks = String.raw`
  await db.exec(await fs.readFile('supabase/migrations/20261109192913_visual_assignment_history_visibility.sql','utf8'))
  await db.exec(await fs.readFile('supabase/migrations/20261109202708_visual_worker_feedback_counts.sql','utf8'))
  await db.exec(await fs.readFile('supabase/migrations/20261109210739_visual_workflow_review_rounds.sql','utf8'))
- await db.exec(await fs.readFile('supabase/migrations/20261118101456_visual_category_comment_participants.sql','utf8'))
+ await db.exec(await fs.readFile('supabase/migrations/20261118102144_visual_category_comment_participants.sql','utf8'))
  await db.exec('commit')
  const legacyDetail=origin+'/work-requests/design?requestId='+legacyId+'&visualTab=banner'
  const scopes=page.getByRole('group',{name:'업무 범위',exact:true})
