@@ -1,4 +1,4 @@
-import type { DraftOptionRow, ProductDraftStatus } from '@/lib/types'
+import type { DraftOptionRow, ProductDraft, ProductDraftStatus } from '@/lib/types'
 
 export const UNASSIGNED_DRAFT_BRAND = 'unassigned' as const
 
@@ -55,6 +55,31 @@ export function matchesDraftOwnerScope(
   if (scope === 'all') return true
   if (scope === UNASSIGNED_DRAFT_OWNER) return !name
   return name === scope
+}
+
+export function countDesignerDevelopment(
+  drafts: readonly Pick<ProductDraft, 'id' | 'createdBy' | 'owner' | 'status' | 'held' | 'promotedStyleId' | 'createdAt'>[],
+  employee: { id: string; displayName: string | null; hireDate: string | null },
+) {
+  const name = employee.displayName?.trim()
+  const hireStart = employee.hireDate ? Date.parse(`${employee.hireDate}T00:00:00+09:00`) : NaN
+  const completed = new Set<string>()
+  let inProgress = 0
+
+  for (const draft of drafts) {
+    // Older drafts may store only the designer's name.
+    const owned = draft.createdBy ? draft.createdBy === employee.id : name && draft.owner.trim() === name
+    if (!owned || draft.status === 'dropped') continue
+
+    if (draft.status === 'confirmed' || draft.promotedStyleId) {
+      if (Number.isFinite(hireStart) && !(Date.parse(draft.createdAt) >= hireStart)) continue
+      completed.add(draft.promotedStyleId ?? draft.id)
+    } else if (draft.status === 'open' && !draft.held) {
+      inProgress += 1
+    }
+  }
+
+  return { inProgress, completed: completed.size }
 }
 
 export function collectDraftOwnerNames(

@@ -15,6 +15,7 @@ import {
 import {
   UNASSIGNED_DRAFT_BRAND,
   UNASSIGNED_DRAFT_OWNER,
+  countDesignerDevelopment,
   matchesDraftBrandScope,
   matchesDraftOwnerScope,
   type DraftBrandScope,
@@ -51,6 +52,8 @@ import {
   type PreviewReleaseAssignment,
   type PreviewReleaseGroup,
 } from './release-schedule-preview'
+
+const designerSummaryYear = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric' })
 
 type BoardFilter = 'all' | 'unassigned' | 'scheduled'
 type FolderView = 'drafts' | 'completed'
@@ -142,6 +145,10 @@ export function CompanyDraftsPage() {
   })
 
   const drafts = draftsQuery.data ?? emptyList<ProductDraft>()
+  const designer = useMemo(() => profile && {
+    name: profile.displayName?.trim() || '이름 미등록',
+    ...countDesignerDevelopment(drafts, profile),
+  }, [drafts, profile])
   const draftsRef = useRef(drafts)
   draftsRef.current = drafts
   const savedDraftRef = useRef(new Map<string, ProductDraft>())
@@ -564,6 +571,16 @@ export function CompanyDraftsPage() {
             기획안 추가
           </Link>}
         </div>
+        {designer && (
+          <div aria-label="내 상품 개발 현황" role="group" className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 py-1 text-xs text-muted-foreground">
+            <p>{designerSummaryYear.format(new Date())} 디자이너 <strong className="font-semibold text-foreground">{designer.name}</strong></p>
+            <p className="flex flex-wrap gap-x-4 gap-y-1 sm:border-l sm:border-border sm:pl-4">
+              <span>개발 중 <strong className="font-semibold tabular-nums text-foreground">{draftsQuery.data ? `${formatNumber(designer.inProgress)}건` : '—'}</strong></span>
+              <span>개발 완료 <strong className="font-semibold tabular-nums text-foreground">{draftsQuery.data ? `${formatNumber(designer.completed)}건` : '—'}</strong></span>
+            </p>
+            <p className="sm:border-l sm:border-border sm:pl-4">기여 매출 <strong className="font-semibold tabular-nums text-foreground">0원</strong></p>
+          </div>
+        )}
       </div>
 
       {draftsQuery.isError ? (

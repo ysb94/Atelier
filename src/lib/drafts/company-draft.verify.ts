@@ -8,6 +8,7 @@ import {
   applyDraftBrandChange,
   collectDraftOwnerNames,
   canChangeDraftBrand,
+  countDesignerDevelopment,
   draftBrandChangeMessage,
   formatDraftNo,
   hasSampleWorkOrder,
@@ -112,5 +113,29 @@ assert(
   draftBrandChangeMessage(switched).includes('연결 상품 1개'),
   '확인 문구에 상품 수',
 )
+
+const employee = { id: 'designer-a', displayName: '김기획', hireDate: '2024-01-01' }
+const completedDraft = {
+  id: 'draft-a',
+  createdBy: employee.id,
+  createdAt: '2023-12-31T15:00:00Z',
+  owner: '이전 표시 이름',
+  status: 'confirmed' as const,
+  held: false,
+  promotedStyleId: 'style-a',
+  colors: Array.from({ length: 100 }, (_, index) => `color-${index}`),
+}
+const development = countDesignerDevelopment([
+  completedDraft,
+  { ...completedDraft, id: 'duplicate-link', status: 'open' },
+  { ...completedDraft, id: 'before-hire', promotedStyleId: null, createdAt: '2023-12-31T14:59:59Z' },
+  { ...completedDraft, id: 'other-employee', createdBy: 'designer-b', owner: '김기획', promotedStyleId: null },
+  { ...completedDraft, id: 'legacy-owner', createdBy: null, owner: '김기획', promotedStyleId: null },
+  { ...completedDraft, id: 'active', status: 'open', promotedStyleId: null },
+  { ...completedDraft, id: 'held', status: 'open', held: true, promotedStyleId: null },
+  { ...completedDraft, id: 'dropped', status: 'dropped', promotedStyleId: null },
+], employee)
+assert(development.inProgress === 1, '본인 개발 중 기획안에서 보류·드롭 제외')
+assert(development.completed === 2, '입사일부터 제품별 한 건, 같은 이름의 다른 직원 제외')
 
 console.log('company-draft.verify ok')
