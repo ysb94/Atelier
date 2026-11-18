@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@/lib/supabase/auth'
 import { listWorkRequests } from '@/lib/supabase/work-requests'
 import { isWorkRequestOwner, WORK_REQUEST_CONFIG, WORK_REQUEST_DEPARTMENT_IDS, WORK_REQUEST_OWNERS } from './work-request-form-config'
-import { STATUS_META, type WorkRequestRecord } from './work-request-types'
+import { canEditWorkRequestContent, STATUS_META, type WorkRequestRecord } from './work-request-types'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useRenderWatch } from '@/lib/diagnostics'
@@ -76,6 +76,10 @@ export function WorkRequestHubPage() {
                       <span className="break-words">{request.values.title}<small className="ml-2 text-muted-foreground">{WORK_REQUEST_CONFIG[request.owner].label}</small></span>
                       <Badge variant={request.status === 'completed' ? 'success' : 'muted'}>{STATUS_META[request.status].label}</Badge>
                     </Link>
+                    {sent && canEditWorkRequestContent(request, actorId ?? '') && <Link
+                      className="rounded-md border border-border px-3 py-1.5 font-medium hover:bg-muted"
+                      to={buildPersonalWorkRequestSearch(searchParams, request.owner, { kind: 'edit', requestId: request.id })}
+                    >수정</Link>}
                     {sent ? <WorkRequestCancellation request={request} />
                       : request.cancellation?.state === 'requested' && !['completed', 'cancelled', 'rejected'].includes(request.status) ? <Badge variant="warning">취소 요청 중</Badge> : null}
                   </div>

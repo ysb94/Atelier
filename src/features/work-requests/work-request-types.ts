@@ -229,6 +229,11 @@ export function isClosedStatus(status: RequestStatus) {
   )
 }
 
+export function canEditWorkRequestContent(request: WorkRequestRecord, actorId: string) {
+  return Boolean(actorId && request.requesterId === actorId && (request.status === 'requested' ||
+    (request.kind !== 'internal' && request.owner === 'design' && !isClosedStatus(request.status))))
+}
+
 export function isCompletionPending(status: RequestStatus) {
   return status === 'completionReview' || status === 'completionConfirm'
 }

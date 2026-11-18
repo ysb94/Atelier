@@ -22,6 +22,7 @@ const noticeLabels: Record<VisualWorkflowNotice['kind'], string> = {
   registered: '새 요청 등록',
   working: '새 작업 배정',
   rework: '수정 작업 배정',
+  content_updated: '메인 내용이 수정되었습니다.',
 }
 
 export const visualWorkflowNoticesKey = (actor?: string) => ['visual-workflow-notices', actor]
@@ -31,12 +32,14 @@ export function visualWorkflowNoticeItem(row: VisualWorkflowNotice): InboxNotifi
   if (row.categoryId) params.set('visualTab', row.categoryId)
   if (row.personal) params.set(VISUAL_REVIEW_PARAM, '1')
   const href = (row.personal ? '/settings/profile' : '/work-requests/design') + '?' + params.toString()
-  const label = noticeLabels[row.kind]
+  const label = row.kind === 'content_updated' && row.categoryId
+    ? `${row.categoryLabel || '해당 탭'} 업무 내용이 수정되었습니다.`
+    : noticeLabels[row.kind]
   return {
     id: row.id, kind: 'visual_workflow', title: [row.title, row.categoryLabel].filter(Boolean).join(' · '),
     body: label, href, createdAt: row.createdAt, readAt: row.readAt, current: row.current,
     target: { source: 'visual-workflow', entityId: row.requestId, eventVersion: row.id, tab: 'work', href },
-    action: row.current && row.kind !== 'registered' ? { key: 'visual:' + row.requestId + ':' + row.categoryId, label: '처리 필요' } : null,
+    action: row.current && row.kind !== 'registered' && row.kind !== 'content_updated' ? { key: 'visual:' + row.requestId + ':' + row.categoryId, label: '처리 필요' } : null,
   }
 }
 
@@ -80,7 +83,7 @@ export function useVisualWorkflowNotices(coordinator = false, background = false
   return { available, rows: active ? query.data?.rows : undefined, error: active ? query.error : null }
 }
 
-export function useReadVisualWorkflowNotices(request: string, category: string, revision: number | undefined, displayed: boolean) {
+export function useReadVisualWorkflowNotices(request: string, category: string, revision: number | undefined, displayed: boolean, scope: 'workflow' | 'content' = 'workflow') {
   const { profile } = useAuth()
   const visible = useNotificationDetailVisibility()
   const notices = useVisualWorkflowNotices(false, false, displayed && visible)
@@ -89,6 +92,7 @@ export function useReadVisualWorkflowNotices(request: string, category: string, 
   const [retry, setRetry] = useState(0)
   const attempted = useRef('')
   const ids = notices.rows?.filter(row => row.current && !row.readAt && row.requestId === request
+    && (row.kind === 'content_updated') === (scope === 'content')
     && (!row.categoryId || row.categoryId === category) && row.version <= (revision ?? 0)).slice(0, 40).map(row => row.id).join(',') ?? ''
   const actor = profile?.id
 
