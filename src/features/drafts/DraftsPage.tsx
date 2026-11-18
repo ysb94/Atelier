@@ -26,7 +26,7 @@ import { writeColorSpec } from '@/lib/drafts/color-spec'
 import { useAuth } from '@/lib/supabase/auth'
 import { useBasicWorkAccess, canWriteDraft } from '@/lib/supabase/basic-work-access'
 import { draftPriceError, type DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
-import { saveDraftColors } from '@/lib/supabase/product-drafts'
+import { saveDraftColors, saveDraftReleaseFolder } from '@/lib/supabase/product-drafts'
 import {
   type ProductDraft,
   type ProductDraftInput,
@@ -224,6 +224,16 @@ export function CompanyDraftsPage() {
     () => new Map(seasons.map((season) => [season.id, season])),
     [seasons],
   )
+  const releaseFoldersByBrand = useMemo(() => {
+    const byBrand = new Map<string, Season[]>()
+    for (const season of seasons) {
+      if (season.code === 'UNASSIGNED') continue
+      const folders = byBrand.get(season.brandId)
+      if (folders) folders.push(season)
+      else byBrand.set(season.brandId, [season])
+    }
+    return byBrand
+  }, [seasons])
   const previewGroups = useMemo(() => {
     const byId = new Map<string, PreviewReleaseGroup>()
     for (const season of seasons) {
@@ -465,6 +475,19 @@ export function CompanyDraftsPage() {
     closeScheduleDialog()
   }
 
+  async function changeReleaseFolder(draft: ProductDraft, seasonId: string | null) {
+    await queueDraftSave(draft.id, 'draft_save_release_folder', (current, context) => {
+      if (!current.brandId || current.brandId !== draft.brandId) {
+        throw new Error('기획안의 브랜드를 다시 확인해 주세요.')
+      }
+      const folder = seasonId ? seasonMap.get(seasonId) : undefined
+      if (seasonId && (folder?.brandId !== current.brandId || folder.code === 'UNASSIGNED')) {
+        throw new Error('해당 브랜드의 출시 폴더를 다시 선택해 주세요.')
+      }
+      return saveDraftReleaseFolder(current, seasonId, context)
+    })
+  }
+
   return (
     <div>
       <DraftBrandScopeBar
@@ -604,8 +627,7 @@ export function CompanyDraftsPage() {
             ) : (
               visible.map((draft) => {
                 const schedule = scheduleByDraft.get(draft.id)
-                const brandId = schedule?.brandId ?? draft.brandId
-                const brand = brandId ? brandById.get(brandId) : undefined
+                const brand = draft.brandId ? brandById.get(draft.brandId) : undefined
                 const price = priceByDraft.get(draft.id)
                 return (
                   <DraftSheetRow
@@ -615,6 +637,8 @@ export function CompanyDraftsPage() {
                     informationEditorId={profile?.id}
                     schedule={schedule}
                     brand={brand}
+                    releaseFolders={(draft.brandId && releaseFoldersByBrand.get(draft.brandId)) || emptyList<Season>()}
+                    onChangeReleaseFolder={(seasonId) => changeReleaseFolder(draft, seasonId)}
                     price={{
                       ...price, loading: prices.query.isPending, error: priceListError,
                       retry: () => { void prices.query.refetch() },

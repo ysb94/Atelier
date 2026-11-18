@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEventHandler, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { FileText, GripVertical, Heart, ImageOff, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
+import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Input, Select } from '@/components/ui/input'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { DRAFT_COLOR_PHOTO_ACCEPT, prepareDraftColorPhoto } from '@/lib/drafts/color-photo'
 import { MAX_DRAFT_COLORS } from '@/lib/drafts/empty-draft'
@@ -18,7 +19,7 @@ import { sheetRegisteredDay } from '@/lib/drafts/sample-work-order'
 import { readFileAsDataUrl } from '@/lib/images'
 import type { DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
 import type { DraftColorEdit } from '@/lib/supabase/product-drafts'
-import { DRAFT_STATUS_LABEL, type Brand, type DraftColorImageChoice, type DraftColorRow, type DraftSpecs, type ProductDraft } from '@/lib/types'
+import { DRAFT_STATUS_LABEL, type Brand, type DraftColorImageChoice, type DraftColorRow, type DraftSpecs, type ProductDraft, type Season } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
 import { RELEASE_CERTAINTY_LABEL, formatReleaseGroupLabel, formatTargetDate, type ResolvedReleaseSchedule } from './release-schedule-preview'
 import './draft-board.css'
@@ -720,9 +721,50 @@ export function DraftPhoto({ src, name, onOpen }: { src: string | null; name: st
 
 export type DraftConfirmFlag = 'nameConfirmed' | 'colorsConfirmed'
 
-export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price, informationEditorId, informationTemporaryStore, onOpen, onNextSample, onSchedule, onSaveColors, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
+function DraftReleaseFolderSelect({ draft, folders, readOnly, onChange }: {
+  draft: ProductDraft
+  folders: Pick<Season, 'id' | 'name' | 'releaseTiming'>[]
+  readOnly: boolean
+  onChange: (seasonId: string | null) => Promise<void>
+}) {
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const selected = folders.find((folder) => folder.id === draft.seasonId)
+
+  async function selectFolder(seasonId: string) {
+    setSaving(true)
+    setError('')
+    try {
+      await onChange(seasonId || null)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '출시 폴더를 저장하지 못했습니다.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return <>
+    <Select
+      aria-label={`${draft.draftNo} 출시 폴더`}
+      aria-busy={saving}
+      className="draft-sheet-release-folder"
+      value={selected?.id ?? ''}
+      disabled={readOnly || saving || folders.length === 0}
+      title={folders.length ? (selected ? formatReleaseGroupLabel(selected) : '출시 폴더 선택') : '이 브랜드에 선택할 수 있는 출시 폴더가 없습니다.'}
+      onChange={(event) => { void selectFolder(event.currentTarget.value) }}
+    >
+      <option value="">출시미정</option>
+      {folders.map((folder) => <option key={folder.id} value={folder.id}>{formatReleaseGroupLabel(folder)}</option>)}
+    </Select>
+    {error && <p className="draft-sheet-release-error" role="alert">{error}</p>}
+  </>
+}
+
+export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releaseFolders, onChangeReleaseFolder, price, informationEditorId, informationTemporaryStore, onOpen, onNextSample, onSchedule, onSaveColors, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
   readOnly?: boolean
   draft: ProductDraft; schedule: ResolvedReleaseSchedule | undefined; brand: Brand | undefined
+  releaseFolders: Pick<Season, 'id' | 'name' | 'releaseTiming'>[]
+  onChangeReleaseFolder: (seasonId: string | null) => Promise<void>
   price?: DraftPriceControls
   onOpen: () => void
   onNextSample?: () => void
@@ -807,11 +849,19 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
 
   return <><tr className="draft-sheet-row">
     <td><div className="draft-sheet-image-cell">
-      <strong className="draft-sheet-brand">{brand?.name ?? '브랜드 미정'}</strong>
+      <DraftReleaseFolderSelect draft={draft} folders={releaseFolders} readOnly={readOnly} onChange={onChangeReleaseFolder} />
       <DraftPhoto src={draft.imageUrl} name={name === '이름 미정' ? draft.draftNo : name} onOpen={onOpen} />
       <div className="draft-sheet-names">
-        <div className="draft-sheet-owner">Designer <strong>{draft.owner.trim() || '미정'}</strong></div>
-        <strong className="draft-sheet-number">No. {draft.draftNo}</strong>
+        <div className="draft-sheet-brand-info">
+          <div>
+            <div className="draft-sheet-owner">Designer <strong>{draft.owner.trim() || '미정'}</strong></div>
+            <strong className="draft-sheet-number">No. {draft.draftNo}</strong>
+            <p className="draft-sheet-proposer">제안자 : {draft.specs.proposer?.name?.trim() || '미지정'}</p>
+          </div>
+          {brand && <div role="img" aria-label={`${brand.name} 브랜드`} title={brand.name}>
+            <BrandAvatar brand={brand} className="size-10 rounded-full [&>img]:object-contain" />
+          </div>}
+        </div>
         <button type="button" className="draft-sheet-product-name" aria-label={`${draft.draftNo} 한글명`} onClick={onOpen}>{draft.nameKo.trim()}</button>
         <button type="button" className="draft-sheet-product-name is-en" aria-label={`${draft.draftNo} 영문명`} onClick={onOpen}>{draft.nameEn.trim()}</button>
       </div>

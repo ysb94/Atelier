@@ -15,7 +15,10 @@ const fixtureClient={
       importer?.replaceAll('\\','/').endsWith('/product-drafts.ts')) return '\0draft-color-client'
  },
  load(id) {
-   if(id==='\0draft-color-client') return `export const getSupabase = () => ({
+   if(id==='\0draft-color-client') return `import { createClient } from '@supabase/supabase-js'
+   const client = createClient(location.origin, 'fixture-key', { auth: { persistSession: false } })
+   export const getSupabase = () => ({
+     from: table => client.from(table),
      async rpc(name, args) {
        const response = await fetch('/rpc/'+name, {method:'POST',body:JSON.stringify(args)})
        return response.json()
@@ -432,6 +435,39 @@ try{
  assert.deepEqual(colorPayload.p_colors.slice(0,2),[{id:'black',name:'블랙'},{id:'ivory',name:'아이보리'}])
  assert.match(colorPayload.p_colors[2].id,/^[0-9a-f-]{36}$/)
  assert.deepEqual({...colorPayload.p_colors[2],id:'new'}, {id:'new',name:'흰색',imageChoice:'None',photoUrl:null})
+ const brandCell=row.locator(':scope > td').first()
+ const releaseFolder=brandCell.getByRole('combobox',{name:'PL-TEST 출시 폴더'})
+ assert.equal(await releaseFolder.inputValue(),'')
+ assert.deepEqual(await releaseFolder.locator('option').allTextContents(),['출시미정','11월 출시','12월 출시'])
+ await brandCell.getByText('No. PL-TEST',{exact:true}).waitFor()
+ await brandCell.getByText('제안자 : 제안 직원',{exact:true}).waitFor()
+ const [pickerBox,photoBox,brandBox,ownerBox]=await Promise.all([
+   releaseFolder,brandCell.locator('.draft-sheet-photo'),brandCell.getByRole('img',{name:'MAS 브랜드'}),brandCell.locator('.draft-sheet-owner'),
+ ].map(node=>node.boundingBox()))
+ assert.ok(pickerBox.y+pickerBox.height<photoBox.y&&photoBox.y+photoBox.height<ownerBox.y&&ownerBox.x<brandBox.x)
+ const folderWrites=[]
+ const folderRevision='2026-11-18T06:46:00+00:00'
+ await page.route('**/rest/v1/product_drafts?*',async route=>{
+   const request=route.request()
+   const params=new URL(request.url()).searchParams
+   const payload=request.postDataJSON()
+   folderWrites.push({method:request.method(),id:params.get('id'),company:params.get('company_id'),revision:params.get('updated_at'),payload})
+   await route.fulfill({json:payload.season_id==='group-dec'?null:{...payload,updated_at:folderRevision}})
+ })
+ await releaseFolder.selectOption('group')
+ await page.waitForFunction(()=>document.querySelector('.draft-sheet-release-folder')?.value==='group'&&!document.querySelector('.draft-sheet-release-folder')?.disabled)
+ await releaseFolder.selectOption('group-dec')
+ await brandCell.getByRole('alert').getByText(/기획안이 변경되었습니다/).waitFor()
+ assert.equal(await releaseFolder.inputValue(),'group')
+ await releaseFolder.selectOption('')
+ await page.waitForFunction(()=>document.querySelector('.draft-sheet-release-folder')?.value===''&&!document.querySelector('.draft-sheet-release-folder')?.disabled)
+ assert.deepEqual(folderWrites,[
+   {method:'PATCH',id:'eq.fixture',company:'eq.fixture',revision:'eq.2026-11-18T06:45:00+00:00',payload:{season_id:'group'}},
+   {method:'PATCH',id:'eq.fixture',company:'eq.fixture',revision:`eq.${folderRevision}`,payload:{season_id:'group-dec'}},
+   {method:'PATCH',id:'eq.fixture',company:'eq.fixture',revision:`eq.${folderRevision}`,payload:{season_id:null}},
+ ])
+ await page.getByRole('button',{name:'다른 직원으로 전환'}).click()
+ assert.equal(await releaseFolder.isDisabled(),true)
  assert.deepEqual(errors,[])
- console.log('draft-sheet-readonly: existing actions, INFORMATION temporary save and reload, private visibility, confirmation and reopening passed')
+ console.log('draft-sheet-readonly: existing actions, INFORMATION, color updates, and BRAND folder selection passed')
 }finally{await browser?.close();await server?.close()}

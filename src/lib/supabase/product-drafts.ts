@@ -586,6 +586,28 @@ export async function saveDraftColors(
   }
 }
 
+export async function saveDraftReleaseFolder(
+  draft: ProductDraft,
+  seasonId: string | null,
+  context?: DiagnosticContext,
+): Promise<ProductDraft> {
+  const request = getSupabase().from('product_drafts')
+    .update({ season_id: seasonId })
+    .eq('id', draft.id)
+    .eq('company_id', draft.companyId)
+    .eq('updated_at', draft.updatedAt)
+    .select('season_id, updated_at')
+    .maybeSingle()
+  const { data, error } = await tracedQuery(request, context)
+  if (error) {
+    throw new ProductDraftStoreError(errorMessage(error, '출시 폴더를 저장하지 못했습니다.'), 'invalid')
+  }
+  if (!data) {
+    throw new ProductDraftStoreError('기획안이 변경되었습니다. 새로고침한 뒤 다시 선택해 주세요.', 'invalid')
+  }
+  return { ...draft, seasonId: data.season_id, updatedAt: data.updated_at }
+}
+
 export async function updateProductDraft(
   id: string,
   input: ProductDraftInput,
