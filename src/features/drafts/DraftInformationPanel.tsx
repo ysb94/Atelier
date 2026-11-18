@@ -131,6 +131,7 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
   edits?: InformationEdits; onEditsChange: (update: UpdateInformationEdits) => void
 }) {
   const [busy, setBusy] = useState(false)
+  const [editing, setEditing] = useState(false)
   const [error, setError] = useState('')
   const locked = readOnly || busy
   const colorName = color.name.trim() || '컬러 미정'
@@ -153,6 +154,7 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
   const hasChanges = Object.keys(changes).length > 0
   const canConfirm = hasChanges || (hasValue && !confirmed)
   const isConfirmed = hasValue && confirmed && !hasChanges
+  const showModify = isConfirmed && !editing
   const copyChanges = { ...changes }
   delete copyChanges.sizeNote
   const hasCopyChanges = Object.keys(copyChanges).length > 0
@@ -169,6 +171,7 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
       await onSave(color.id, applyAll ? valuesToCopy : changes, applyAll, field)
       const remaining = applyAll && edits?.sizeNote ? { sizeNote: edits.sizeNote } : undefined
       onEditsChange(current => current === edits ? remaining : current)
+      if (!applyAll) setEditing(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : '변경을 저장하지 못했습니다.')
     } finally {
@@ -191,11 +194,11 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
       </div>
       {field === 'size' ? (
         <SizeFields text={valueFor('size')} weight={valueFor('weight')} note={valueFor('sizeNote')}
-          locked={locked} onChange={editField} />
+          locked={locked || showModify} onChange={editField} />
       ) : (
         <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
           {fieldLabel}
-          <Textarea aria-label={`${fieldLabel} 값`} value={valueFor(field)} readOnly={locked}
+          <Textarea aria-label={`${fieldLabel} 값`} value={valueFor(field)} readOnly={locked || showModify}
             rows={3} className="min-h-20 text-foreground"
             onChange={event => editField(field, event.target.value)} />
         </label>
@@ -214,7 +217,9 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
           {isConfirmed ? '확정 완료' : hasValue || hasChanges ? '기입 중' : '미입력'}
           <span aria-hidden="true" className={cn('size-3 rounded-sm border border-border', isConfirmed && 'border-primary bg-primary')} />
         </span>
-        <Button size="sm" type="submit" disabled={locked || !canConfirm}>{busy ? '저장 중…' : '확정'}</Button>
+        {showModify
+          ? <Button size="sm" type="button" variant="outline" disabled={locked} onClick={() => setEditing(true)}>수정</Button>
+          : <Button size="sm" type="submit" disabled={locked || !canConfirm}>{busy ? '저장 중…' : '확정'}</Button>}
       </div>
       {error && <p className="text-xs text-danger @[720px]:col-span-3" role="alert">{error}</p>}
     </form>
@@ -227,10 +232,13 @@ function SpecDocumentForm({ draft, readOnly, edits, onEditChange, onSave }: {
 }) {
   const value = draft.specs.coating.note
   const [busy, setBusy] = useState(false)
+  const [editing, setEditing] = useState(false)
   const [error, setError] = useState('')
   const text = informationEditText(value, readOnly ? undefined : edits?.specDoc)
   const confirmed = isSpecDocumentConfirmed(draft.specs)
   const canConfirm = text.trim() !== value.trim() || (Boolean(text.trim()) && !confirmed)
+  const showModify = Boolean(text.trim()) && confirmed && !canConfirm && !editing
+  const locked = readOnly || busy
   const legacy = draft.colors.flatMap(color => {
     const note = draft.specs.colorSpecs[color.id]?.specDoc.trim()
     return note && note !== value.trim() ? [{ id: color.id, name: color.name, note }] : []
@@ -240,12 +248,13 @@ function SpecDocumentForm({ draft, readOnly, edits, onEditChange, onSave }: {
     <form aria-label="공통 스펙 문서" className="space-y-3 border-t border-border p-4"
       onSubmit={async event => {
         event.preventDefault()
-        if (readOnly || busy || !canConfirm) return
+        if (locked || !canConfirm) return
         setBusy(true)
         setError('')
         try {
           await onSave(text.trim())
           onEditChange(current => current === edits ? undefined : current)
+          setEditing(false)
         } catch (err) {
           setError(err instanceof Error ? err.message : '스펙 문서를 저장하지 못했습니다.')
         } finally {
@@ -253,7 +262,7 @@ function SpecDocumentForm({ draft, readOnly, edits, onEditChange, onSave }: {
         }
       }}>
       <Textarea aria-label="스펙 문서 값" value={text} placeholder="모든 컬러에 적용되는 스펙을 입력해 주세요."
-        rows={7} readOnly={readOnly || busy} onChange={event => {
+        rows={7} readOnly={locked || showModify} onChange={event => {
           const next = event.target.value
           onEditChange(() => ({ specDoc: { source: value, text: next } }))
         }} />
@@ -274,7 +283,9 @@ function SpecDocumentForm({ draft, readOnly, edits, onEditChange, onSave }: {
         <span className="text-xs text-muted-foreground">
           {canConfirm ? '기입 중' : text.trim() ? '확정 완료' : '미입력'}
         </span>
-        <Button size="sm" type="submit" disabled={readOnly || busy || !canConfirm}>{busy ? '저장 중…' : '확정'}</Button>
+        {showModify
+          ? <Button size="sm" type="button" variant="outline" disabled={locked} onClick={() => setEditing(true)}>수정</Button>
+          : <Button size="sm" type="submit" disabled={locked || !canConfirm}>{busy ? '저장 중…' : '확정'}</Button>}
       </div>
       {error && <p className="text-xs text-danger" role="alert">{error}</p>}
     </form>
