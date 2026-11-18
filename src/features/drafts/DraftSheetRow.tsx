@@ -871,48 +871,51 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
       </div>
     </td>
     <td>
-      <div className="draft-color-pad">
-        <InformationButton label={specsConfirmed && specDocument.trim() ? '스펙 확정' : '스펙 문서'}
-          value={specDocument} tone={specTone(specDocument, specsConfirmed)} panelId={informationId}
-          expanded={documentOpen} disabled={false} icon={<FileText size={16} aria-hidden="true" />}
-          onClick={event => setInformation(documentOpen ? null : { anchor: event.currentTarget, colorId: null, field: 'specDoc' })} />
-      </div>
-      <div className="draft-color-lines">
-        {colorRows.map((color, index) => {
-          const spec = color ? resolveColorSpec(draft.specs, color.id) : null
-          function informationButton(field: Exclude<DraftInformationField, 'specDoc'>) {
-            const value = spec?.[field] ?? ''
-            const displayValue = field === 'size' ? [formatSizeSpecLabel(value), spec?.weight.trim()].filter(Boolean).join(' · ') : value
-            const confirmed = field === 'size'
-              ? (!value.trim() || draft.specs.size.confirmed) && (!spec?.weight.trim() || draft.specs.weight.confirmed)
-              : draft.specs[field].confirmed
-            const expanded = information?.colorId === color?.id && information?.field === field
+      <div className="draft-color-pad" />
+      <div className="draft-sheet-information grid grid-cols-[minmax(0,1fr)_auto]">
+        <div className="draft-color-lines">
+          {colorRows.map((color, index) => {
+            const spec = color ? resolveColorSpec(draft.specs, color.id) : null
+            function informationButton(field: Exclude<DraftInformationField, 'specDoc'>) {
+              const value = spec?.[field] ?? ''
+              const displayValue = field === 'size' ? [formatSizeSpecLabel(value), spec?.weight.trim()].filter(Boolean).join(' · ') : value
+              const confirmed = field === 'size'
+                ? (!value.trim() || draft.specs.size.confirmed) && (!spec?.weight.trim() || draft.specs.weight.confirmed)
+                : draft.specs[field].confirmed
+              const expanded = information?.colorId === color?.id && information?.field === field
+              return (
+                <InformationButton key={field} label={DRAFT_INFORMATION_LABELS[field]}
+                  value={displayValue}
+                  tone={specTone(displayValue, confirmed)}
+                  panelId={informationId} expanded={expanded} disabled={!color}
+                  onClick={event => {
+                    if (!color) return
+                    setInformation(expanded ? null : { anchor: event.currentTarget, colorId: color.id, field })
+                  }} />
+              )
+            }
             return (
-              <InformationButton key={field} label={DRAFT_INFORMATION_LABELS[field]}
-                value={displayValue}
-                tone={specTone(displayValue, confirmed)}
-                panelId={informationId} expanded={expanded} disabled={!color}
-                onClick={event => {
-                  if (!color) return
-                  setInformation(expanded ? null : { anchor: event.currentTarget, colorId: color.id, field })
-                }} />
-            )
-          }
-          return (
-            <ColorLine key={color?.id ?? 'none'} index={index}>
-              <div className="draft-sheet-info">
-                <SampleStatus
-                  status={colorSampleLineStatus(colorSampleStarted, colorSampleReceived, Boolean(color && colorSampleDone(color.id)))}
-                  canToggle={!readOnly && Boolean(color) && colorSampleReceived}
-                  onToggle={color ? () => toggleColorSampleDone(color.id, !colorSampleDone(color.id)) : undefined}
-                />
-                <div className="draft-sheet-specs">
-                  {(['size', 'fabric'] as const).map(informationButton)}
+              <ColorLine key={color?.id ?? 'none'} index={index}>
+                <div className="draft-sheet-info">
+                  <SampleStatus
+                    status={colorSampleLineStatus(colorSampleStarted, colorSampleReceived, Boolean(color && colorSampleDone(color.id)))}
+                    canToggle={!readOnly && Boolean(color) && colorSampleReceived}
+                    onToggle={color ? () => toggleColorSampleDone(color.id, !colorSampleDone(color.id)) : undefined}
+                  />
+                  <div className="draft-sheet-specs">
+                    {(['size', 'fabric'] as const).map(informationButton)}
+                  </div>
                 </div>
-              </div>
-            </ColorLine>
-          )
-        })}
+              </ColorLine>
+            )
+          })}
+        </div>
+        <div className="flex items-center justify-center bg-card px-3">
+          <InformationButton label={specsConfirmed && specDocument.trim() ? '스펙 확정' : '스펙 문서'}
+            value={specDocument} tone={specTone(specDocument, specsConfirmed)} panelId={informationId}
+            expanded={documentOpen} disabled={false} icon={<FileText size={16} aria-hidden="true" />}
+            onClick={event => setInformation(documentOpen ? null : { anchor: event.currentTarget, colorId: null, field: 'specDoc' })} />
+        </div>
       </div>
     </td>
     <td className="draft-sheet-md-cell">

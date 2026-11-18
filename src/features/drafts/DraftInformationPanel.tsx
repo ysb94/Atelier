@@ -29,7 +29,7 @@ function informationPanelPosition(anchor: HTMLButtonElement): CSSProperties | nu
   if (!anchor.isConnected || trigger.bottom <= 0 || trigger.top >= height ||
     trigger.right <= Math.max(0, board?.left ?? 0) || trigger.left >= Math.min(width, board?.right ?? width)) return null
 
-  const lines = anchor.closest('td')?.querySelector('.draft-color-lines')?.getBoundingClientRect()
+  const lines = anchor.closest('.draft-sheet-information')?.getBoundingClientRect()
   const column = lines ? {
     left: Math.min(lines.left, trigger.left), right: Math.max(lines.right, trigger.right),
     top: Math.min(lines.top, trigger.top), bottom: Math.max(lines.bottom, trigger.bottom),
