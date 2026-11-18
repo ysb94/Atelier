@@ -102,10 +102,19 @@ export function useReadVisualWorkflowNotices(request: string, category: string, 
     if (attempted.current === key) return
     attempted.current = key
     let current = true
+    const noticeIds = ids.split(',')
+    const queryKey = visualWorkflowNoticesKey(actor)
     void diagnosticOperation('notification', 'visual_workflow_detail_seen', async trace => {
       trace.step('match_displayed_version')
-      await trace.run('save_read', context => readVisualWorkflowNotices(request, category, revision, ids.split(','), context))
-      await trace.run('refresh_queries', () => cache.invalidateQueries({ queryKey: visualWorkflowNoticesKey(actor) }), { writeOutcome: 'committed' })
+      await trace.run('save_read', context => readVisualWorkflowNotices(request, category, revision, noticeIds, context))
+      await trace.run('refresh_queries', async () => {
+        await cache.invalidateQueries({ queryKey }, { cancelRefetch: false })
+        // A query started by a different notice may have read the server before this write.
+        const latest = cache.getQueryData<Awaited<ReturnType<typeof listMyVisualWorkflowNotices>>>(queryKey)
+        if (latest?.rows.some(row => !row.readAt && noticeIds.includes(row.id))) {
+          await cache.refetchQueries({ queryKey, type: 'active' }, { cancelRefetch: false })
+        }
+      }, { writeOutcome: 'committed' })
     }).then(() => { if (current) setError(false) }, () => { if (current) setError(true) })
     return () => { current = false }
   }, [actor, cache, category, displayed, ids, request, retry, revision, visible])
