@@ -527,21 +527,23 @@ export function CompanyDraftsPage() {
             <div>미확정 : 기획 {formatNumber(sheetCounts.planningOpen)}건</div>
             <div>미확정 : MD {formatNumber(sheetCounts.mdOpen)}건</div>
           </div>
-          <DraftFolderBar
-            folders={folderItems}
-            brands={brands.map((brand) => ({ id: brand.id, name: brand.name }))}
-            defaultBrandId={scopedBrand?.id}
-            selectedIds={selectedFolderIds}
-            unassignedCount={unassignedFolderCount}
-            onSelect={setFolderFilter}
-            onCreate={async (value) => {
-              await createSeason(value.brandId, {
-                name: value.name,
-                releaseTiming: '',
-              })
-              await queryClient.invalidateQueries({ queryKey: ['seasons', value.brandId] })
-            }}
-          />
+          {brandScope !== 'all' && (
+            <DraftFolderBar
+              folders={folderItems}
+              brands={brands.map((brand) => ({ id: brand.id, name: brand.name }))}
+              defaultBrandId={scopedBrand?.id}
+              selectedIds={selectedFolderIds}
+              unassignedCount={unassignedFolderCount}
+              onSelect={setFolderFilter}
+              onCreate={async (value) => {
+                await createSeason(value.brandId, {
+                  name: value.name,
+                  releaseTiming: '',
+                })
+                await queryClient.invalidateQueries({ queryKey: ['seasons', value.brandId] })
+              }}
+            />
+          )}
         </div>
         {canWriteDraft(workAccess.access) && <Link
           to={newHref}
