@@ -8,6 +8,7 @@ import { isWorkday } from '@/features/operations-support/monthly-attendance'
 import { getMyWorkdayBasis } from '@/lib/supabase/attendance-entry'
 import { confirmLateStatementHr, confirmLateStatementManager, downloadLateStatementFile, lateStatementReview, listLateArrivalStatements, listLateStatementFiles, loadCumulativeLate, removeLateStatementFile, saveMyLateStatement, uploadLateStatementFile, type LateArrivalStatement, type LateStatementFile } from '@/lib/supabase/late-arrival-statements'
 import { useAuth } from '@/lib/supabase/auth'
+import { useAttendanceIncidentAdjustments } from '@/lib/supabase/attendance-incident-adjustments'
 import { koreaDateKey } from '@/features/settings/my-attendance'
 import { LATE_ATTACHMENT_LIMIT, lateAttachmentError, lateConfirmStamp, lateMinutes } from './late-arrival'
 import { useMyClockIn } from './use-my-clock-in'
@@ -310,7 +311,9 @@ export function LateArrivalHeaderButton() {
     enabled: ready,
   })
   const arrivalStart = basis.data?.quarterArrivalSupported ? basis.data.arrivalStart : basis.data?.start
-  const minutes = arrivalStart ? lateMinutes(arrivalStart, actual) : 0
+  const incidentAdjustments = useAttendanceIncidentAdjustments(today, today, userId, ready && active, 30_000)
+  const computed = arrivalStart ? lateMinutes(arrivalStart, actual) : 0
+  const minutes = computed > 0 ? incidentAdjustments.data?.rows.find(row => row.kind === 'late')?.minutes ?? computed : 0
   const filed = statements.data?.find(item => item.date === today && item.employeeId === userId)
   const cumulative = useCumulativeLate(userId, today, ready && !basis.isPending && !statements.isPending && Boolean(basis.data?.start) && minutes > 0 && !filed)
   const [open, setOpen] = useState(false)
@@ -331,7 +334,7 @@ export function LateArrivalHeaderButton() {
   useEffect(() => {
     if (statements.error) console.warn('[late-arrival] 오늘 사유서 조회 실패', statements.error)
   }, [statements.error])
-  if (!ready || basis.isPending || basis.error || statements.isPending || !arrivalStart || minutes <= 0) return null
+  if (!ready || basis.isPending || basis.error || statements.isPending || incidentAdjustments.isLoading || incidentAdjustments.isError || !arrivalStart || minutes <= 0) return null
   const preview: Preview = {
     date: today,
     start: arrivalStart,

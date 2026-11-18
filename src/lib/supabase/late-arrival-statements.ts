@@ -1,4 +1,5 @@
 import { cumulativeLateText, cumulativeLateTotal, lateAttachmentError } from '@/features/home/late-arrival'
+import { listAttendanceIncidentAdjustments } from './attendance-incident-adjustments'
 import { listEmployeeAttendanceClocks } from './attendance-clocks'
 import { getSupabase } from './client'
 import { startWorkflow, tracedQuery, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
@@ -231,12 +232,14 @@ export async function downloadLateStatementFile(file: LateStatementFile) {
 
 export async function loadCumulativeLate(employeeId: string, through: string) {
   const from = `${through.slice(0, 4)}-01-01`
-  const [clocks, starts] = await Promise.all([
+  const [clocks, starts, adjustments] = await Promise.all([
     listEmployeeAttendanceClocks(employeeId, from, through),
     listAttendanceStartsBetween(employeeId, from, through),
+    listAttendanceIncidentAdjustments(from, through, employeeId),
   ])
   const startByDate = new Map(starts.map(item => [item.date, item.start]))
-  return cumulativeLateText(cumulativeLateTotal(clocks, date => startByDate.get(date) ?? startByDate.get(date.slice(0, 7)) ?? '', through))
+  const lateByDate = new Map(adjustments.rows.flatMap(row => row.kind === 'late' && row.minutes != null ? [[row.work_date, row.minutes] as const] : []))
+  return cumulativeLateText(cumulativeLateTotal(clocks, date => startByDate.get(date) ?? startByDate.get(date.slice(0, 7)) ?? '', through, lateByDate))
 }
 
 async function listAttendanceStartsBetween(employeeId: string, from: string, to: string) {
