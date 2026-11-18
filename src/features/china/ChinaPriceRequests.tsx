@@ -83,7 +83,7 @@ function ChinaPriceRequestRow({ request, earlier, draft, confirmed, brandName, a
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const { answeredAt, draftNo, colors } = request
-  const sentEarlier = earlier.filter(round => round.answeredAt).reverse()
+  const sentEarlier = earlier.filter(round => round.answeredAt)
 
   async function reply() {
     if (busy || disabled || answeredAt) return
@@ -170,10 +170,10 @@ function ChinaPriceRequestRow({ request, earlier, draft, confirmed, brandName, a
           </> : <Button type="submit" variant="outline" size="sm" disabled={busy || disabled}>{busy ? '전송 중' : '단가 전송'}</Button>}
           {error && !answeredAt && <p role="alert" className="text-sm text-danger">{error}</p>}
         </form>
-        {sentEarlier.length > 0 && <section aria-label="이전 전송 단가" className="min-w-32 flex-1 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
+        {sentEarlier.length > 0 && <section aria-label="이전 전송 단가" className="min-w-40 flex-1 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
           <p className="font-medium text-muted-foreground">이전 전송 단가</p>
-          <ol className="mt-1 divide-y divide-border/70">
-            {sentEarlier.map(round => <li key={round.id} className="space-y-1 py-2 last:pb-0">
+          <ol className="mt-1 flex overflow-x-auto divide-x divide-border/70">
+            {sentEarlier.map(round => <li key={round.id} className="w-32 shrink-0 space-y-1 px-2 py-1 first:pl-0">
               <p className="font-medium">{round.round}차 회신</p>
               <dl className="space-y-1">
                 {round.colors.map(color => {

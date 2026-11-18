@@ -519,6 +519,8 @@ try {
   assert.equal(await rounds.getByText('확정',{exact:true}).count(),0)
   assert.equal(await repeatBlack.inputValue(),'')
   await previousPrices.getByText('¥18.25',{exact:true}).waitFor()
+  const previousRoundLabels=previousPrices.getByRole('listitem').getByText(/^\d+차 회신$/)
+  assert.deepEqual(await previousRoundLabels.allTextContents(),['1차 회신','2차 회신'])
   await priceFilters.getByRole('button',{name:'ALL (1)',exact:true}).click()
   await rounds.getByText('단가 재요청 · 3차',{exact:true}).waitFor()
   await priceManager.close()
