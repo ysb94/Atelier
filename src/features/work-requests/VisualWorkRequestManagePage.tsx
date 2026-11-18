@@ -36,7 +36,9 @@ function VisualWorkRequestManageForm() {
   const finalApprovalAvailable = settings.data?.supervisorIds !== undefined
   const selected = categories.find(item => item.id === selectedId) ?? categories[0]
   const canManage = settings.data?.canManage ?? Boolean(access.access?.manageOwners.includes('design'))
-  const editable = canManage && !saving && !settings.isFetching && !settings.isError
+  const canEditForm = settings.data?.canEditForm ?? canManage
+  const editable = canEditForm && !saving && !settings.isFetching && !settings.isError
+  const canEditManagers = canManage && editable && !directory.isPending && !directory.isError
   function change(next: VisualCategory[], nextSupervisors = supervisors) {
     setDraft({ revision: draft?.revision ?? settings.data?.revision ?? 0, categories: next, supervisors: nextSupervisors })
     setMessage('')
@@ -48,17 +50,17 @@ function VisualWorkRequestManageForm() {
     change(categories.map(item => item.id === categoryId ? { ...item, assigneeId } : item))
   }
   async function save() {
-    if (!draft || saving || !settings.data?.available) return
+    if (!draft || !editable || !settings.data?.available) return
     const trace = startWorkflow('app', 'visual_work_settings_save')
     trace.step('validate_input')
     const error = validateVisualSettings(draft.categories)
     if (error) { trace.block('invalid_categories'); setMessage(error); return }
-    if (settings.data.supervisorIds?.length && draft.supervisors.length === 0) {
+    if (canManage && settings.data.supervisorIds?.length && draft.supervisors.length === 0) {
       trace.block('no_supervisor'); setMessage('총괄 관리자를 한 명 이상 지정해 주세요.'); return
     }
     setSaving(true)
     try {
-      await trace.run('save', context => saveWorkRequestSettings(draft.categories, draft.revision, finalApprovalAvailable ? draft.supervisors : undefined, context))
+      await trace.run('save', context => saveWorkRequestSettings(draft.categories, draft.revision, canManage && finalApprovalAvailable ? draft.supervisors : undefined, context))
       await trace.run('refresh_queries', () => client.invalidateQueries({ queryKey: ['work-request-settings', profile?.id] }), { writeOutcome: 'committed' })
       trace.done({ writeOutcome: 'committed' })
       setDraft(null)
@@ -78,7 +80,9 @@ function VisualWorkRequestManageForm() {
       {settings.isPending ? <p role="status">설정을 불러오는 중…</p> : null}
       {settings.error || directory.error ? <p role="alert" className="mb-4 text-sm text-danger">{settings.error?.message ?? directory.error?.message}<Button variant="outline" size="sm" onClick={() => { void settings.refetch(); void directory.refetch() }}>다시 조회</Button></p> : null}
       {settings.data && !settings.data.available ? <p role="status" className="mb-4 text-sm text-warning">서버 설정 연결이 아직 적용되지 않았습니다. 입력 구성을 확인할 수 있으며 서버 적용 후 저장할 수 있습니다.</p> : null}
-      {!canManage && !settings.isPending ? <p className="mb-4 text-sm text-muted-foreground">설정 변경은 기존 Visual 업무 관리 담당자만 할 수 있습니다.</p> : null}
+      {!canManage && !settings.isPending ? <p className="mb-4 text-sm text-muted-foreground">{canEditForm
+        ? '작업 분류와 요청 양식을 수정할 수 있습니다. 관리자 지정은 Visual 업무 관리 담당자가 변경합니다.'
+        : '작업 분류와 요청 양식은 Visual 업무 관리 담당자와 총괄 관리자가 수정할 수 있습니다.'}</p> : null}
       {message ? <p role="status" className="mb-4 text-sm">{message}</p> : null}
       {draft && settings.data && draft.revision !== settings.data.revision ? <p role="alert" className="mb-4 text-sm text-warning">다른 관리자가 설정을 변경했습니다. 작성 중인 값은 유지됩니다. 다시 불러온 뒤 변경 내용을 확인하세요.</p> : null}
       <Card className="mb-5"><CardContent className="space-y-3 p-5">
@@ -89,7 +93,7 @@ function VisualWorkRequestManageForm() {
         </h2>
         <div id="visual-manager-settings" hidden={!managersOpen} className="space-y-3">
         <p className="text-sm text-muted-foreground">요청자가 결과를 확인한 뒤, 해당 업무에 배정된 총괄 관리자가 최종 승인합니다. 한 명이면 자동 지정되며, 여러 명이면 업무별로 한 명씩 나눠 배정할 수 있습니다.</p>
-        <fieldset disabled={!editable || !finalApprovalAvailable || directory.isPending || directory.isError} className="min-w-0 space-y-3">
+        <fieldset disabled={!canEditManagers || !finalApprovalAvailable} className="min-w-0 space-y-3">
           <label className="block max-w-sm space-y-1 text-sm">총괄 관리자 추가
             <Select aria-label="총괄 관리자 추가" className="w-full" value="" disabled={!supervisorCandidates.length} onChange={event => change(categories, [...supervisors, event.target.value])}>
               <option value="" disabled>Visual 직원 선택</option>
@@ -113,7 +117,7 @@ function VisualWorkRequestManageForm() {
             {categories.map(category => (
               <li key={category.id} className="grid items-center gap-3 py-2 sm:grid-cols-[minmax(8rem,16rem)_minmax(0,20rem)]">
                 <span className="break-words text-sm">{category.label}{!category.enabled ? <span className="ml-2 text-xs text-muted-foreground">숨김</span> : null}</span>
-                <Select aria-label={`${category.label} 중간 담당자`} className="w-full" value={category.assigneeId} disabled={!editable || directory.isPending || directory.isError} onChange={event => assignManager(category.id, event.target.value)}>
+                <Select aria-label={`${category.label} 중간 담당자`} className="w-full" value={category.assigneeId} disabled={!canEditManagers} onChange={event => assignManager(category.id, event.target.value)}>
                   <option value="">미지정 · 관리자가 배정</option>
                   {category.assigneeId && !members.some(member => member.id === category.assigneeId) ? <option value={category.assigneeId}>기존 중간 관리자 · 현재 배정 불가</option> : null}
                   {members.map(member => <option key={member.id} value={member.id}>{member.displayName || '직원'}{member.position ? ` · ${member.position}` : ''}</option>)}
@@ -141,7 +145,7 @@ function VisualWorkRequestManageForm() {
               <label className="flex items-center gap-2 py-2 text-sm"><input type="checkbox" checked={selected.enabled} onChange={event => update({ enabled: event.target.checked })} />등록 화면에 표시</label>
               <Button variant="outline" size="sm" onClick={() => { if (window.confirm('이 분류를 설정에서 삭제할까요? 이미 등록된 요청과 첨부는 유지됩니다.')) change(categories.filter(item => item.id !== selected.id)) }}><Trash2 className="size-3.5" />분류 삭제</Button>
             </div>
-            <label className="block space-y-1 text-sm">기본 중간 관리자<Select className="w-full" value={selected.assigneeId} disabled={directory.isPending || directory.isError} onChange={event => update({ assigneeId: event.target.value })}><option value="">미지정 · 관리자가 배정</option>{selected.assigneeId && !members.some(member => member.id === selected.assigneeId) ? <option value={selected.assigneeId}>기존 중간 관리자 · 현재 배정 불가</option> : null}{members.map(member => <option key={member.id} value={member.id}>{member.displayName || '직원'}{member.position ? ` · ${member.position}` : ''}</option>)}</Select></label>
+            <label className="block space-y-1 text-sm">기본 중간 관리자<Select aria-label="기본 중간 관리자" className="w-full" value={selected.assigneeId} disabled={!canEditManagers} onChange={event => update({ assigneeId: event.target.value })}><option value="">미지정 · 관리자가 배정</option>{selected.assigneeId && !members.some(member => member.id === selected.assigneeId) ? <option value={selected.assigneeId}>기존 중간 관리자 · 현재 배정 불가</option> : null}{members.map(member => <option key={member.id} value={member.id}>{member.displayName || '직원'}{member.position ? ` · ${member.position}` : ''}</option>)}</Select></label>
             <p className="text-xs text-muted-foreground">지정한 중간 관리자는 새 요청의 해당 분류에 자동 배정됩니다. 미지정·퇴사·부서 이동 시 관리자 배정을 기다립니다.</p>
           </CardContent></Card>
           <Card><CardContent className="space-y-4 p-5">

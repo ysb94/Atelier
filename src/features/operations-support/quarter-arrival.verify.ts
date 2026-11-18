@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { attendanceArrivalStart } from './attendance-arrival.ts'
 import { buildAttendanceRecords } from './attendance-records.ts'
-import { recordTiming, timeSeconds } from './monthly-attendance.ts'
+import { monthlyAttendance, recordTiming, timeSeconds } from './monthly-attendance.ts'
 import { countMyLateDays } from '../home/my-attendance-summary.ts'
 import { workdayGuidance } from '../home/attendance-guidance.ts'
 import type { LeaveRequest } from '../../lib/supabase/leave-requests.ts'
@@ -53,4 +53,16 @@ testDay('2026-11-18', '10:00', '10:40', 'manual', { kind: 'offsite', start: '14:
 testDay('2026-11-18', '09:00', '10:00', 'correction', { kind: 'offsite', start: '10:00', end: '19:00' }, 60)
 testDay('2026-11-18', '10:00', '10:40', 'manual', { kind: 'half', start: '14:00', end: '18:00' }, 40)
 testDay('2026-11-18', '09:00', '10:06', 'manual', { kind: 'offsite', start: '16:00', end: '20:00', offsiteWorkStart: '10:00' }, 6)
+const nextDate = '2026-11-11'
+const adjustment = { employee_id: 'a', minutes: 0, reason: null, revision: null }
+const corrected = buildAttendanceRecords([date, nextDate], [clock], [], lunch, [
+  { ...adjustment, work_date: date, kind: 'late' },
+  { ...adjustment, work_date: nextDate, kind: 'absent' },
+])
+const summary = monthlyAttendance('a', '2026-11', corrected, { start: '09:00', grace: 5 }, {}, nextDate, date)
+assert.equal(corrected[date].a.start, clock.clockIn)
+assert.equal(summary.exceeded, 0)
+assert.deepEqual(summary.missingDates, [])
+assert.equal(summary.pending, 0)
+assert.equal(countMyLateDays([clock], '09:00', 5, date, [], lunch, new Set([date])), 0)
 console.info('Attendance arrival: adjusted leave and offsite times, grace, correction and manual clock-in parity passed')

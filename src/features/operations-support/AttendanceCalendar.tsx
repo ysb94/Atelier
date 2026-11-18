@@ -25,16 +25,16 @@ export function AttendanceCalendar({ month, memberId, records, schedule, overrid
       const future = date > today
       const weekday = new Date(`${date}T12:00:00`).getDay()
       const nationalHoliday = names.length > 0 && !workday && record.status === 'unset'
-      const status = excluded ? '집계 제외' : record.status === 'unset' ? (!workday ? holidayLabel || '휴무' : future ? '예정' : '미기록') : STATUS_LABEL[record.status]
+      const status = excluded ? '집계 제외' : record.absenceExcluded && workday ? '결근 제외' : record.status === 'unset' ? (!workday ? holidayLabel || '휴무' : future ? '예정' : '미기록') : STATUS_LABEL[record.status]
       const className = [
         'attendance-calendar-day',
         !workday || excluded ? 'is-off' : '',
         weekday === 6 ? 'is-sat' : '',
         weekday === 0 ? 'is-sun' : '',
         nationalHoliday ? 'is-holiday' : '',
-        !excluded && workday && record.status === 'unset' && !future ? 'is-missing' : '',
+        !excluded && !record.absenceExcluded && workday && record.status === 'unset' && !future ? 'is-missing' : '',
         !excluded && workday && record.status === 'unset' && future ? 'is-planned' : '',
-        !excluded && record.status !== 'unset' ? `is-${record.status}` : '',
+        !excluded && !record.absenceExcluded && record.status !== 'unset' ? `is-${record.status}` : '',
         date === today ? 'is-today' : '',
         !excluded && (timing.exceeded ? 'is-exceeded' : timing.after ? 'is-after' : ''),
         selectedDate === date ? 'is-selected' : '',

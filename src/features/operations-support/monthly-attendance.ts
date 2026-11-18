@@ -9,7 +9,7 @@ export const ATTENDANCE_STATUSES = [
   { id: 'holiday', label: '휴무' },
 ] as const
 export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number]['id']
-export type AttendanceRecord = { status: AttendanceStatus; start: string; end: string; expectedStart: string; note: string; reviewed: boolean; arrivalIntervals?: ArrivalInterval[]; lunch?: ArrivalInterval; offsiteArrival?: string }
+export type AttendanceRecord = { status: AttendanceStatus; start: string; end: string; expectedStart: string; note: string; reviewed: boolean; arrivalIntervals?: ArrivalInterval[]; lunch?: ArrivalInterval; offsiteArrival?: string; lateMinutes?: number; absenceExcluded?: boolean }
 export type AttendanceSchedule = { start: string; grace: number }
 export type AttendanceRecords = Record<string, Record<string, AttendanceRecord>>
 export type WorkdayOverrides = Record<string, boolean>
@@ -53,7 +53,7 @@ export function recordTiming(record: AttendanceRecord, schedule: AttendanceSched
   return {
     actual, baseline,
     after: actual != null && baseline != null && actual > baseline,
-    exceeded: actual != null && baseline != null && actual > baseline + schedule.grace * 60,
+    exceeded: record.lateMinutes !== 0 && actual != null && baseline != null && actual > baseline + schedule.grace * 60,
   }
 }
 
@@ -73,10 +73,10 @@ export function monthlyAttendance(memberId: string, month: string, records: Atte
     if (workday && record.status === 'annual') annual++
     if (workday && (record.status === 'half-am' || record.status === 'half-pm')) half++
     if (workday && record.status === 'official') official++
-    if (workday && record.status === 'absent') absent++
-    const missing = workday && (record.status === 'unset' || (needsArrival(record.status) && timing.actual == null))
+    if (workday && record.status === 'absent' && !record.absenceExcluded) absent++
+    const missing = workday && !record.absenceExcluded && (record.status === 'unset' || (needsArrival(record.status) && timing.actual == null))
     if (missing) missingDates.push(date)
-    const exception = workday && ['half-am', 'half-pm', 'official', 'absent'].includes(record.status)
+    const exception = workday && (['half-am', 'half-pm', 'official'].includes(record.status) || (record.status === 'absent' && !record.absenceExcluded))
     if (missing || (!record.reviewed && (timing.exceeded || exception))) pendingDates.push(date)
   }
   const scheduleMissing = timeSeconds(schedule.start) == null && dueDays > 0

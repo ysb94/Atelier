@@ -7,12 +7,12 @@ import { offsiteWorkdayStart } from '../operations-support/offsite-workday-start
 import { attendanceArrivalStart, type ArrivalClock, type ArrivalInterval } from '../operations-support/attendance-arrival.ts'
 
 /** 근무일이고 출근 기준+유예보다 늦은 기록 수. 기준이 없으면 null. */
-export function countMyLateDays(clocks: readonly (ArrivalClock & { date: string })[], start: string, grace: number, today: string, requests: readonly PersonalRequest[] = [], lunch?: ArrivalInterval): number | null {
+export function countMyLateDays(clocks: readonly (ArrivalClock & { date: string })[], start: string, grace: number, today: string, requests: readonly PersonalRequest[] = [], lunch?: ArrivalInterval, excluded?: ReadonlySet<string>): number | null {
   const baseline = timeSeconds(start)
   if (baseline == null) return null
   let count = 0
   for (const clock of clocks) {
-    if (clock.date > today || !isWorkday(clock.date, {})) continue
+    if (clock.date > today || excluded?.has(clock.date) || !isWorkday(clock.date, {})) continue
     const actual = timeSeconds(clock.clockIn)
     const arrivalStart = attendanceArrivalStart(offsiteWorkdayStart(requests, clock.date) ?? start, requests, clock.date, lunch, clock)
     const limit = (timeSeconds(arrivalStart) ?? baseline) + grace * 60

@@ -14,6 +14,7 @@ import { hasPermission } from '@/lib/company/permissions'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { interactionContext } from '@/lib/diagnostics/perf-watch'
 import { useAuth } from '@/lib/supabase/auth'
+import { useAttendanceIncidentAdjustments } from '@/lib/supabase/attendance-incident-adjustments'
 import { listCompanyAttendanceClocks, type CompanyAttendanceClock } from '@/lib/supabase/attendance-clocks'
 import { countLateStatementsAwaitingHr } from '@/lib/supabase/late-arrival-statements'
 import { listLeaveRequests, type LeaveRequest } from '@/lib/supabase/leave-requests'
@@ -145,9 +146,10 @@ export function AttendanceWorkspace({ directory, canEdit, today = localDateKey(n
     enabled: monthOk && !presetRecords && dates.length > 0,
   })
   const lunch = useQuery({ queryKey: ['company-work-hours'], queryFn: loadCompanyLunch, enabled: monthOk && !presetRecords })
+  const incidentAdjustments = useAttendanceIncidentAdjustments(dates[0], dates[dates.length - 1], undefined, monthOk && !presetRecords)
   const clockRows = clocks.data ?? emptyList<CompanyAttendanceClock>()
   const leaveRows = leaves.data ?? emptyList<LeaveRequest>()
-  const records = useMemo(() => presetRecords ?? timeAttendanceWork(() => buildAttendanceRecords(dates, clockRows, leaveRows, lunch.data)), [presetRecords, dates, clockRows, leaveRows, lunch.data])
+  const records = useMemo(() => presetRecords ?? timeAttendanceWork(() => buildAttendanceRecords(dates, clockRows, leaveRows, lunch.data, incidentAdjustments.data?.rows)), [presetRecords, dates, clockRows, leaveRows, lunch.data, incidentAdjustments.data])
   const [schedules, setSchedules] = useState<Record<string, AttendanceSchedule>>(initialSchedules)
   const savedIndex = useMemo(() => attendanceStartIndex(savedSettings ?? []), [savedSettings])
   const [overrides, setOverrides] = useState<WorkdayOverrides>({})
@@ -180,8 +182,8 @@ export function AttendanceWorkspace({ directory, canEdit, today = localDateKey(n
   const pages = Math.max(1, Math.ceil(visible.length / pageSize))
   const currentPage = Math.min(page, pages)
   const pageRows = visible.slice((currentPage - 1) * pageSize, currentPage * pageSize)
-  const recordsLoading = !presetRecords && (clocks.isPending || leaves.isPending || lunch.isPending)
-  const recordsError = !presetRecords && (clocks.isError || leaves.isError || lunch.isError)
+  const recordsLoading = !presetRecords && (clocks.isPending || leaves.isPending || lunch.isPending || incidentAdjustments.isLoading)
+  const recordsError = !presetRecords && (clocks.isError || leaves.isError || lunch.isError || incidentAdjustments.isError)
   const unavailable = directory.loading || Boolean(directory.error) || settingsLoading || settingsError || recordsLoading || recordsError
   // 부서 카드: 인원과 확인 필요 인원. 검색어는 반영하지 않고 부서 범위만 보인다.
   const deptCards = useMemo(() => departmentScopeCards({

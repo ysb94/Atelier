@@ -12,14 +12,33 @@ import{useSyncExternalStore}from'react';
 const listeners=new Set();window.actor='hr';window.policyFailure=false;window.enrollmentReads=0;window.currentDay='2026-11-05';
 window.setAccount=actor=>{window.actor=actor;listeners.forEach(fn=>fn())};
 const subscribe=fn=>{listeners.add(fn);return()=>listeners.delete(fn)};
-export function useAuth(){const actor=useSyncExternalStore(subscribe,()=>window.actor);return{profile:{id:actor,companyId:actor==='peer'?'other':'company',status:'active',createdAt:'2026-10-01T00:00:00Z',approvedAt:actor==='new'?'2026-11-05T07:11:26Z':null},session:{user:{id:actor}}}}
+export function useAuth(){const actor=useSyncExternalStore(subscribe,()=>window.actor);return{profile:{id:actor,companyId:actor==='peer'?'other':'company',status:'active',permissionGrants:actor==='hr'?[{permission:'org.manage',scopeKind:'company',scopeId:'company'}]:[],createdAt:'2026-10-01T00:00:00Z',approvedAt:actor==='new'?'2026-11-05T07:11:26Z':null},session:{user:{id:actor}}}}
 const people=[{id:'new',displayName:'신규 직원',departmentId:'office',hireDate:'2026-11-03'},{id:'old',displayName:'기존 직원',departmentId:'office',hireDate:'2020-01-01'}];
 window.originalMembers=JSON.stringify(people);window.people=people;
 window.clockRows=[...['03','04','05'].map(day=>({employeeId:'new',date:'2026-11-'+day,clockIn:'09:12'})),...['02','03','04'].map(day=>({employeeId:'old',date:'2026-11-'+day,clockIn:'09:00'}))];
 export const listDepartments=async()=>[{id:'office',name:'테스트 부서'}];
 export const listOrgChartMembers=async()=>window.actor==='peer'?[{id:'peer-member',displayName:'다른 회사 직원',departmentId:'office',hireDate:'2020-01-01'}]:window.people;
-export const getSupabase=()=>({rpc:async name=>{if(name==='clock_in_today')window.clockWriteAttempts=(window.clockWriteAttempts||0)+1;if(name==='is_my_attendance_exempt')return{data:false,error:null};if(name!=='list_attendance_enrollments')throw Error('unexpected RPC '+name);window.enrollmentReads++;if(window.policyFailure)return{data:null,error:{code:'57014',message:'connection timeout'}};return{error:null,data:(window.actor==='peer'?[{employeeId:'peer-member',startsOn:'2026-11-02'}]:[{employeeId:'new',startsOn:'2026-11-06'},{employeeId:'old',startsOn:'2026-11-02'},...(window.newlyActivated?[{employeeId:'added',startsOn:'2026-11-09'}]:[])]).filter(row=>!window.partialEnrollment||row.employeeId!=='new')}}});
+const adjustments=new Map();let revision=0;
+const confirmations=new Map();
+export const getSupabase=()=>({rpc:async (name,args)=>{
+ if(name==='list_attendance_incident_confirmations')return{data:window.actor==='hr'?[...confirmations.values()]:[],error:null};
+ if(name==='confirm_attendance_incident'){
+  if(window.actor!=='hr')return{error:{message:'권한 없음'}};
+  if(window.confirmationFailure)return{error:{message:'확인 저장 실패'}};
+  const key=args.p_employee+':'+args.p_date+':'+args.p_kind;
+  confirmations.set(key,{employee_id:args.p_employee,work_date:args.p_date,kind:args.p_kind,confirmed_at:'2026-11-06T09:30:00Z'});
+  return{error:null};
+ }
+ if(name==='list_attendance_incident_adjustments')return{data:window.actor==='hr'?[...adjustments.values()]:[],error:null};
+ if(name==='save_attendance_incident_adjustment'){
+  const key=args.p_employee+':'+args.p_date+':'+args.p_kind;
+  if(window.actor!=='hr'||args.p_revision!==(adjustments.get(key)?.revision??null))return{error:{message:'변경 충돌'}};
+  adjustments.set(key,{employee_id:args.p_employee,work_date:args.p_date,kind:args.p_kind,minutes:args.p_minutes,reason:args.p_reason,revision:String(++revision)});
+  return{error:null};
+ }
+ if(name==='clock_in_today')window.clockWriteAttempts=(window.clockWriteAttempts||0)+1;if(name==='is_my_attendance_exempt')return{data:false,error:null};if(name!=='list_attendance_enrollments')throw Error('unexpected RPC '+name);window.enrollmentReads++;if(window.policyFailure)return{data:null,error:{code:'57014',message:'connection timeout'}};return{error:null,data:(window.actor==='peer'?[{employeeId:'peer-member',startsOn:'2026-11-02'}]:[{employeeId:'new',startsOn:'2026-11-06'},{employeeId:'old',startsOn:'2026-11-02'},...(window.newlyActivated?[{employeeId:'added',startsOn:'2026-11-09'}]:[])]).filter(row=>!window.partialEnrollment||row.employeeId!=='new')}}});
 export const listCompanyAttendanceClocks=async()=>window.clockRows;export const listCompanyDeferredClockOuts=async()=>[];
+export const loadCompanyLunch=async()=>({start:'12:00',end:'13:00'});
 export const listMyAttendanceClocks=async()=>{window.ownClockReads=(window.ownClockReads||0)+1;return[]};export const clockOutToday=async()=>{throw Error('unexpected clock write')};export const undoClockOutToday=clockOutToday;
 export const listLeaveRequests=async()=>[];export const listLateArrivalStatements=async()=>[];export const countLateStatementsAwaitingHr=async()=>0;
 export const LateArrivalStatementDocument=()=>null;export const useRenderWatch=()=>{};
@@ -39,7 +58,7 @@ const member=directory.members.find(p=>p.id==='new');const records=buildAttendan
 return <main style={{padding:24}}><Probe/>{showClock&&<ClockProbe/>}<AttendanceLatePanel key={tick} directory={directory} schedules={schedules}/>{member&&<section aria-label="신규 직원 달력"><AttendanceCalendar month="2026-11" memberId={member.id} records={records} schedule={schedule} overrides={{}} today={window.currentDay} trackingStart={member.attendanceTrackedFrom}/></section>}</main>}
 createRoot(document.getElementById('root')).render(<QueryClientProvider client={cache}><Screen/></QueryClientProvider>);
 `, 'utf8')
-const mocks = /(?:lib\/supabase\/(?:auth|client|profiles|attendance-clocks|leave-requests|late-arrival-statements)|features\/home\/LateArrivalClockIn|lib\/diagnostics)$/
+const mocks = /(?:lib\/supabase\/(?:auth|client|profiles|attendance-clocks|leave-requests|late-arrival-statements|company-work-hours)|features\/home\/LateArrivalClockIn|lib\/diagnostics)$/
 await build({ entryPoints: [entry], outfile: path.join(dir, 'app.js'), bundle: true, format: 'esm', platform: 'browser', jsx: 'automatic', tsconfig: path.join(root, 'tsconfig.app.json'), define: { 'import.meta.env': '{"DEV":true,"PROD":false}', 'process.env.NODE_ENV': '"development"' }, plugins: [{ name: 'isolated-enrollment-api', setup(builder) { builder.onResolve({ filter: /.*/ }, args => {
   if (!args.importer.startsWith(path.join(root, 'src'))) return
   const target = (args.path.startsWith('@/') ? path.join(root, 'src', args.path.slice(2)) : path.resolve(args.resolveDir, args.path)).replaceAll('\\', '/').replace(/\.tsx?$/, '')
@@ -62,7 +81,12 @@ try {
   })
   const page = await context.newPage();page.on('pageerror', error => errors.push(error.message))
   await page.goto('https://enrollment-preview.invalid/operations-support')
-  await page.locator('tbody').getByText('기존 직원', { exact: true }).waitFor()
+  try {
+    await page.locator('tbody').getByText('기존 직원', { exact: true }).waitFor({ timeout: 8_000 })
+  } catch (error) {
+    console.error('Attendance preview did not load:', errors, await page.locator('body').innerText())
+    throw error
+  }
   assert.equal(await page.locator('tbody').getByText('신규 직원', { exact: true }).count(), 0, 'pre-approval clocks and missing days are not lateness/absence')
   assert.equal(await page.evaluate(() => window.enrollmentReads), 1, 'shared readers deduplicate the enrollment request')
   assert.equal(await page.evaluate(() => window.visibleMembers.find(p => p.id === 'new').hireDate), '2026-11-03')
@@ -95,6 +119,51 @@ try {
   assert.match(await newRow.innerText(), /지각/)
   assert.equal(await page.evaluate(() => window.summary.exceeded), 1, 'normal assessment resumes from enrollment')
   assert.equal(await page.evaluate(() => JSON.stringify(window.people) === window.originalMembers), true)
+  assert.deepEqual((await page.getByRole('columnheader').allTextContents()).slice(-3), ['수정','사유서','확인'])
+  const saveAdjustment = async (row, mode, minutes) => {
+    await row.getByRole('button',{name:'수정',exact:true}).click()
+    const dialog=page.getByRole('dialog')
+    await dialog.getByLabel('처리').selectOption(mode)
+    if (minutes != null) await dialog.getByLabel('지각 시간 (분)').fill(String(minutes))
+    await dialog.getByLabel('수정 사유').fill('확인된 예외 사유')
+    await dialog.getByRole('button',{name:'저장',exact:true}).click()
+    await dialog.waitFor({state:'hidden'})
+  }
+  await saveAdjustment(newRow,'duration',3)
+  await newRow.getByText('3분',{exact:true}).waitFor()
+  await saveAdjustment(newRow,'exclude')
+  await newRow.waitFor({state:'hidden'})
+  const included=page.getByLabel('집계 제외 기록 보기')
+  await included.check()
+  await newRow.getByText('지각 제외',{exact:true}).waitFor()
+  await saveAdjustment(newRow,'restore')
+  await newRow.getByText('9분',{exact:true}).waitFor()
+  const absentRow=page.locator('tbody tr').filter({hasText:'기존 직원'}).filter({hasText:/11\.06/})
+  await saveAdjustment(absentRow,'exclude')
+  await absentRow.getByText('결근 제외',{exact:true}).waitFor()
+  await saveAdjustment(absentRow,'restore')
+  await absentRow.getByText('결근',{exact:true}).first().waitFor()
+  const confirmButton = row => row.getByRole('button',{name:'확인',exact:true})
+  const showConfirmed = page.getByLabel('확인된 기록 포함',{exact:true})
+  await page.evaluate(() => { window.confirmationFailure=true })
+  await confirmButton(newRow).click()
+  await page.getByRole('alert').getByText('확인 저장 실패',{exact:true}).waitFor()
+  assert.equal(await newRow.isVisible(),true)
+  await page.evaluate(() => { window.confirmationFailure=false })
+  await confirmButton(newRow).click()
+  await newRow.waitFor({state:'hidden'})
+  await showConfirmed.check()
+  await newRow.getByText('확인됨',{exact:true}).waitFor()
+  await confirmButton(absentRow).click()
+  await absentRow.getByText('확인됨',{exact:true}).waitFor()
+  await page.evaluate(() => window.advanceDay())
+  await showConfirmed.waitFor()
+  assert.equal(await showConfirmed.isChecked(),false)
+  await newRow.waitFor({state:'hidden'})
+  await absentRow.waitFor({state:'hidden'})
+  await showConfirmed.check()
+  await newRow.getByText('확인됨',{exact:true}).waitFor()
+  await absentRow.getByText('확인됨',{exact:true}).waitFor()
   const readsBeforeActivation = await page.evaluate(() => window.enrollmentReads)
   await page.evaluate(() => window.activateMember())
   await page.waitForFunction(() => window.visibleMembers.find(row => row.id === 'added')?.attendanceTrackedFrom === '2026-11-09')
@@ -102,6 +171,7 @@ try {
   assert.equal(await page.locator('tbody').getByText('추가 승인 직원', { exact: true }).count(), 0)
   await page.evaluate(() => window.setAccount('peer'))
   await page.waitForFunction(() => window.visibleMembers.length === 1 && window.visibleMembers[0].id === 'peer-member')
+  assert.equal(await page.getByRole('columnheader',{name:'수정',exact:true}).count(),0)
   assert.equal(await page.getByRole('region', { name: '신규 직원 달력' }).count(), 0, 'account changes remove previous attendance data')
   await page.evaluate(() => { window.currentDay = '2026-11-05';window.testNow = '2026-11-05T09:30:00Z';window.setAccount('new');window.openClockProbe() })
   await page.waitForFunction(() => window.clockProbe?.exempt === true && window.clockProbe.loading === false)
@@ -113,5 +183,5 @@ try {
   await page.waitForFunction(() => window.clockProbe?.needsClockIn === true && window.clockProbe.loading === false)
   assert.equal(await page.evaluate(() => window.clockProbe.exempt), false, 'the recent approval account can clock in normally from its start date')
   assert.deepEqual(errors, []);assert.deepEqual(external, [])
-  console.info('Attendance enrollment browser: real directory + late/absence/calendar/summary, no pre-approval penalties, normal later assessment, shared reads, read-failure retry, account isolation and unchanged inputs passed')
+  console.info('Attendance browser: enrollment, late minutes, late/absence exclusion and restore, read-failure retry, account isolation and unchanged inputs passed')
 } finally { await browser.close() }

@@ -93,5 +93,97 @@ try {
   assert.equal(await arrival(), '10:00:00')
   assert.equal((await file()).late_minutes, 40)
   assert.equal(await scalar('select clock_in from public.attendance_clock_ins'), '10:40:00')
+  const peerCompany = 'e0000000-0000-4000-8000-000000000002'
+  const outsider = '10000000-0000-4000-8000-000000000003'
+  await db.exec(`
+    insert into public.companies values ('${peerCompany}');
+    insert into public.profiles values ('${outsider}','${peerCompany}',null,'active','other','staff');
+    create function app.permission_company_id() returns uuid language sql stable security definer as
+      $$select company_id from public.profiles where id=auth.uid() and status='active'$$;
+    create function app.permission_allowed(text,text,uuid) returns boolean language sql stable as
+      $$select auth.uid()='${peer}'::uuid and $1='org.manage' and $3='${company}'::uuid$$;
+    create function app.workforce_mode(uuid) returns text language sql stable as $$select 'head-office'::text$$;
+    create function app.can_manage_late_statement(uuid) returns boolean language sql stable as $$select false$$;
+    grant execute on function app.save_my_late_statement(text,text,text,text) to authenticated;
+  `)
+  const oldStatement = await scalar('select to_jsonb(s) from public.late_arrival_statements s')
+  const originalClock = await scalar('select to_jsonb(s) from public.attendance_clock_ins s')
+  await db.exec(await readFile('supabase/migrations/20261118114126_attendance_incident_adjustments.sql', 'utf8'))
+  const actingAs = async (id, role = 'authenticated') => {
+    await db.exec('reset role')
+    await db.query("select set_config('request.jwt.claim.sub',$1,false)", [id])
+    await db.exec(`set role ${role}`)
+  }
+  const write = (employee, date, kind, minutes, revision = null) => db.query(
+    "select public.save_attendance_incident_adjustment($1,$2,$3,$4,'테스트 사유',$5)",
+    [employee, date, kind, minutes, revision],
+  )
+  const read = async (employee = null) => (await db.query(
+    "select * from public.list_attendance_incident_adjustments('2026-11-01','2026-11-30',$1) order by work_date",
+    [employee],
+  )).rows
+  await actingAs(staff)
+  await assert.rejects(write(staff,'2026-11-10','late',0), { code: '42501' })
+  await assert.rejects(db.query('select * from app.attendance_incident_adjustments'), { code: '42501' })
+  await actingAs(peer)
+  await assert.rejects(write(outsider,'2026-11-11','absent',0), { code: '42501' })
+  await assert.rejects(write(staff,'2026-11-10','absent',0), { code: '22023' })
+  await assert.rejects(write(staff,'2026-11-11','absent',1), { code: '22023' })
+  await write(staff,'2026-11-10','late',3)
+  await write(staff,'2026-11-11','absent',0)
+  let adjustments = await read()
+  assert.equal(adjustments[0].minutes,3)
+  assert.equal(adjustments[1].minutes,0)
+  assert.equal(adjustments[0].reason,'테스트 사유')
+  await assert.rejects(write(staff,'2026-11-10','late',0), { code: '40001' })
+  await db.exec('reset role; delete from public.late_arrival_statements')
+  await actingAs(staff)
+  assert.equal((await file()).late_minutes,3,'new statement uses adjusted positive minutes')
+  assert.equal((await read(staff))[0].reason,null)
+  assert.deepEqual(await read(),[])
+  await assert.rejects(read(peer), { code: '42501' })
+  await actingAs(peer)
+  await write(staff,'2026-11-10','late',0,adjustments[0].revision)
+  await write(staff,'2026-11-11','absent',null,adjustments[1].revision)
+  adjustments = await read()
+  await actingAs(staff)
+  await assert.rejects(file(), /지각 제외/)
+  assert.equal((await read(staff)).length,1)
+  await actingAs(outsider)
+  await assert.rejects(read(staff), { code: '42501' })
+  await actingAs('', 'anon')
+  await assert.rejects(read(), { code: '42501' })
+  await actingAs(peer)
+  await write(staff,'2026-11-10','late',null,adjustments[0].revision)
+  await actingAs(staff)
+  assert.deepEqual(await read(staff),[])
+  await db.exec('reset role')
+  assert.deepEqual(await scalar('select to_jsonb(s) from public.attendance_clock_ins s'),originalClock)
+  assert.equal(oldStatement.late_minutes,40)
+  assert.equal(await scalar('select late_minutes from public.late_arrival_statements'),3,'existing statement preserved after later exclusion and restore')
+  await db.exec(await readFile('supabase/migrations/20261118114458_attendance_incident_confirmations.sql', 'utf8'))
+  const confirm = (employee, date, kind) => db.query('select public.confirm_attendance_incident($1,$2,$3)', [employee,date,kind])
+  const confirmed = async () => (await db.query("select * from public.list_attendance_incident_confirmations('2026-11-01','2026-11-30') order by work_date")).rows
+  await actingAs(staff)
+  await assert.rejects(confirm(staff,'2026-11-10','late'), { code: '42501' })
+  await actingAs(peer)
+  await assert.rejects(confirm(outsider,'2026-11-11','absent'), { code: '42501' })
+  await assert.rejects(confirm(staff,'2026-11-11','missed'), { code: '22023' })
+  await confirm(staff,'2026-11-10','late')
+  await confirm(staff,'2026-11-11','absent')
+  const firstConfirmation = await confirmed()
+  assert.deepEqual(firstConfirmation.map(row => row.kind),['late','absent'])
+  await confirm(staff,'2026-11-10','late')
+  assert.deepEqual(await confirmed(),firstConfirmation,'retry preserves first confirmation')
+  await assert.rejects(db.query('select * from app.attendance_incident_confirmations'), { code: '42501' })
+  await actingAs(staff)
+  assert.deepEqual(await confirmed(),[])
+  await actingAs('', 'anon')
+  await assert.rejects(confirmed(), { code: '42501' })
+  await db.exec('reset role')
+  assert.equal(await scalar('select late_minutes from public.late_arrival_statements'),3)
+  assert.deepEqual(await scalar('select to_jsonb(s) from public.attendance_clock_ins s'),originalClock)
+  console.info('Attendance confirmation DB: late and absent, idempotency, existing rights and original record preservation passed')
+  console.info('Attendance incident DB: late minutes, exclusion, restore, scoped access, stale revisions and preservation passed')
   console.info('Attendance arrival DB: half/quarter leave, scheduled offsite, afternoon office arrival, correction, permissions and original values passed')
 } finally { await db.close() }

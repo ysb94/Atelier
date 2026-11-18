@@ -1,3 +1,4 @@
+import { LateArrivalAppealNoticeDialog, LateArrivalAppealsQueue } from '@/features/home/LateArrivalAppeal'
 import { AttendanceLatePanel } from './AttendanceLatePanel'
 import { type useOpsDirectory } from './ops-directory'
 import { type useAttendanceStartSettings } from './use-attendance-start-settings'
@@ -11,10 +12,14 @@ export function AttendanceCheckPanel({ view, onViewChange, directory, schedules 
   directory: ReturnType<typeof useOpsDirectory>
   schedules: ReturnType<typeof useAttendanceStartSettings>
 }) {
-  return <AttendanceLatePanel
-    directory={directory}
-    schedules={schedules}
-    initialKind={view === 'missed' ? 'missed' : 'all'}
-    onKindChange={kind => { const next: CheckView = kind === 'missed' ? 'missed' : 'late'; if (next !== view) onViewChange(next) }}
-  />
+  return <div className="space-y-4">
+    {view === 'late' && <LateArrivalAppealsQueue />}
+    <AttendanceLatePanel
+      directory={directory}
+      schedules={schedules}
+      initialKind={view === 'missed' ? 'missed' : 'all'}
+      onKindChange={kind => { const next: CheckView = kind === 'missed' ? 'missed' : 'late'; if (next !== view) onViewChange(next) }}
+    />
+    <LateArrivalAppealNoticeDialog />
+  </div>
 }
