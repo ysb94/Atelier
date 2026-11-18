@@ -150,6 +150,7 @@ export function CompanyDraftsPage() {
     draftId: string,
     change: (current: ProductDraft) => ProductDraftInput,
     action = 'draft_save',
+    temporaryInformationRevision?: string,
   ) {
     const previous = saveChainRef.current.get(draftId) ?? Promise.resolve()
     // 앞선 저장 실패는 그 호출을 기다린 쪽에 이미 전달됐다. 다음 수정은 이어서 저장한다.
@@ -163,7 +164,7 @@ export function CompanyDraftsPage() {
         trace.step('validate_input')
         const input = change(current)
         const updated = await trace.run('save', (context) =>
-          updateProductDraft(draftId, tracedInput(input, context)),
+          updateProductDraft(draftId, tracedInput(input, context), temporaryInformationRevision),
         )
         await trace.run('refresh_queries', async () => {
           savedDraftRef.current.set(draftId, updated)
@@ -606,6 +607,7 @@ export function CompanyDraftsPage() {
                     key={draft.id}
                     draft={draft}
                     readOnly={!canWriteDraft(workAccess.access,draft)}
+                    informationEditorId={profile?.id}
                     schedule={schedule}
                     brand={brand}
                     price={{
@@ -667,7 +669,7 @@ export function CompanyDraftsPage() {
                         return { ...input, [field]: name }
                       })
                     }}
-                    onSaveSheetValue={async (colorId, changes, applyAll, field) => {
+                    onSaveSheetValue={async (colorId, changes, applyAll, field, temporaryRevision) => {
                       await saveDraftChange(draft.id, (current) => {
                         const input = draftToInput(current)
                         if (!input.colors.some((color) => color.id === colorId)) {
@@ -681,13 +683,13 @@ export function CompanyDraftsPage() {
                           ...input,
                           specs: writeColorSpec(input.specs, ids, changes, field, !applyAll),
                         }
-                      })
+                      }, 'draft_information_save', temporaryRevision)
                     }}
-                    onSaveSpecDocument={async value => {
+                    onSaveSpecDocument={async (value, temporaryRevision) => {
                       await saveDraftChange(draft.id, current => {
                         const input = draftToInput(current)
                         return { ...input, specs: { ...input.specs, specDocumentConfirmed: true, coating: { ...input.specs.coating, note: value } } }
-                      })
+                      }, 'draft_information_save', temporaryRevision)
                     }}
                     onUploadSampleWorkOrder={async (file) => {
                       await saveDraftChange(draft.id, (current) => {

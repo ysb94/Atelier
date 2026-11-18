@@ -16,6 +16,7 @@ import { colorSampleLineStatus, resolveColorSampleRounds } from '@/lib/drafts/dr
 import { sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
 import { sheetRegisteredDay } from '@/lib/drafts/sample-work-order'
 import { readFileAsDataUrl } from '@/lib/images'
+import type { DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
 import { DRAFT_STATUS_LABEL, type Brand, type DraftColorImageChoice, type DraftColorRow, type DraftSpecs, type ProductDraft } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
 import { RELEASE_CERTAINTY_LABEL, formatReleaseGroupLabel, formatTargetDate, type ResolvedReleaseSchedule } from './release-schedule-preview'
@@ -454,7 +455,6 @@ function ColorDocumentButton({
                 <Input
                   className="h-8 min-w-0 flex-1 text-sm"
                   aria-label={rows.length > 1 ? `컬러 이름 ${index + 1}` : '컬러 이름'}
-                  placeholder="컬러 이름"
                   value={row.name}
                   disabled={locked}
                   onChange={(event) => {
@@ -534,7 +534,6 @@ function SheetInlineField({
   readOnly = false,
   label,
   value,
-  placeholder,
   className,
   showError = false,
   multiline = false,
@@ -543,7 +542,6 @@ function SheetInlineField({
   readOnly?: boolean
   label: string
   value: string
-  placeholder?: string
   className: string
   showError?: boolean
   multiline?: boolean
@@ -598,7 +596,6 @@ function SheetInlineField({
     title: error || undefined,
     className,
     value: readOnly ? value : text,
-    placeholder,
     disabled: busy,
     readOnly,
     autoComplete: 'off' as const,
@@ -725,7 +722,7 @@ export function DraftPhoto({ src, name, onOpen }: { src: string | null; name: st
 
 export type DraftConfirmFlag = 'nameConfirmed' | 'colorsConfirmed'
 
-export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price, onOpen, onNextSample, onSchedule, onSaveColors, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price, informationEditorId, informationTemporaryStore, onOpen, onNextSample, onSchedule, onSaveColors, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
   readOnly?: boolean
   draft: ProductDraft; schedule: ResolvedReleaseSchedule | undefined; brand: Brand | undefined
   price?: DraftPriceControls
@@ -736,7 +733,9 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
   onRenameProduct: (field: 'nameKo' | 'nameEn', name: string) => Promise<void>
   onRenameColor: (colorId: string, name: string) => Promise<void>
   onSaveSheetValue: SaveColorSpec
-  onSaveSpecDocument: (value: string) => Promise<void>
+  onSaveSpecDocument: (value: string, temporaryRevision?: string) => Promise<void>
+  informationEditorId?: string
+  informationTemporaryStore?: DraftInformationTemporaryStore
   onUploadSampleWorkOrder: (file: { url: string; name: string }) => Promise<void>
   onReceiveSample: (id: string) => Promise<void>
   onRequestNextSampleRound: (file: { url: string; name: string }, country?: string) => Promise<void>
@@ -760,8 +759,8 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
   const [information, setInformation] = useState<{ anchor: HTMLButtonElement; colorId: string | null; field: DraftInformationField } | null>(null)
   const [informationEdits, setInformationEdits] = useState<InformationDrafts>({})
   useEffect(() => {
-    if (readOnly) setInformationEdits({})
-  }, [readOnly])
+    setInformationEdits({})
+  }, [readOnly, informationEditorId])
   function updateInformationEdits(key: string, update: UpdateInformationEdits) {
     if (!readOnly) setInformationEdits(current => ({ ...current, [key]: update(current[key]) }))
   }
@@ -815,8 +814,8 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
       <div className="draft-sheet-names">
         <div className="draft-sheet-owner">Designer <strong>{draft.owner.trim() || '미정'}</strong></div>
         <strong className="draft-sheet-number">No. {draft.draftNo}</strong>
-        <button type="button" className={`draft-sheet-product-name${draft.nameKo.trim() ? '' : ' is-placeholder'}`} aria-label={`${draft.draftNo} 한글명`} onClick={onOpen}>{draft.nameKo.trim() || '투웨이 셔링 호보백_글로우'}</button>
-        <button type="button" className={`draft-sheet-product-name is-en${draft.nameEn.trim() ? '' : ' is-placeholder'}`} aria-label={`${draft.draftNo} 영문명`} onClick={onOpen}>{draft.nameEn.trim() || '2way shirring hobo bag_Glow'}</button>
+        <button type="button" className="draft-sheet-product-name" aria-label={`${draft.draftNo} 한글명`} onClick={onOpen}>{draft.nameKo.trim()}</button>
+        <button type="button" className="draft-sheet-product-name is-en" aria-label={`${draft.draftNo} 영문명`} onClick={onOpen}>{draft.nameEn.trim()}</button>
       </div>
       <SheetConfirmButton
         className="draft-sheet-name-confirm"
@@ -880,7 +879,6 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
                 label={`${draft.draftNo} 컬러 ${index + 1} 이름`}
                 className="draft-sheet-color-name"
                 value={color.name}
-                placeholder="컬러 이름"
                 onCommit={(next) => onRenameColor(color.id, next)}
               />
               {color.orderQty != null && color.orderQty > 0 ? <small>{formatNumber(color.orderQty)}</small> : null}
@@ -958,7 +956,8 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
     </div></td>
     </tr>
     {information && (
-      <DraftInformationPanel id={informationId} anchor={information.anchor}
+      <DraftInformationPanel key={informationEditorId} id={informationId} anchor={information.anchor}
+        editorId={informationEditorId} temporaryStore={informationTemporaryStore}
         edits={informationEdits} onEditsChange={updateInformationEdits}
         draft={draft} field={information.field} colorId={information.colorId} readOnly={readOnly}
         onSave={onSaveSheetValue}

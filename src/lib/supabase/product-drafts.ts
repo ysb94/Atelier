@@ -379,6 +379,7 @@ async function saveViaRpc(
   brandId: string | null,
   id: string | null,
   input: ProductDraftInput,
+  temporaryInformationRevision?: string,
 ): Promise<string> {
   const clean = sanitize(input)
   if (!clean.nameKo && !clean.nameEn) {
@@ -394,7 +395,7 @@ async function saveViaRpc(
     )
   }
 
-  const request = getSupabase().rpc('save_product_draft', {
+  const args = {
     p_company_id: companyId,
     p_brand_id: brandId,
     p_id: id,
@@ -415,7 +416,10 @@ async function saveViaRpc(
       name: option.name,
       price: toJsonValue(option.price),
     })),
-  })
+  }
+  const request = temporaryInformationRevision
+    ? getSupabase().rpc('save_product_draft_information', { ...args, p_temporary_revision: temporaryInformationRevision })
+    : getSupabase().rpc('save_product_draft', args)
   const { data, error } = await tracedQuery(request, inputDiagnosticContext(input))
 
   if (error) {
@@ -519,6 +523,7 @@ export async function createProductDraft(
 export async function updateProductDraft(
   id: string,
   input: ProductDraftInput,
+  temporaryInformationRevision?: string,
 ): Promise<ProductDraft> {
   const existing = await getProductDraftById(id)
   if (!existing) {
@@ -529,6 +534,7 @@ export async function updateProductDraft(
     normalizeDraftBrandId(input.brandId),
     id,
     input,
+    temporaryInformationRevision,
   )
   const updated = await getProductDraftById(id)
   if (!updated) {

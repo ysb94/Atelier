@@ -1,12 +1,31 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { DraftSheetRow } from '@/features/drafts/DraftSheetRow'
 import { emptyDraftInput, newColorRow } from '@/lib/drafts/empty-draft'
 import { normalizeColorSpecs, writeColorSpec, type SaveColorSpec } from '@/lib/drafts/color-spec'
 import { newSampleWorkOrder } from '@/lib/drafts/sample-work-order'
 import type { ProductDraft } from '@/lib/types'
 import type { DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
+import type { DraftInformationTemporary, DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
 import '@/index.css'
+
+const temporaryKey = 'atelier-fixture-information-temporary'
+function temporaryRows(): DraftInformationTemporary[] {
+  return JSON.parse(sessionStorage.getItem(temporaryKey) ?? '[]')
+}
+
+function clearTemporary(revision: string | undefined) {
+  if (revision) sessionStorage.setItem(temporaryKey, JSON.stringify(temporaryRows().filter(row => row.revision !== revision)))
+}
+
+const temporaryStore: DraftInformationTemporaryStore = {
+  async list() { return temporaryRows() },
+  async save(_draftId, _editorId, copy) {
+    const rows = temporaryRows().filter(row => row.field !== copy.field || row.color_id !== copy.color_id)
+    sessionStorage.setItem(temporaryKey, JSON.stringify([...rows, copy]))
+  },
+}
 
 function Fixture() {
   const [priceRequest, setPriceRequest] = useState<DraftPriceRequest>()
@@ -33,16 +52,18 @@ function Fixture() {
   })
   const shown={...draft,sampleWorkOrders:phase==='new'?[]:draft.sampleWorkOrders,specs:{...draft.specs,colorSampleRounds:phase==='review'?draft.specs.colorSampleRounds:[]}}
   const write=async()=>{setWrites(n=>n+1)}
-  const saveDocument = async (note: string) => {
+  const saveDocument = async (note: string, revision?: string) => {
     setDraft(current => ({ ...current, specs: { ...current.specs, specDocumentConfirmed: true, coating: { ...current.specs.coating, note } } }))
+    clearTemporary(revision)
     await write()
   }
-  const saveSpec: SaveColorSpec = async (colorId, changes, applyAll, field) => {
+  const saveSpec: SaveColorSpec = async (colorId, changes, applyAll, field, revision) => {
     setSavedSpec(JSON.stringify([colorId, changes, applyAll]))
     setDraft(current => {
       const specs = writeColorSpec(current.specs, applyAll ? current.colors.map(color => color.id) : [colorId], changes, field, !applyAll)
       return { ...current, specs: { ...specs, colorSpecs: normalizeColorSpecs(specs.colorSpecs) } }
     })
+    clearTemporary(revision)
     await write()
   }
   return <main className="p-6"><button onClick={()=>setReadOnly(v=>!v)}>{readOnly?'작성자로 전환':'다른 직원으로 전환'}</button><select aria-label="검증 단계" value={phase} onChange={event=>setPhase(event.target.value)}><option value="review">샘플 검토</option><option value="new">최초 지시서</option><option value="color-upload">컬러 지시서</option></select><output data-testid="writes">{writes}</output><output data-testid="opened">{opened}</output>
@@ -52,6 +73,7 @@ function Fixture() {
       amounts: { ivory: 0, black: 14 + current.round },
     })}>단가 회신 반영</button>
     <div className="draft-board-scroll"><table className="draft-board-table"><colgroup>{Array.from({length:6},(_,index)=><col key={index}/>)}</colgroup><thead><tr>{['BRAND','IMAGE','PRICE','COLOR','INFORMATION','MD TEAM'].map(label=><th key={label}>{label}</th>)}</tr></thead><tbody><DraftSheetRow draft={shown} readOnly={readOnly} brand={undefined} schedule={{group:{id:'group',brandId:'fixture-brand',name:'11월 출시',releaseTiming:''},targetDate:'2026-11-03',certainty:'confirmed',brandId:null,isPreview:false}}
+      informationEditorId="fixture-owner" informationTemporaryStore={temporaryStore}
       price={{
         latest: priceRequest, reply: priceRequest?.answeredAt ? priceRequest : previousPriceReply,
         loading: false, error: '', retry: () => {},
@@ -72,4 +94,4 @@ function Fixture() {
       }}
       onOpen={()=>setOpened(n=>n+1)} onSchedule={()=>{void write()}} onSaveColors={write} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={saveSpec} onSaveSpecDocument={saveDocument} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/></tbody></table></div></main>
 }
-createRoot(document.getElementById('root')!).render(<Fixture/> )
+createRoot(document.getElementById('root')!).render(<QueryClientProvider client={new QueryClient()}><Fixture /></QueryClientProvider>)

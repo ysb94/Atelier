@@ -115,7 +115,7 @@ export function DraftFolderBar({
           ) : null}
           <label>
             <span>폴더 이름</span>
-            <input value={name} disabled={busy} placeholder="2026년 10월 26FW" onChange={(event) => setName(event.target.value)} />
+            <input value={name} disabled={busy} onChange={(event) => setName(event.target.value)} />
           </label>
           <button type="submit" disabled={busy}>{busy ? '저장 중' : '저장'}</button>
           <button type="button" disabled={busy} onClick={closeEditor}>취소</button>

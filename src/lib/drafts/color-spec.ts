@@ -5,7 +5,7 @@ export type ColorSpecField = Exclude<keyof DraftColorSpec, 'sizeConfirmed' | 'fa
 export type DraftInformationField = Exclude<ColorSpecField, 'weight' | 'sizeNote'>
 export type ColorInformationField = Exclude<DraftInformationField, 'specDoc'>
 export type ColorSpecValues = Partial<Pick<DraftColorSpec, ColorSpecField>>
-export type SaveColorSpec = (colorId: string, changes: ColorSpecValues, applyAll: boolean, field: ColorInformationField) => Promise<void>
+export type SaveColorSpec = (colorId: string, changes: ColorSpecValues, applyAll: boolean, field: ColorInformationField, temporaryRevision?: string) => Promise<void>
 
 export type InformationEdits = Partial<Record<ColorSpecField, { source: string; text: string }>>
 export type InformationDrafts = Partial<Record<string, InformationEdits>>
@@ -17,7 +17,7 @@ export function colorInformationEditKey(colorId: string, field: ColorInformation
 }
 
 export function informationEditText(source: string, edit: InformationEdits[ColorSpecField]) {
-  return edit?.source === source ? edit.text : source
+  return edit?.source === source && typeof edit.text === 'string' ? edit.text : source
 }
 
 export function hasInformationEdits(source: DraftColorSpec, edits: InformationEdits | undefined) {

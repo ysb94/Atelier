@@ -85,11 +85,6 @@ const EMPTY_STYLES: Style[] = []
 
 const TEXT_SPEC_KEYS = ['fabric', 'coating'] as const satisfies DraftSpecKey[]
 
-const SPEC_PLACEHOLDER: Record<(typeof TEXT_SPEC_KEYS)[number], string> = {
-  fabric: '겉감: Nylon 75% / 안감: Polyester 100%',
-  coating: '생활 발수 OK',
-}
-
 function toNumber(value: string): number | null {
   const cleaned = value.replace(/[,\s]/g, '').trim()
   if (!cleaned) return null
@@ -241,13 +236,11 @@ function UnitInput({
   value,
   unit,
   onChange,
-  placeholder,
   className,
 }: {
   value: string
   unit: string
   onChange: (next: string) => void
-  placeholder?: string
   className?: string
 }) {
   return (
@@ -259,7 +252,6 @@ function UnitInput({
         inputMode="decimal"
         className="h-8 pr-9"
         value={value}
-        placeholder={placeholder}
         onChange={(e) => onChange(sanitizeNumberText(e.target.value))}
       />
       <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[11px] text-muted-foreground">
@@ -792,7 +784,6 @@ export function DraftEditPage() {
                 <Input
                   className="h-9"
                   value={form.nameKo}
-                  placeholder="투웨이 셔링 호보백_글로우"
                   readOnly={Boolean(form.specs.nameConfirmed)}
                   onChange={(e) => patch({ nameKo: e.target.value })}
                 />
@@ -802,7 +793,6 @@ export function DraftEditPage() {
                 <Input
                   className="h-9"
                   value={form.nameEn}
-                  placeholder="2way shirring hobo bag_Glow"
                   readOnly={Boolean(form.specs.nameConfirmed)}
                   onChange={(e) => patch({ nameEn: e.target.value })}
                 />
@@ -1009,7 +999,6 @@ export function DraftEditPage() {
                       </span>
                       <Input
                         className="h-8 min-w-0"
-                        placeholder="Silver (실버)"
                         value={color.name}
                         onChange={(e) =>
                           patchColor(color.id, { name: e.target.value })
@@ -1018,7 +1007,6 @@ export function DraftEditPage() {
                       <Input
                         className="h-8 px-2 text-right tabular-nums"
                         inputMode="numeric"
-                        placeholder="0"
                         value={
                           color.orderQty == null ? '' : String(color.orderQty)
                         }
@@ -1166,7 +1154,6 @@ export function DraftEditPage() {
               <Input
                 className="h-8"
                 inputMode="decimal"
-                placeholder="48.5"
                 value={form.targetCost == null ? '' : String(form.targetCost)}
                 onChange={(e) =>
                   patch({ targetCost: toNumber(e.target.value) })
@@ -1194,7 +1181,6 @@ export function DraftEditPage() {
               <Input
                 className="h-8"
                 inputMode="numeric"
-                placeholder="65000"
                 value={form.retailPrice == null ? '' : String(form.retailPrice)}
                 onChange={(e) =>
                   patch({ retailPrice: toNumber(e.target.value) })
@@ -1205,7 +1191,6 @@ export function DraftEditPage() {
               <Input
                 className="h-8"
                 inputMode="numeric"
-                placeholder="59000"
                 value={
                   form.discountPrice == null ? '' : String(form.discountPrice)
                 }
@@ -1267,7 +1252,6 @@ export function DraftEditPage() {
             <Textarea
               className="p-2"
               rows={2}
-              placeholder="** 카카오선물하기 단독 **"
               value={form.releaseIssue}
               onChange={(e) => patch({ releaseIssue: e.target.value })}
             />
@@ -1311,7 +1295,6 @@ export function DraftEditPage() {
                       <UnitInput
                         value={size[part]}
                         unit="mm"
-                        placeholder="0"
                         onChange={(value) =>
                           patch({
                             specs: {
@@ -1349,7 +1332,6 @@ export function DraftEditPage() {
               <UnitInput
                 value={parseWeightSpec(form.specs.weight.value)}
                 unit="g"
-                placeholder="244.5"
                 onChange={(value) =>
                   patch({
                     specs: {
@@ -1373,7 +1355,6 @@ export function DraftEditPage() {
               <Textarea
                 className="p-2"
                 rows={2}
-                placeholder="예: 스트랩 최대 1060mm"
                 value={form.specs.size.note}
                 onChange={(e) =>
                   patch({
@@ -1405,7 +1386,6 @@ export function DraftEditPage() {
                   <Textarea
                     className="p-2"
                     rows={2}
-                    placeholder={SPEC_PLACEHOLDER[key]}
                     value={spec.value}
                     onChange={(e) =>
                       patch({
@@ -1429,7 +1409,6 @@ export function DraftEditPage() {
               <Textarea
                 className="p-2"
                 rows={2}
-                placeholder="예: 1차 샘플 원단 결 확인 완료"
                 value={form.specs.fabric.note}
                 onChange={(e) =>
                   patch({
@@ -1448,7 +1427,6 @@ export function DraftEditPage() {
               <Textarea
                 className="p-2"
                 rows={2}
-                placeholder="예: 원단·부자재 스펙서 v1"
                 value={form.specs.coating.note}
                 onChange={(e) =>
                   patch({
@@ -1539,7 +1517,7 @@ export function DraftEditPage() {
                     <Input
                       className="h-8 px-2 text-right tabular-nums"
                       inputMode="numeric"
-                      placeholder="가격"
+                      aria-label="가격"
                       value={row.price == null ? '' : String(row.price)}
                       onChange={(e) =>
                         patch({
