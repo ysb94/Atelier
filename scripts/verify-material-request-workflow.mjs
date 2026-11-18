@@ -74,7 +74,7 @@ export async function installMaterialTestSchema(db) {
   await db.exec(await sql('20261106163544_material_nudge_recipient_satisfaction'))
   await db.exec(await sql('20261106165117_material_nudge_inbox_confirmation'))
   await db.exec(await sql('20261106171049_china_work_assignee_order'))
-  await db.exec(await sql('20261118071734_promotion_sample_record_only'))
+  await db.exec(await sql('20261118072820_promotion_sample_record_only'))
 }
 
 export async function createMaterialTestDatabase() {
