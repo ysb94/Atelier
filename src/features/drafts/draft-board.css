@@ -1,6 +1,5 @@
 .draft-board-scroll{overflow-x:auto;border:1px solid #e5e5e2;border-radius:16px 16px 0 0;background:white}
 .draft-folder-editor p,.draft-folder-heading p{flex-basis:100%;margin:0;font-size:11px;color:#c60920}
-.draft-folder-heading{margin:0 0 12px}
 .draft-folder-heading h2{display:flex;flex-direction:column;gap:2px;margin:0;color:#2c2416;font-size:22px;font-weight:600;line-height:1.2}
 .draft-folder-heading small{font-size:11px;font-weight:500;color:#877755}
 .draft-folder-heading h2 button{width:fit-content;border:0;background:transparent;padding:0;color:inherit;font:inherit;text-align:left;cursor:text}

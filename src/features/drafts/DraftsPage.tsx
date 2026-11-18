@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Plus } from 'lucide-react'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { Button } from '@/components/ui/button'
+import { FilterTabs, type FilterTab } from '@/components/ui/filter-tabs'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { startWorkflow, tracedInput, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 import { createSeason, deleteSeason, getCompanyProductDrafts, getSeasonsByBrand, updateProductDraft, updateSeason } from '@/lib/api'
@@ -52,6 +53,12 @@ import {
 } from './release-schedule-preview'
 
 type BoardFilter = 'all' | 'unassigned' | 'scheduled'
+type FolderView = 'drafts' | 'completed'
+
+const folderViewTabs: FilterTab<FolderView>[] = [
+  { value: 'drafts', label: '기획안' },
+  { value: 'completed', label: '완료 (0)' },
+]
 
 function emptyMessage(
   hasAny: boolean,
@@ -90,6 +97,7 @@ export function CompanyDraftsPage() {
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const [boardFilter, setBoardFilter] = useState<BoardFilter>('all')
+  const [completedFolderId, setCompletedFolderId] = useState<string | null>(null)
   const [tempGroups, setTempGroups] = useState<PreviewReleaseGroup[]>([])
   const [assignments, setAssignments] = useState<
     Record<string, PreviewReleaseAssignment>
@@ -336,6 +344,7 @@ export function CompanyDraftsPage() {
   const activeFolder = folderFilter === 'all' || folderFilter === 'unassigned'
     ? null
     : folderItems.find((folder) => selectedFolderIds.includes(folder.id)) ?? null
+  const showingCompleted = activeFolder !== null && activeFolder.id === completedFolderId
   const unassignedFolderCount = ownerDrafts.filter(draft => !scheduleByDraft.get(draft.id)?.group).length
 
   const sheetCounts = useMemo(() => {
@@ -397,6 +406,7 @@ export function CompanyDraftsPage() {
 
   function setFolderFilter(value: string) {
     setBoardFilter('all')
+    setCompletedFolderId(null)
     setSearchParams(prev => {
       const next = new URLSearchParams(prev)
       next.delete('season')
@@ -408,6 +418,7 @@ export function CompanyDraftsPage() {
 
   function setBrandScope(value: DraftBrandScope) {
     setBoardFilter('all')
+    setCompletedFolderId(null)
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev)
@@ -560,29 +571,37 @@ export function CompanyDraftsPage() {
       ) : null}
 
       {activeFolder ? (
-        <DraftFolderHeading
-          folder={activeFolder}
-          onUpdate={async (id, name) => {
-            const season = seasonMap.get(id)
-            const updated = await updateSeason(id, {
-              name,
-              releaseTiming: '',
-              status: season?.status,
-            })
-            await queryClient.invalidateQueries({ queryKey: ['seasons', updated.brandId] })
-          }}
-          onDelete={async (id) => {
-            const season = seasonMap.get(id)
-            await deleteSeason(id)
-            if (folderFilter === id) setFolderFilter('all')
-            if (season) {
-              await queryClient.invalidateQueries({ queryKey: ['seasons', season.brandId] })
-            }
-          }}
-        />
+        <div className="mb-3 flex flex-wrap items-end gap-x-3 gap-y-2">
+          <DraftFolderHeading
+            folder={activeFolder}
+            onUpdate={async (id, name) => {
+              const season = seasonMap.get(id)
+              const updated = await updateSeason(id, {
+                name,
+                releaseTiming: '',
+                status: season?.status,
+              })
+              await queryClient.invalidateQueries({ queryKey: ['seasons', updated.brandId] })
+            }}
+            onDelete={async (id) => {
+              const season = seasonMap.get(id)
+              await deleteSeason(id)
+              if (folderFilter === id) setFolderFilter('all')
+              if (season) {
+                await queryClient.invalidateQueries({ queryKey: ['seasons', season.brandId] })
+              }
+            }}
+          />
+          <FilterTabs
+            tabs={folderViewTabs}
+            value={showingCompleted ? 'completed' : 'drafts'}
+            onChange={(view) => setCompletedFolderId(view === 'completed' ? activeFolder.id : null)}
+            ariaLabel={`${activeFolder.label} 목록 보기`}
+          />
+        </div>
       ) : null}
 
-      <div className="draft-board-scroll" role="region" aria-label="기획안 목록" tabIndex={0}>
+      <div className="draft-board-scroll" role="region" aria-label={showingCompleted ? '완료된 기획안 목록' : '기획안 목록'} tabIndex={0}>
         <table className="draft-board-table">
           <caption className="sr-only">기획안별 샘플, 상품 정보 및 MD 진행 현황</caption>
           <colgroup>{Array.from({ length: 6 }, (_, index) => <col key={index} />)}</colgroup>
@@ -606,7 +625,13 @@ export function CompanyDraftsPage() {
             </tr>
           </thead>
           <tbody>
-            {loading ? (
+            {showingCompleted ? (
+              <tr>
+                <td colSpan={6} className="bg-white px-4 py-10 text-center text-sm text-muted-foreground">
+                  이 폴더에 완료된 기획안이 없습니다.
+                </td>
+              </tr>
+            ) : loading ? (
               <tr>
                 <td
                   colSpan={6}
