@@ -45,8 +45,9 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   const hasReply = Boolean(reply?.answeredAt && reply.id === latest?.id)
   const confirmed = hasReply && reply?.id === confirmedRequestId
   const confirm = controls?.confirm
-  const showReplyActions = hasReply && !readOnly && Boolean(confirm)
+  const showReplyActions = hasReply && !readOnly
   const waiting = Boolean(latest && !latest.answeredAt)
+  const waitingForRepeat = waiting && (latest?.round ?? 0) > 1
   const requestedAt = waiting && latest ? new Date(latest.requestedAt) : null
   const sentAt = requestedAt && Number.isFinite(requestedAt.getTime()) ? requestedAt : null
   const ready = hasColors && missingColors.length === 0
@@ -86,6 +87,23 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
     }
   }
 
+  function sendAgain() {
+    if (controls?.error) {
+      setError(controls.error)
+      controls.retry()
+      return
+    }
+    if (!hasColors) {
+      setError('컬러를 먼저 추가해 주세요.')
+      return
+    }
+    if (missingColors.length > 0) {
+      setError(`컬러 문서에서 사진을 첨부하거나 None을 선택해 주세요. 미등록 컬러 · ${missingColors.join(', ')}`)
+      return
+    }
+    void send()
+  }
+
   function openDetails() {
     setError('')
     setOpen(true)
@@ -96,13 +114,18 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
       {sentAt && <time dateTime={latest?.requestedAt} className="whitespace-nowrap text-xs leading-snug text-muted-foreground">
         {requestDay.format(sentAt)}<br />{requestClock.format(sentAt)} 발송
       </time>}
-      <Button type="button" size="sm" variant={waiting || showReplyActions ? 'ghost' : ready && !readOnly ? 'default' : 'outline'}
-        className={waiting || showReplyActions ? 'h-7 bg-blue-700 px-1.5 text-white hover:bg-blue-800' : 'h-7 px-2.5'}
-        disabled={busy || (readOnly && !latest)} aria-haspopup="dialog" onClick={openDetails}>
-        {waiting ? '단가 계산중' : showReplyActions ? '단가 재요청' : reply ? '단가 확인' : '단가 요청'}
-      </Button>
+      {waitingForRepeat
+        ? <span role="status" className="inline-flex h-7 items-center whitespace-nowrap rounded-md bg-neutral-500 px-2.5 text-xs font-medium text-white">
+          재요청중
+        </span>
+        : <Button type="button" size="sm" variant={waiting || showReplyActions ? 'ghost' : ready && !readOnly ? 'default' : 'outline'}
+          className={waiting || showReplyActions ? 'h-7 bg-blue-700 px-1.5 text-white hover:bg-blue-800' : 'h-7 px-2.5'}
+          disabled={busy || (readOnly && !latest) || (showReplyActions && controls?.loading)}
+          aria-haspopup={showReplyActions ? undefined : 'dialog'} onClick={showReplyActions ? sendAgain : openDetails}>
+          {waiting ? '단가 계산중' : showReplyActions ? '단가 재요청' : reply ? '단가 확인' : '단가 요청'}
+        </Button>}
       {confirmed ? <span className="text-xs font-medium text-primary">단가 확정</span>
-        : showReplyActions && <Button type="button" size="sm" className="h-7"
+        : showReplyActions && confirm && <Button type="button" size="sm" className="h-7"
           disabled={busy || controls?.loading || Boolean(controls?.error)} onClick={() => void confirmReply()}>
           확정
         </Button>}
@@ -138,8 +161,8 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
         <div className="mt-4 flex flex-wrap justify-end gap-2">
           <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setOpen(false)}>닫기</Button>
           {controls?.error && <Button type="button" size="sm" variant="outline" onClick={controls.retry}>다시 조회</Button>}
-          {canSend && <Button type="button" size="sm" disabled={busy} onClick={() => void send()}>
-            {busy ? '요청 저장 중' : latest ? '단가 재요청 보내기' : '단가 요청 보내기'}
+          {canSend && !showReplyActions && <Button type="button" size="sm" disabled={busy} onClick={() => void send()}>
+            {busy ? '요청 저장 중' : '단가 요청 보내기'}
           </Button>}
         </div>
       </dialog>, document.body,

@@ -783,7 +783,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
     informationEditText(specDocument, informationEdits[documentEditKey]?.specDoc).trim() !== specDocument.trim()
   const documentOpen = information?.field === 'specDoc'
   const colorRows: Array<DraftColorRow | null> = draft.colors.length ? draft.colors : [null]
-  const priceAmounts = price?.latest?.answeredAt ? price.latest.amounts : null
+  const priceAmounts = price?.reply?.amounts
   function colorSampleDone(colorId: string) {
     return colorId in pendingDone ? pendingDone[colorId] : doneColorIds.has(colorId)
   }
