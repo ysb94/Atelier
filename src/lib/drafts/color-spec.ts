@@ -2,8 +2,9 @@ import type { DraftColorSpec, DraftSpecKey, DraftSpecs } from '@/lib/types'
 import { parseSizeSpecInput } from './spec-format'
 
 export type ColorSpecField = Exclude<keyof DraftColorSpec, 'sizeConfirmed' | 'fabricConfirmed'>
-export type DraftInformationField = Exclude<ColorSpecField, 'weight' | 'sizeNote'>
+export type DraftInformationField = 'size' | 'fabric' | 'specDoc'
 export type ColorInformationField = Exclude<DraftInformationField, 'specDoc'>
+export type ResolvedDraftColorSpec = DraftColorSpec & { coating: string }
 export type ColorSpecValues = Partial<Pick<DraftColorSpec, ColorSpecField>>
 export type SaveColorSpec = (colorId: string, changes: ColorSpecValues, applyAll: boolean, field: ColorInformationField, temporaryRevision?: string) => Promise<void>
 
@@ -20,7 +21,7 @@ export function informationEditText(source: string, edit: InformationEdits[Color
   return edit?.source === source && typeof edit.text === 'string' ? edit.text : source
 }
 
-export function hasInformationEdits(source: DraftColorSpec, edits: InformationEdits | undefined) {
+export function hasInformationEdits(source: ResolvedDraftColorSpec, edits: InformationEdits | undefined) {
   return (Object.keys(edits ?? {}) as ColorSpecField[]).some(
     key => informationEditText(source[key], edits?.[key]).trim() !== source[key].trim(),
   )
@@ -32,7 +33,7 @@ export const DRAFT_INFORMATION_LABELS = {
   specDoc: '스펙 문서',
 } satisfies Record<DraftInformationField, string>
 
-export function colorSpecFromProduct(
+function colorSpecFromProduct(
   specs: Pick<DraftSpecs, DraftSpecKey>,
 ): DraftColorSpec {
   return {
@@ -45,15 +46,17 @@ export function colorSpecFromProduct(
 }
 
 /** 컬러에 저장된 값이 없으면 상품 공통 스펙을 초기값으로 보여 준다. */
-export function resolveColorSpec(specs: DraftSpecs, colorId: string): DraftColorSpec {
-  return specs.colorSpecs[colorId] ?? colorSpecFromProduct(specs)
+export function resolveColorSpec(specs: DraftSpecs, colorId: string): ResolvedDraftColorSpec {
+  const color = specs.colorSpecs[colorId] ?? colorSpecFromProduct(specs)
+  return { ...color, coating: color.coating ?? specs.coating.value }
 }
 
-export function isColorInformationConfirmed(specs: DraftSpecs, spec: DraftColorSpec, field: ColorInformationField) {
+export function isColorInformationConfirmed(specs: DraftSpecs, spec: ResolvedDraftColorSpec, field: ColorInformationField) {
   return field === 'size'
     ? spec.sizeConfirmed ?? ((!spec.size.trim() || specs.size.confirmed) && (!spec.weight.trim() || specs.weight.confirmed) &&
         Boolean(spec.size.trim() || spec.weight.trim()))
-    : spec.fabricConfirmed ?? specs.fabric.confirmed
+    : spec.fabricConfirmed ?? ((!spec.fabric.trim() || specs.fabric.confirmed) &&
+        (!spec.coating.trim() || specs.coating.confirmed) && Boolean(spec.fabric.trim() || spec.coating.trim()))
 }
 
 export function isSpecDocumentConfirmed(specs: DraftSpecs) {
@@ -77,7 +80,9 @@ export function writeColorSpec(
   for (const id of colorIds) {
     const current = colorSpecs[id] ?? colorSpecFromProduct(specs)
     const next = { ...current, ...patch }
-    if (confirm || Object.entries(patch).some(([key, value]) => current[key as ColorSpecField] !== value)) {
+    if (confirm && field === 'fabric') next.coating ??= specs.coating.value
+    const previous = { ...current, coating: current.coating ?? specs.coating.value }
+    if (confirm || Object.entries(patch).some(([key, value]) => previous[key as ColorSpecField] !== value)) {
       next[confirmationKey] = confirm
     }
     colorSpecs[id] = next
@@ -95,6 +100,7 @@ export function normalizeColorSpecs(raw: unknown): Record<string, DraftColorSpec
       size: typeof item.size === 'string' ? item.size : '',
       sizeNote: typeof item.sizeNote === 'string' ? item.sizeNote : '',
       fabric: typeof item.fabric === 'string' ? item.fabric : '',
+      ...(typeof item.coating === 'string' ? { coating: item.coating } : {}),
       weight: typeof item.weight === 'string' ? item.weight : '',
       specDoc: typeof item.specDoc === 'string' ? item.specDoc : '',
       ...(typeof item.sizeConfirmed === 'boolean' ? { sizeConfirmed: item.sizeConfirmed } : {}),

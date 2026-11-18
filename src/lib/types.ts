@@ -315,6 +315,7 @@ export type DraftColorSpec = {
   size: string
   sizeNote: string
   fabric: string
+  coating?: string
   weight: string
   specDoc: string
   sizeConfirmed?: boolean

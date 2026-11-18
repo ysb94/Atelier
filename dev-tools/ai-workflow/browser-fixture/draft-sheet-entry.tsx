@@ -42,7 +42,7 @@ function Fixture() {
       colors:[{...newColorRow(),id:'black',name:'블랙',orderQty:12},{...newColorRow(),id:'ivory',name:'아이보리',orderQty:8}],
       sampleWorkOrders:[{...newSampleWorkOrder(),id:'sample',url:'sample.pdf',shippedAt:'2026-10-01T00:00:00Z',receivedAt:'2026-10-02T00:00:00Z',passed:false}],
       specs:{...base.specs,nameConfirmed:true,colorsConfirmed:true,colorNamesConfirmed:true,
-        coating:{...base.specs.coating,note:'상품 공통 스펙 본문'},
+        coating:{...base.specs.coating,value:'기존 공통 코팅',note:'상품 공통 스펙 본문'},
         colorImageChoices:{black:'Image',ivory:'None'},
         colorPhotoUrls:{black:'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50"><rect width="50" height="50" fill="black"/></svg>')},
         colorSpecs:normalizeColorSpecs({

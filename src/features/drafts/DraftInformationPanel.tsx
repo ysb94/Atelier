@@ -9,16 +9,17 @@ import { Input, Textarea } from '@/components/ui/input'
 import {
   DRAFT_INFORMATION_LABELS, colorInformationEditKey, documentEditKey, informationEditText, isColorInformationConfirmed,
   isSpecDocumentConfirmed, resolveColorSpec, type ColorInformationField, type ColorSpecField, type ColorSpecValues,
-  type DraftInformationField, type InformationDrafts, type InformationEdits, type SaveColorSpec, type UpdateInformationEdits,
+  type DraftInformationField, type InformationDrafts, type InformationEdits, type ResolvedDraftColorSpec, type SaveColorSpec, type UpdateInformationEdits,
 } from '@/lib/drafts/color-spec'
 import { formatSizeSpec, parseSizeSpec, type SizeParts } from '@/lib/drafts/spec-format'
-import type { DraftColorRow, DraftColorSpec, ProductDraft } from '@/lib/types'
+import type { DraftColorRow, ProductDraft } from '@/lib/types'
 import { draftInformationTemporaryStore, type DraftInformationTemporary, type DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
 import { cn } from '@/lib/utils'
 
 const FIELDS: readonly DraftInformationField[] = ['size', 'fabric', 'specDoc']
 const MEASUREMENT_FIELDS = ['size', 'weight'] as const
 const SIZE_FIELDS = [...MEASUREMENT_FIELDS, 'sizeNote'] as const
+const FABRIC_FIELDS = ['fabric', 'coating'] as const
 type SaveTemporaryInformation = (edits: InformationEdits) => Promise<void>
 const DIMENSIONS = [
   ['width', '가로', 'W'],
@@ -128,7 +129,7 @@ function SizeFields({ text, weight, note, locked, onChange }: {
 }
 
 function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, highlighted, canApplyBelow, edits, saved, onEditsChange, onSave, onSaveTemporary }: {
-  color: DraftColorRow; photo?: string | null; field: ColorInformationField; spec: DraftColorSpec; confirmed: boolean
+  color: DraftColorRow; photo?: string | null; field: ColorInformationField; spec: ResolvedDraftColorSpec; confirmed: boolean
   readOnly: boolean; highlighted: boolean; canApplyBelow: boolean; onSave: SaveColorSpec
   edits?: InformationEdits; onEditsChange: (update: UpdateInformationEdits) => void
   saved?: DraftInformationTemporary; onSaveTemporary?: SaveTemporaryInformation
@@ -150,7 +151,7 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
   const filledValues: ColorSpecValues = {}
   let hasValue = false
   let temporaryChanged = false
-  for (const key of field === 'size' ? SIZE_FIELDS : [field]) {
+  for (const key of field === 'size' ? SIZE_FIELDS : FABRIC_FIELDS) {
     const value = valueFor(key).trim()
     if (value) hasValue = true
     if (value !== spec[key].trim()) {
@@ -219,12 +220,19 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
         <SizeFields text={valueFor('size')} weight={valueFor('weight')} note={valueFor('sizeNote')}
           locked={locked || showModify} onChange={editField} />
       ) : (
-        <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
-          {fieldLabel}
-          <Textarea aria-label={`${fieldLabel} 값`} value={valueFor(field)} readOnly={locked || showModify}
-            rows={3} className="min-h-20 text-foreground"
-            onChange={event => editField(field, event.target.value)} />
-        </label>
+        <div className="grid min-w-0 gap-3">
+          <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+            {fieldLabel}
+            <Textarea aria-label={`${fieldLabel} 값`} value={valueFor('fabric')} readOnly={locked || showModify}
+              rows={3} className="min-h-20 text-foreground"
+              onChange={event => editField('fabric', event.target.value)} />
+          </label>
+          <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+            Water-resistant coated · 생활 발수 코팅
+            <Input value={valueFor('coating')} readOnly={locked || showModify}
+              className="h-8 min-w-0 text-foreground" onChange={event => editField('coating', event.target.value)} />
+          </label>
+        </div>
       )}
       <div className="flex flex-wrap items-center gap-2 @[720px]:flex-col @[720px]:items-end">
         {canApplyBelow && (

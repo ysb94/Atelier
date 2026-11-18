@@ -895,7 +895,9 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
             const spec = color ? resolveColorSpec(draft.specs, color.id) : null
             function informationButton(field: ColorInformationField) {
               const value = spec?.[field] ?? ''
-              const displayValue = field === 'size' ? [formatSizeSpecLabel(value), spec?.weight.trim()].filter(Boolean).join(' · ') : value
+              const displayValue = field === 'size'
+                ? [formatSizeSpecLabel(value), spec?.weight.trim()].filter(Boolean).join(' · ')
+                : value || spec?.coating || ''
               const confirmed = spec ? isColorInformationConfirmed(draft.specs, spec, field) : false
               const editing = !readOnly && color && spec
                 ? hasInformationEdits(spec, informationEdits[colorInformationEditKey(color.id, field)])
