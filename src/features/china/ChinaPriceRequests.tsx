@@ -215,7 +215,7 @@ export function ChinaPriceRequests({ requests, drafts, brandById, inputs, loadin
     return { ...group, draft, status }
   }), [byDraft, requests])
   const pending = groups.filter(({ request }) => !request.answeredAt)
-  const shown = filter === 'all' ? groups : groups.filter(({ status }) => status === filter)
+  const shown = groups.filter(({ status }) => filter === 'all' ? status !== 'confirmed' : status === filter)
 
   return <section aria-labelledby="china-price-requests-title">
     <h2 id="china-price-requests-title" className="sr-only">단가요청</h2>
