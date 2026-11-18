@@ -806,6 +806,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
   }
   const closeInformation = useCallback(() => setInformation(null), [])
   const name = draft.nameEn.trim() || draft.nameKo.trim() || '이름 미정'
+  const proposerName = draft.specs.proposer?.name?.trim()
   const named = Boolean(draft.nameEn.trim() || draft.nameKo.trim())
   const hasColor = draft.colors.length > 0
   const missingPriceColors = draft.colors.flatMap((color, index) =>
@@ -856,7 +857,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
           <div>
             <div className="draft-sheet-owner">Designer <strong>{draft.owner.trim() || '미정'}</strong></div>
             <strong className="draft-sheet-number">No. {draft.draftNo}</strong>
-            <p className="draft-sheet-proposer">제안자 : {draft.specs.proposer?.name?.trim() || '미지정'}</p>
+            {proposerName && <p className="draft-sheet-proposer">제안자 : {proposerName}</p>}
           </div>
           {brand && <div role="img" aria-label={`${brand.name} 브랜드`} title={brand.name}>
             <BrandAvatar brand={brand} className="size-10 rounded-full [&>img]:object-contain" />

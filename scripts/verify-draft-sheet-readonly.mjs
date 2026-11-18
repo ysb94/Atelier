@@ -468,6 +468,10 @@ try{
  ])
  await page.getByRole('button',{name:'다른 직원으로 전환'}).click()
  assert.equal(await releaseFolder.isDisabled(),true)
+ await page.goto(`${origin}/#without-proposer`)
+ await page.reload({waitUntil:'domcontentloaded'})
+ await brandCell.getByText('No. PL-TEST',{exact:true}).waitFor()
+ assert.equal(await brandCell.locator('.draft-sheet-proposer').count(),0)
  assert.deepEqual(errors,[])
  console.log('draft-sheet-readonly: existing actions, INFORMATION, color updates, and BRAND folder selection passed')
 }finally{await browser?.close();await server?.close()}
