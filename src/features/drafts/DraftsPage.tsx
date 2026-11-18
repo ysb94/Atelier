@@ -669,6 +669,12 @@ export function CompanyDraftsPage() {
                         }
                       })
                     }}
+                    onSaveSpecDocument={async value => {
+                      await saveDraftChange(draft.id, current => {
+                        const input = draftToInput(current)
+                        return { ...input, specs: { ...input.specs, coating: { ...input.specs.coating, note: value } } }
+                      })
+                    }}
                     onUploadSampleWorkOrder={async (file) => {
                       await saveDraftChange(draft.id, (current) => {
                         const input = draftToInput(current)

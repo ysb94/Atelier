@@ -29,7 +29,11 @@ function informationPanelPosition(anchor: HTMLButtonElement): CSSProperties | nu
   if (!anchor.isConnected || trigger.bottom <= 0 || trigger.top >= height ||
     trigger.right <= Math.max(0, board?.left ?? 0) || trigger.left >= Math.min(width, board?.right ?? width)) return null
 
-  const column = anchor.closest('.draft-color-lines')?.getBoundingClientRect() ?? trigger
+  const lines = anchor.closest('td')?.querySelector('.draft-color-lines')?.getBoundingClientRect()
+  const column = lines ? {
+    left: Math.min(lines.left, trigger.left), right: Math.max(lines.right, trigger.right),
+    top: Math.min(lines.top, trigger.top), bottom: Math.max(lines.bottom, trigger.bottom),
+  } : trigger
   const leftSpace = column.left - gap - margin
   const rightSpace = width - margin - column.right - gap
   const sideWidth = Math.max(leftSpace, rightSpace)
@@ -118,7 +122,7 @@ function SizeFields({ text, weight, note, locked, onChange }: {
 }
 
 function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, highlighted, canApplyBelow, onSave }: {
-  color: DraftColorRow; photo?: string | null; field: DraftInformationField; spec: DraftColorSpec; confirmed: boolean
+  color: DraftColorRow; photo?: string | null; field: Exclude<DraftInformationField, 'specDoc'>; spec: DraftColorSpec; confirmed: boolean
   readOnly: boolean; highlighted: boolean; canApplyBelow: boolean; onSave: SaveColorSpec
 }) {
   const [edits, setEdits] = useState<Partial<Record<ColorSpecField, { source: string; text: string }>>>({})
@@ -209,9 +213,60 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
   )
 }
 
-export function DraftInformationPanel({ id, anchor, draft, field, colorId, readOnly, onFieldChange, onClose, onSave }: {
-  id: string; anchor: HTMLButtonElement; draft: ProductDraft; field: DraftInformationField; colorId: string; readOnly: boolean
+function SpecDocumentForm({ draft, readOnly, onSave }: { draft: ProductDraft; readOnly: boolean; onSave: (value: string) => Promise<void> }) {
+  const value = draft.specs.coating.note
+  const [edit, setEdit] = useState<{ source: string; text: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const text = !readOnly && edit?.source === value ? edit.text : value
+  const legacy = draft.colors.flatMap(color => {
+    const note = draft.specs.colorSpecs[color.id]?.specDoc.trim()
+    return note && note !== value.trim() ? [{ id: color.id, name: color.name, note }] : []
+  })
+
+  return (
+    <form aria-label="공통 스펙 문서" className="space-y-3 border-t border-border p-4"
+      onSubmit={async event => {
+        event.preventDefault()
+        if (readOnly || busy || text.trim() === value.trim()) return
+        setBusy(true)
+        setError('')
+        try {
+          await onSave(text.trim())
+          setEdit(null)
+        } catch (err) {
+          setError(err instanceof Error ? err.message : '스펙 문서를 저장하지 못했습니다.')
+        } finally {
+          setBusy(false)
+        }
+      }}>
+      <Textarea aria-label="스펙 문서 값" value={text} placeholder="모든 컬러에 적용되는 스펙을 입력해 주세요."
+        rows={7} readOnly={readOnly || busy} onChange={event => setEdit({ source: value, text: event.target.value })} />
+      {legacy.length > 0 && (
+        <details className="rounded-lg border border-border px-3 py-2 text-sm">
+          <summary className="cursor-pointer text-muted-foreground">이전 컬러별 스펙 문서</summary>
+          <dl className="mt-2 space-y-2">
+            {legacy.map(({ id, name, note }) => (
+              <div key={id}>
+                <dt className="text-xs font-medium">{name || '컬러 미정'}</dt>
+                <dd className="whitespace-pre-wrap break-words">{note}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      )}
+      <div className="flex justify-end">
+        <Button size="sm" type="submit" disabled={readOnly || busy || text.trim() === value.trim()}>{busy ? '저장 중…' : '저장'}</Button>
+      </div>
+      {error && <p className="text-xs text-danger" role="alert">{error}</p>}
+    </form>
+  )
+}
+
+export function DraftInformationPanel({ id, anchor, draft, field, colorId, readOnly, onFieldChange, onClose, onSave, onSaveSpecDocument }: {
+  id: string; anchor: HTMLButtonElement; draft: ProductDraft; field: DraftInformationField; colorId: string | null; readOnly: boolean
   onFieldChange: (field: DraftInformationField) => void; onClose: () => void; onSave: SaveColorSpec
+  onSaveSpecDocument: (value: string) => Promise<void>
 }) {
   const active = useWorkspaceTabActivity()
   const overlay = useRef<HTMLDivElement>(null)
@@ -257,10 +312,6 @@ export function DraftInformationPanel({ id, anchor, draft, field, colorId, readO
   }
 
   const colors = draft.colors
-  const specConfirmed = field === 'specDoc'
-    ? draft.specs.size.confirmed && draft.specs.fabric.confirmed && draft.specs.weight.confirmed
-    : draft.specs[field].confirmed
-
   if (!active) return null
 
   const content = (
@@ -286,7 +337,8 @@ export function DraftInformationPanel({ id, anchor, draft, field, colorId, readO
       </div>
       <div className="mx-4 mb-4 overflow-hidden rounded-xl border border-border">
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
-          <span className="text-sm font-semibold">컬러 <span className="ml-1.5 font-normal text-muted-foreground">{colors.length}개</span></span>
+          {field === 'specDoc' ? <span className="text-sm font-semibold">공통 스펙 문서</span>
+            : <span className="text-sm font-semibold">컬러 <span className="ml-1.5 font-normal text-muted-foreground">{colors.length}개</span></span>}
           <div role="group" aria-label="INFORMATION 입력 항목" className="flex flex-wrap gap-2">
             {FIELDS.map(option => (
               <Button key={option} type="button" size="sm" variant={field === option ? 'default' : 'outline'}
@@ -297,12 +349,13 @@ export function DraftInformationPanel({ id, anchor, draft, field, colorId, readO
             ))}
           </div>
         </div>
-        {colors.length ? colors.map((color, index) => {
+        {field === 'specDoc' ? <SpecDocumentForm key={String(readOnly)} draft={draft} readOnly={readOnly} onSave={onSaveSpecDocument} />
+          : colors.length ? colors.map((color, index) => {
           const spec = resolveColorSpec(draft.specs, color.id)
           const confirmed = field === 'size'
             ? MEASUREMENT_FIELDS.some(key => spec[key].trim()) &&
               MEASUREMENT_FIELDS.every(key => !spec[key].trim() || draft.specs[key].confirmed)
-            : specConfirmed && Boolean(spec[field].trim())
+            : draft.specs[field].confirmed && Boolean(spec[field].trim())
           return <ColorInformationForm key={`${color.id}:${field}:${readOnly}`} color={color} field={field}
             photo={draft.specs.colorPhotoUrls?.[color.id]} spec={spec} confirmed={confirmed}
             highlighted={color.id === colorId} readOnly={readOnly} canApplyBelow={index === 0 && colors.length > 1} onSave={onSave} />

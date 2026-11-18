@@ -717,7 +717,7 @@ export function DraftPhoto({ src, name, onOpen }: { src: string | null; name: st
 
 export type DraftConfirmFlag = 'nameConfirmed' | 'colorsConfirmed'
 
-export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price, onOpen, onNextSample, onSchedule, onSaveColors, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price, onOpen, onNextSample, onSchedule, onSaveColors, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
   readOnly?: boolean
   draft: ProductDraft; schedule: ResolvedReleaseSchedule | undefined; brand: Brand | undefined
   price?: DraftPriceControls
@@ -728,6 +728,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
   onRenameProduct: (field: 'nameKo' | 'nameEn', name: string) => Promise<void>
   onRenameColor: (colorId: string, name: string) => Promise<void>
   onSaveSheetValue: SaveColorSpec
+  onSaveSpecDocument: (value: string) => Promise<void>
   onUploadSampleWorkOrder: (file: { url: string; name: string }) => Promise<void>
   onReceiveSample: (id: string) => Promise<void>
   onRequestNextSampleRound: (file: { url: string; name: string }, country?: string) => Promise<void>
@@ -748,7 +749,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
   const doneColorIds = new Set(latestColorRound ? draft.specs.colorSampleDone?.[latestColorRound.id] ?? [] : [])
   const [pendingDone, setPendingDone] = useState<Record<string, boolean>>({})
   const informationId = useId()
-  const [information, setInformation] = useState<{ anchor: HTMLButtonElement; colorId: string; field: DraftInformationField } | null>(null)
+  const [information, setInformation] = useState<{ anchor: HTMLButtonElement; colorId: string | null; field: DraftInformationField } | null>(null)
   const closeInformation = useCallback(() => setInformation(null), [])
   const name = draft.nameEn.trim() || draft.nameKo.trim() || '이름 미정'
   const named = Boolean(draft.nameEn.trim() || draft.nameKo.trim())
@@ -762,6 +763,8 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
   const colorsConfirmed = Boolean(draft.specs.colorsConfirmed)
   const registeredDay = sheetRegisteredDay(draft.createdAt)
   const specsConfirmed = draft.specs.size.confirmed && draft.specs.fabric.confirmed && draft.specs.weight.confirmed
+  const specDocument = draft.specs.coating.note
+  const documentOpen = information?.field === 'specDoc'
   const colorRows: Array<DraftColorRow | null> = draft.colors.length ? draft.colors : [null]
   function colorSampleDone(colorId: string) {
     return colorId in pendingDone ? pendingDone[colorId] : doneColorIds.has(colorId)
@@ -868,24 +871,27 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
       </div>
     </td>
     <td>
-      <div className="draft-color-pad" />
+      <div className="draft-color-pad">
+        <InformationButton label={specsConfirmed && specDocument.trim() ? '스펙 확정' : '스펙 문서'}
+          value={specDocument} tone={specTone(specDocument, specsConfirmed)} panelId={informationId}
+          expanded={documentOpen} disabled={false} icon={<FileText size={16} aria-hidden="true" />}
+          onClick={event => setInformation(documentOpen ? null : { anchor: event.currentTarget, colorId: null, field: 'specDoc' })} />
+      </div>
       <div className="draft-color-lines">
         {colorRows.map((color, index) => {
           const spec = color ? resolveColorSpec(draft.specs, color.id) : null
-          const specDocLabel = specsConfirmed && spec?.specDoc.trim() ? '스펙 확정' : '스펙 문서'
-          function informationButton(field: DraftInformationField) {
+          function informationButton(field: Exclude<DraftInformationField, 'specDoc'>) {
             const value = spec?.[field] ?? ''
             const displayValue = field === 'size' ? [formatSizeSpecLabel(value), spec?.weight.trim()].filter(Boolean).join(' · ') : value
-            const confirmed = field === 'specDoc' ? specsConfirmed : field === 'size'
+            const confirmed = field === 'size'
               ? (!value.trim() || draft.specs.size.confirmed) && (!spec?.weight.trim() || draft.specs.weight.confirmed)
               : draft.specs[field].confirmed
             const expanded = information?.colorId === color?.id && information?.field === field
             return (
-              <InformationButton key={field} label={field === 'specDoc' ? specDocLabel : DRAFT_INFORMATION_LABELS[field]}
+              <InformationButton key={field} label={DRAFT_INFORMATION_LABELS[field]}
                 value={displayValue}
                 tone={specTone(displayValue, confirmed)}
                 panelId={informationId} expanded={expanded} disabled={!color}
-                icon={field === 'specDoc' ? <FileText size={16} aria-hidden="true" /> : undefined}
                 onClick={event => {
                   if (!color) return
                   setInformation(expanded ? null : { anchor: event.currentTarget, colorId: color.id, field })
@@ -902,9 +908,6 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
                 />
                 <div className="draft-sheet-specs">
                   {(['size', 'fabric'] as const).map(informationButton)}
-                </div>
-                <div className="draft-sheet-actions">
-                  {informationButton('specDoc')}
                 </div>
               </div>
             </ColorLine>
@@ -935,6 +938,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
       <DraftInformationPanel id={informationId} anchor={information.anchor}
         draft={draft} field={information.field} colorId={information.colorId} readOnly={readOnly}
         onSave={onSaveSheetValue}
+        onSaveSpecDocument={onSaveSpecDocument}
         onFieldChange={field => setInformation(current => current && { ...current, field })}
         onClose={closeInformation} />
     )}

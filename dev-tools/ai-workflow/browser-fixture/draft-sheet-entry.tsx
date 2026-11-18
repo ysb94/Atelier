@@ -20,6 +20,7 @@ function Fixture() {
       colors:[{...newColorRow(),id:'black',name:'블랙',orderQty:12},{...newColorRow(),id:'ivory',name:'아이보리',orderQty:8}],
       sampleWorkOrders:[{...newSampleWorkOrder(),id:'sample',url:'sample.pdf',shippedAt:'2026-10-01T00:00:00Z',receivedAt:'2026-10-02T00:00:00Z',passed:false}],
       specs:{...base.specs,nameConfirmed:true,colorsConfirmed:true,colorNamesConfirmed:true,
+        coating:{...base.specs.coating,note:'상품 공통 스펙 본문'},
         colorImageChoices:{black:'Image',ivory:'None'},
         colorPhotoUrls:{black:'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50"><rect width="50" height="50" fill="black"/></svg>')},
         colorSpecs:normalizeColorSpecs({
@@ -29,6 +30,10 @@ function Fixture() {
   })
   const shown={...draft,sampleWorkOrders:phase==='new'?[]:draft.sampleWorkOrders,specs:{...draft.specs,colorSampleRounds:phase==='review'?draft.specs.colorSampleRounds:[]}}
   const write=async()=>{setWrites(n=>n+1)}
+  const saveDocument = async (note: string) => {
+    setDraft(current => ({ ...current, specs: { ...current.specs, coating: { ...current.specs.coating, note } } }))
+    await write()
+  }
   const saveSpec: SaveColorSpec = async (colorId, changes, applyAll) => {
     setSavedSpec(JSON.stringify([colorId, changes, applyAll]))
     setDraft(current => {
@@ -40,6 +45,6 @@ function Fixture() {
   return <main className="p-6"><button onClick={()=>setReadOnly(v=>!v)}>{readOnly?'작성자로 전환':'다른 직원으로 전환'}</button><select aria-label="검증 단계" value={phase} onChange={event=>setPhase(event.target.value)}><option value="review">샘플 검토</option><option value="new">최초 지시서</option><option value="color-upload">컬러 지시서</option></select><output data-testid="writes">{writes}</output><output data-testid="opened">{opened}</output>
     <output data-testid="saved-spec">{savedSpec}</output>
     <div className="draft-board-scroll"><table className="draft-board-table"><colgroup>{Array.from({length:6},(_,index)=><col key={index}/>)}</colgroup><thead><tr>{['BRAND','IMAGE','PRICE','COLOR','INFORMATION','MD TEAM'].map(label=><th key={label}>{label}</th>)}</tr></thead><tbody><DraftSheetRow draft={shown} readOnly={readOnly} brand={undefined} schedule={{group:{id:'group',brandId:'fixture-brand',name:'11월 출시',releaseTiming:''},targetDate:'2026-11-03',certainty:'confirmed',brandId:null,isPreview:false}}
-      onOpen={()=>setOpened(n=>n+1)} onSchedule={()=>{void write()}} onSaveColors={write} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={saveSpec} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/></tbody></table></div></main>
+      onOpen={()=>setOpened(n=>n+1)} onSchedule={()=>{void write()}} onSaveColors={write} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={saveSpec} onSaveSpecDocument={saveDocument} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/></tbody></table></div></main>
 }
 createRoot(document.getElementById('root')!).render(<Fixture/> )
