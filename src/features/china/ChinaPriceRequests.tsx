@@ -21,7 +21,7 @@ const requestDate = new Intl.DateTimeFormat('ko-KR', {
 })
 const quoteAmount = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 })
 
-type RequestFilter = 'all' | 'first' | 'repeat'
+type RequestFilter = 'all' | 'first' | 'repeat' | 'confirmed'
 type SelectedPhoto = { requestId: string; color: DraftPriceColor }
 export type DraftPriceInputs = Record<string, Record<string, string>>
 
@@ -67,10 +67,11 @@ function ChinaPricePhoto({ photo, onClose }: { photo: SelectedPhoto; onClose: ()
   </dialog>, document.body)
 }
 
-function ChinaPriceRequestRow({ request, earlier, draft, brandName, amounts, disabled, onEdit, onReply, onPhoto }: {
+function ChinaPriceRequestRow({ request, earlier, draft, confirmed, brandName, amounts, disabled, onEdit, onReply, onPhoto }: {
   request: DraftPriceRequest
   earlier: readonly DraftPriceRequest[]
   draft: ProductDraft | undefined
+  confirmed: boolean
   brandName: string | undefined
   amounts: Record<string, string> | undefined
   disabled: boolean
@@ -129,6 +130,7 @@ function ChinaPriceRequestRow({ request, earlier, draft, brandName, amounts, dis
               className={cn('rounded-md', current && first && 'border-transparent bg-primary text-primary-foreground')}>
               {first ? '1차 요청' : `단가 재요청 · ${round.round}차`}
             </Badge>
+            {current && confirmed && <div><Badge variant="success" className="rounded-md">확정</Badge></div>}
             <p className={cn('text-sm font-medium tabular-nums', !current ? 'text-muted-foreground' : round.answeredAt ? 'text-foreground' : 'text-primary')}>
               {round.answeredAt ? `${days} days` : `+ ${days} days`}
             </p>
@@ -205,9 +207,15 @@ export function ChinaPriceRequests({ requests, drafts, brandById, inputs, loadin
   const [filter, setFilter] = useState<RequestFilter>('all')
   const [photo, setPhoto] = useState<SelectedPhoto | null>(null)
   const byDraft = useMemo(() => new Map(drafts.map(draft => [draft.id, draft])), [drafts])
-  const groups = useMemo(() => groupPriceRequests(requests), [requests])
+  const groups = useMemo(() => groupPriceRequests(requests).map(group => {
+    const { request } = group
+    const draft = byDraft.get(request.draftId)
+    const confirmed = request.answeredAt && draft?.specs.confirmedPriceRequestId === request.id
+    const status = confirmed ? 'confirmed' : request.round === 1 ? 'first' : 'repeat'
+    return { ...group, draft, status }
+  }), [byDraft, requests])
   const pending = groups.filter(({ request }) => !request.answeredAt)
-  const shown = groups.filter(({ request }) => filter === 'all' || (request.round === 1) === (filter === 'first'))
+  const shown = filter === 'all' ? groups : groups.filter(({ status }) => status === filter)
 
   return <section aria-labelledby="china-price-requests-title">
     <h2 id="china-price-requests-title" className="sr-only">단가요청</h2>
@@ -215,8 +223,9 @@ export function ChinaPriceRequests({ requests, drafts, brandById, inputs, loadin
       <FilterTabs<RequestFilter> value={filter} onChange={setFilter} ariaLabel="단가요청 구분" variant="underline" className="border-b-0"
         tabs={[
           { value: 'all', label: `ALL (${pending.length})` },
-          { value: 'first', label: `1차 요청 (${pending.filter(({ request }) => request.round === 1).length})` },
-          { value: 'repeat', label: `재요청 (${pending.filter(({ request }) => request.round > 1).length})` },
+          { value: 'first', label: `1차 요청 (${pending.filter(({ status }) => status === 'first').length})` },
+          { value: 'repeat', label: `재요청 (${pending.filter(({ status }) => status === 'repeat').length})` },
+          { value: 'confirmed', label: `확정 (${groups.filter(({ status }) => status === 'confirmed').length})` },
         ]} />
       <p className="px-4 py-2 text-xs text-muted-foreground">위안화(¥) · 기획안에 컬러별 단가 회신</p>
     </div>
@@ -236,13 +245,11 @@ export function ChinaPriceRequests({ requests, drafts, brandById, inputs, loadin
           </tr>
         </thead>
         <tbody>
-          {shown.map(({ request, earlier }) => {
-            const draft = byDraft.get(request.draftId)
-            return <ChinaPriceRequestRow key={request.id} request={request} earlier={earlier} draft={draft}
+          {shown.map(({ request, earlier, draft, status }) =>
+            <ChinaPriceRequestRow key={request.id} request={request} earlier={earlier} draft={draft} confirmed={status === 'confirmed'}
               brandName={draft?.brandId ? brandById?.get(draft.brandId)?.name : undefined} amounts={inputs[request.id]} disabled={Boolean(error)}
               onEdit={(id, value) => onEdit(request.id, id, value)} onReply={values => onReply(request.id, values)}
-              onPhoto={color => setPhoto({ requestId: request.id, color })} />
-          })}
+              onPhoto={color => setPhoto({ requestId: request.id, color })} />)}
           {shown.length === 0 && <tr><td colSpan={5} className="px-4 py-12 text-center text-sm text-muted-foreground">
             {loading ? '단가요청을 불러오는 중입니다.' : error ? '단가요청 목록을 다시 조회해 주세요.' : '해당 단가요청이 없습니다.'}
           </td></tr>}
