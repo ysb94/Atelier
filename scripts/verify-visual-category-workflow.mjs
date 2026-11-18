@@ -150,6 +150,15 @@ try {
   await rpc(middle, 'save_visual_work_category_comment', [...oldCommentArgs, true])
   await db.exec('reset role; begin')
   await db.exec(await readFile('supabase/migrations/20261109210739_visual_workflow_review_rounds.sql', 'utf8'))
+  const commentFunctionAccess = async () => (await db.query(`select oid,proowner,proacl,prosecdef,proconfig
+    from pg_proc where oid in (
+      'app.visual_work_category_discussion_allowed(uuid,text)'::regprocedure,
+      'app.list_visual_work_category_comments(uuid,text)'::regprocedure,
+      'app.save_visual_work_category_content(uuid,text,uuid,text,uuid,jsonb,boolean,boolean)'::regprocedure
+    ) order by oid`)).rows
+  const commentAccessBefore = await commentFunctionAccess()
+  await db.exec(await readFile('supabase/migrations/20261118101456_visual_category_comment_participants.sql', 'utf8'))
+  assert.deepEqual(await commentFunctionAccess(), commentAccessBefore)
   await db.exec('commit')
   delete historical.data.visualCategoryWorkflow.categories.banner.feedback
   delete historical.data.visualCategoryWorkflow.categories.banner.feedbackCycles
@@ -171,6 +180,18 @@ try {
     legacy, 'banner', crypto.randomUUID(), '숨은 댓글에 답글 시도', oldComment, [], true,
   ]), { code: '22023' })
 
+  const pending = crypto.randomUUID()
+  const pendingDraft = await rpc(ids.planner, 'begin_work_request', [pending, 'design'])
+  const publishedPending = await rpc(ids.planner, 'save_work_request', [pending, pendingDraft, { values, status: 'requested' }, crypto.randomUUID()])
+  const assignedPending = await rpc(ids.manager, 'change_visual_work_final_approval', [pending, publishedPending, 'assign', supervisor, crypto.randomUUID()])
+  assert.equal((await rpc(supervisor, 'list_visual_work_category_comments', [pending, 'banner'])).canWrite, true)
+  await rejected(() => rpc(otherSupervisor, 'list_visual_work_category_comments', [pending, 'banner']))
+  const earlyLegacyComment = crypto.randomUUID()
+  await rpc(supervisor, 'save_visual_work_category_comment', [pending, 'banner', earlyLegacyComment, '접수 전 참고 사항', null, [], true])
+  const receivedPending = await legacyAction(supervisor, 'receipt', { target: pending, revision: assignedPending })
+  await legacyAction(middle, 'assign_worker', { target: pending, category: 'banner', revision: receivedPending, person: worker })
+  assert.equal((await rpc(worker, 'list_visual_work_category_comments', [pending, 'banner'])).items[0].id, earlyLegacyComment)
+
   const draft = await rpc(ids.planner, 'begin_work_request', [request, 'design'])
   const publishCommand = crypto.randomUUID()
   const publishArgs = [request, draft, { values, status: 'requested' }, publishCommand]
@@ -183,6 +204,14 @@ try {
   assert.ok(await current(otherSupervisor, 'receipt'))
   const receipt = await current(supervisor, 'receipt')
   assert.ok(receipt)
+  const earlyComments = []
+  for (const author of [supervisor, middle, ids.planner]) {
+    assert.equal((await rpc(author, 'list_visual_work_category_comments', [request, 'banner'])).canWrite, true)
+    const id = crypto.randomUUID()
+    await rpc(author, 'save_visual_work_category_comment', [request, 'banner', id, '배정 전 작업 참고 의견', null, [], true])
+    earlyComments.push(id)
+  }
+  await rejected(() => rpc(worker, 'save_visual_work_category_comment', [request, 'banner', crypto.randomUUID(), '미배정 직원 댓글', null, [], true]))
 
   await rpc(otherWorker, 'read_my_visual_workflow_notices', [request, 'banner', revision, [receipt.id]])
   await rpc(supervisor, 'read_my_visual_workflow_notices', [request, 'banner', revision - 1, [receipt.id]])
@@ -215,16 +244,22 @@ try {
   assert.ok(await current(worker, 'working', 'banner'))
   await rejected(() => rpc(worker, 'list_visual_work_category_comments', [request, 'video']))
   await rejected(() => rpc(ids.outsider, 'list_visual_work_category_comments', [request, 'banner']))
-  for (const author of [ids.planner, middle]) {
-    await rpc(author, 'save_visual_work_category_comment', [request, 'banner', crypto.randomUUID(), '작업 참고 의견', null, [], true])
-  }
   const workerComments = await rpc(worker, 'list_visual_work_category_comments', [request, 'banner'])
-  assert.equal(workerComments.items.length, 2)
-  assert.equal(workerComments.canWrite, false)
+  assert.deepEqual(workerComments.items.map(row => row.id).sort(), earlyComments.toSorted())
+  assert.equal(workerComments.canWrite, true)
+  const workerComment = crypto.randomUUID()
+  const workerCommentArgs = [request, 'banner', workerComment, '작업자 댓글', earlyComments[0], fileSpec]
+  const workerCommentPath = (await rpc(worker, 'save_visual_work_category_comment', [...workerCommentArgs, false])).files[0].path
+  await upload(worker, workerCommentPath)
+  await rpc(worker, 'save_visual_work_category_comment', [...workerCommentArgs, true])
+  const sharedWorkerComment = (await rpc(ids.planner, 'list_visual_work_category_comments', [request, 'banner'])).items.find(row => row.id === workerComment)
+  assert.equal(sharedWorkerComment.replyTo, earlyComments[0])
+  assert.equal(sharedWorkerComment.files[0].path, workerCommentPath)
+  assert.equal(await canReadFile(supervisor, workerCommentPath), true)
+  assert.equal(await canReadFile(otherWorker, workerCommentPath), false)
   await rejected(() => rpc(worker, 'save_visual_work_category_comment', [
-    request, 'banner', crypto.randomUUID(), '읽기 전용 댓글 권한 검증', null, [], true,
+    request, 'video', crypto.randomUUID(), '다른 분류 댓글', null, [], true,
   ]))
-  assert.equal((await rpc(ids.planner, 'list_visual_work_category_comments', [request, 'banner'])).items.length, 2)
   assert.deepEqual((await review(worker, 'banner')).assignments, [{ middle: 0 }])
   assert.deepEqual((await review(middle, 'banner')).assignments.map(row => [row.workerName, row.middle]), [['배너 작업자', 0]])
 

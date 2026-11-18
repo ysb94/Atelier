@@ -62,7 +62,7 @@ import { WorkRequestCategoryAssignments } from './WorkRequestCategoryAssignments
 import { VisualWorkRequestDrawer } from './VisualWorkRequestDrawer'
 import { VisualWorkflowNotificationList } from '@/features/settings/MyHomeNotificationList'
 import { VisualFinalApprovalPanel } from './VisualFinalApprovalPanel'
-import { visualFinalPending, visualSummaryApprover, workRequestStatusMeta, type VisualFinalAction } from './visual-final-approval'
+import { visualFinalApprover, visualFinalPending, visualSummaryApprover, workRequestStatusMeta, type VisualFinalAction } from './visual-final-approval'
 import { downloadVisualWorkFile, visualWorkDetail } from './visual-work-detail'
 import { useAuth } from '@/lib/supabase/auth'
 import { listBrandDirectory } from '@/lib/supabase/profiles'
@@ -3758,6 +3758,8 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
     const showFinalApproval = selectedRequest.owner === 'design' && (Boolean(categoryWorkflow || selectedRequest.visualFinalApproval) ||
       (finalApprovalEnabled && !isClosedStatus(selectedRequest.status)))
     const supervisorId = visualSummaryApprover(selectedRequest, activeSupervisorIds)
+    const discussionSupervisor = visualFinalApprover(categoryWorkflow ?? selectedRequest.visualFinalApproval, activeSupervisorIds)
+    const isDiscussionSupervisor = activeSupervisorIds.includes(selfId) && (!discussionSupervisor || discussionSupervisor === selfId)
     const memberName = (id: string) => storage.directoryMembers.find(person => person.id === id)?.displayName?.trim() || '기존 직원'
     const canEdit = isSelfRequest && selectedRequest.status === 'requested' && !noticeOnly
     const chatRooms = visibleChatRooms(selectedRequest, {
@@ -4241,6 +4243,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
           canManage={canManageSelected}
           isRequester={isSelfRequest}
           requesterView={personal && isSelfRequest}
+          isDiscussionSupervisor={isDiscussionSupervisor}
           summary={{
             requesterDepartment: departmentLabel(selectedRequest.requesterDepartment),
             requesterName: selectedRequest.values.requester?.trim() || '미입력',

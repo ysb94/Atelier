@@ -22,7 +22,7 @@ const workerCompleteStates = ['supervisor_review', 'middle_revision', 'requester
 
 export function VisualCategoryWorkflowPanel({
   request, workflow, category, step, viewerId, canManage, supervisors, members, memberName, confirmationHost, requesterOnly,
-  feedbackHost, onReviewRoundsReady,
+  feedbackHost,
 }: {
   request: Pick<WorkRequestRecord, 'id' | 'requesterId' | 'revision' | 'status'>
   workflow: VisualCategoryWorkflow
@@ -36,7 +36,6 @@ export function VisualCategoryWorkflowPanel({
   confirmationHost: HTMLDivElement | null
   requesterOnly: boolean
   feedbackHost: HTMLDivElement | null
-  onReviewRoundsReady: (ready: true) => void
 }) {
   const cache = useQueryClient()
   const active = useWorkspaceTabActivity()
@@ -60,7 +59,6 @@ export function VisualCategoryWorkflowPanel({
   })
   const reviewRounds = history.data?.reviewRounds === true
   const workReady = received || reviewRounds
-  useEffect(() => { if (reviewRounds) onReviewRoundsReady(true) }, [onReviewRoundsReady, reviewRounds])
   const [note, setNote] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const hasResultFiles = reviewRounds && files.length > 0
