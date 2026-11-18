@@ -8,6 +8,7 @@ import { listLeaveRequests } from '@/lib/supabase/leave-requests'
 import { getMyAttendanceBasis } from '@/lib/supabase/my-attendance-basis'
 import { loadCompanyLunch } from '@/lib/supabase/company-work-hours'
 import { useAuth } from '@/lib/supabase/auth'
+import { useAttendanceIncidentAdjustments } from '@/lib/supabase/attendance-incident-adjustments'
 import { useHeadOfficeSelfService } from '@/lib/company/workforce-management-context'
 import { emptyList, formatNumber } from '@/lib/utils'
 import { actualOvertimeHours, countMyLateDays } from './my-attendance-summary'
@@ -79,6 +80,8 @@ function HeadOfficeAttendanceSummary() {
   const today = koreaDateKey()
   const month = today.slice(0, 7)
   const dates = useMemo(() => attendanceMonthDates(month), [month])
+  const incidentAdjustments = useAttendanceIncidentAdjustments(dates[0], dates[dates.length - 1], userId, allowed && active, 30_000)
+  const excludedLateDates = useMemo(() => new Set(incidentAdjustments.data?.rows.filter(row => row.kind === 'late' && row.minutes === 0).map(row => row.work_date)), [incidentAdjustments.data])
   const basis = useQuery({
     queryKey: ['my-attendance-basis', userId, month],
     queryFn: () => getMyAttendanceBasis(userId, month),
@@ -105,10 +108,10 @@ function HeadOfficeAttendanceSummary() {
   const basisRow = basis.data
   const lunchHours = lunch.data
   const summary = useMemo(() => ({
-    late: basisRow && lunchHours && !leaves.error && !lunch.error ? countMyLateDays(clock.rows.filter(row => row.date.startsWith(month)), basisRow.start, basisRow.grace, today, requests, lunchHours) : null,
+    late: basisRow && lunchHours && !leaves.error && !lunch.error ? countMyLateDays(clock.rows.filter(row => row.date.startsWith(month)), basisRow.start, basisRow.grace, today, requests, lunchHours, excludedLateDates) : null,
     overtime: actuals.ready ? actualOvertimeHours(clock.rows, requests, lunchHours?.start ?? '', lunchHours?.end ?? '', month, today, basisRow?.start ?? '', actuals.rows) : null,
-  }), [basisRow, clock.rows, month, today, requests, lunchHours, leaves.error, lunch.error, actuals.ready, actuals.rows])
-  const lateLoading = !clock.exempt && (clock.loading || (allowed && (basis.isPending || leaves.isPending || lunch.isPending)))
+  }), [basisRow, clock.rows, month, today, requests, lunchHours, leaves.error, lunch.error, actuals.ready, actuals.rows, excludedLateDates])
+  const lateLoading = !clock.exempt && (clock.loading || (allowed && (basis.isPending || leaves.isPending || lunch.isPending || incidentAdjustments.isLoading)))
   const leaveLoading = allowed && basis.isPending
   const overtimeLoading = allowed && (leaves.isPending || actuals.isPending)
   const overtimeError = Boolean(leaves.error || actuals.error)
@@ -116,7 +119,7 @@ function HeadOfficeAttendanceSummary() {
   return <details className="home-attendance-summary">
     <summary><h2>내 근태 현황</h2>{advances.data?.ready && outstanding > 0 && <strong className="text-xs tabular-nums text-danger">선사용 {formatNumber(-outstanding)}일</strong>}</summary>
     <dl>
-      <div><dt>이번 달 지각</dt><dd>{clock.exempt ? '제외' : lateLoading ? '…' : basis.isError || leaves.isError || lunch.isError ? '조회 실패' : summary.late == null ? '기준 미설정' : amount(summary.late, '회')}</dd></div>
+      <div><dt>이번 달 지각</dt><dd>{clock.exempt ? '제외' : lateLoading ? '…' : basis.isError || leaves.isError || lunch.isError || incidentAdjustments.isError ? '조회 실패' : summary.late == null ? '기준 미설정' : amount(summary.late, '회')}</dd></div>
       <div><dt>남은 연차</dt><dd className={basisRow?.additionalAnnualLeave != null && basisRow.additionalAnnualLeave > 0 ? 'is-split' : undefined}>{leaveLoading ? '…' : basis.isError ? '조회 실패' : basisRow?.additionalAnnualLeave != null && basisRow.additionalAnnualLeave > 0 && basisRow.baseAnnualLeave != null ? <AdditionalLeaveHistory userId={userId}>{remainingLeaveAmount(basisRow.baseAnnualLeave, basisRow.additionalAnnualLeave, basisRow.remainingAnnualLeave)}</AdditionalLeaveHistory> : remainingLeaveAmount(basisRow?.baseAnnualLeave, basisRow?.additionalAnnualLeave, basisRow?.remainingAnnualLeave ?? null)}</dd></div>
       <div><dt>이번 달 야근</dt><dd>{overtimeError ? '조회 실패' : overtimeLoading ? '…' : summary.overtime == null ? '실제 시간 연결 대기' : amount(summary.overtime, '시간')}</dd></div>
     </dl>

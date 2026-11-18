@@ -25,6 +25,9 @@ assert.equal(cumulativeLateText({ count: 17, minutes: 94 }), '17회 (1시간 34�
 assert.equal(cumulativeLateText({ count: 1, minutes: 6 }), '1회 (6분)')
 assert.equal(cumulativeLateText({ count: 2, minutes: 120 }), '2회 (2시간)')
 assert.equal(cumulativeLateText({ count: 0, minutes: 0 }), '0회 (0분)')
+assert.deepEqual(cumulativeLateTotal([
+  { date: '2026-11-10', clockIn: '09:10' }, { date: '2026-11-11', clockIn: '09:12' },
+], () => '09:00', '2026-11-11', new Map([['2026-11-10', 0], ['2026-11-11', 3]])), { count: 1, minutes: 3 })
 assert.deepEqual(cumulativeLateTotal([{ date: '2026-10-26', clockIn: '09:06' }], () => '', '2026-10-27'), { count: 0, minutes: 0 })
 assert.equal(lateConfirmStamp('김민수', '2026-11-01T16:00:00Z'), '김민수 2026.11.2')
 assert.equal(lateConfirmStamp('부서장 없음', null), '부서장 없음')

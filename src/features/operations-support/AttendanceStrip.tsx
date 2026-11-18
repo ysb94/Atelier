@@ -1,9 +1,9 @@
 import { EMPTY_ATTENDANCE, isWorkday, monthDates, recordTiming, type AttendanceRecords, type AttendanceSchedule, type WorkdayOverrides } from './monthly-attendance'
 
-type StripState = 'ok' | 'after' | 'exceeded' | 'leave' | 'half' | 'absent' | 'missing' | 'planned' | 'excluded'
+type StripState = 'ok' | 'after' | 'exceeded' | 'leave' | 'half' | 'absent' | 'missing' | 'planned' | 'excluded' | 'absence-excluded'
 
 const STRIP_LABEL: Record<StripState, string> = {
-  ok: '정시', after: '정시 이후', exceeded: '기준 초과', leave: '연차·공가', half: '반차', absent: '결근', missing: '미기록', planned: '남은 근무일', excluded: '집계 전',
+  ok: '정시', after: '정시 이후', exceeded: '기준 초과', leave: '연차·공가', half: '반차', absent: '결근', missing: '미기록', planned: '남은 근무일', excluded: '집계 전', 'absence-excluded': '결근 제외',
 }
 
 /** 한 달 근무일을 칸 하나씩 보이는 줄(시안). 판정은 개인 달력과 같은 recordTiming을 쓴다. */
@@ -15,6 +15,7 @@ export function AttendanceStrip({ month, memberId, records, schedule, overrides,
     const record = records[date]?.[memberId] ?? EMPTY_ATTENDANCE
     const timing = recordTiming(record, schedule)
     const state: StripState = date < trackingStart ? 'excluded'
+      : record.absenceExcluded ? 'absence-excluded'
       : record.status === 'unset' ? (date > today ? 'planned' : 'missing')
       : record.status === 'annual' || record.status === 'official' ? 'leave'
       : record.status === 'absent' ? 'absent'
@@ -34,7 +35,7 @@ export function AttendanceStrip({ month, memberId, records, schedule, overrides,
   return (
     <span className="attendance-strip" role="img" aria-label={summary ? `${month} 출근 기록: ${summary}` : `${month} 출근 기록 없음`}>
       {days.map((day, index) => (
-        <i key={day.date} className={`is-${day.state}${day.weekStart && index > 0 ? ' is-week' : ''}`} title={`${Number(day.date.slice(5, 7))}/${Number(day.date.slice(8))} ${STRIP_LABEL[day.state]}`} />
+        <i key={day.date} className={`is-${day.state === 'absence-excluded' ? 'excluded' : day.state}${day.weekStart && index > 0 ? ' is-week' : ''}`} title={`${Number(day.date.slice(5, 7))}/${Number(day.date.slice(8))} ${STRIP_LABEL[day.state]}`} />
       ))}
     </span>
   )

@@ -34,7 +34,7 @@ export function lateMinutes(start: string, actual: string, grace = ATTENDANCE_GR
 export type LateTotal = { count: number; minutes: number }
 
 /** 올해 1월 1일부터 기준일까지, 근무일의 지각 횟수와 지각 분 합계. */
-export function cumulativeLateTotal(clocks: readonly { date: string; clockIn: string }[], startFor: (date: string) => string, through: string): LateTotal {
+export function cumulativeLateTotal(clocks: readonly { date: string; clockIn: string }[], startFor: (date: string) => string, through: string, adjustments?: ReadonlyMap<string, number>): LateTotal {
   const from = `${through.slice(0, 4)}-01-01`
   const seen = new Set<string>()
   let count = 0
@@ -42,7 +42,8 @@ export function cumulativeLateTotal(clocks: readonly { date: string; clockIn: st
   for (const clock of clocks) {
     if (clock.date < from || clock.date > through || seen.has(clock.date) || !isWorkday(clock.date, {})) continue
     seen.add(clock.date)
-    const late = lateMinutes(startFor(clock.date), clock.clockIn)
+    const computed = lateMinutes(startFor(clock.date), clock.clockIn)
+    const late = computed > 0 ? adjustments?.get(clock.date) ?? computed : 0
     if (late <= 0) continue
     count += 1
     minutes += late

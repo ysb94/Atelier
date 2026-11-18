@@ -1,4 +1,5 @@
 import type { LeaveRequest } from '../../lib/supabase/leave-requests.ts'
+import type { AttendanceIncidentAdjustment } from '../../lib/supabase/attendance-incident-adjustments.ts'
 import { EMPTY_ATTENDANCE, type AttendanceRecord, type AttendanceRecords, type AttendanceStatus } from './monthly-attendance.ts'
 import { offsiteWorkdayStart } from './offsite-workday-start.ts'
 import { approvedArrivalIntervals, isMorningHalf, scheduledOffsiteArrival, type ArrivalClock, type ArrivalInterval } from './attendance-arrival.ts'
@@ -21,7 +22,7 @@ function withNote(record: AttendanceRecord, note: string): AttendanceRecord {
 }
 
 /** 회사 출근 기록과 대기·승인 신청을 월별 근태 칸으로 바꾼다. */
-export function buildAttendanceRecords(dates: readonly string[], clocks: readonly (ArrivalClock & { employeeId: string; date: string })[], leaves: readonly LeaveRequest[], lunch?: ArrivalInterval): AttendanceRecords {
+export function buildAttendanceRecords(dates: readonly string[], clocks: readonly (ArrivalClock & { employeeId: string; date: string })[], leaves: readonly LeaveRequest[], lunch?: ArrivalInterval, adjustments: readonly AttendanceIncidentAdjustment[] = []): AttendanceRecords {
   const days = new Set(dates)
   const records: AttendanceRecords = {}
   for (const clock of clocks) {
@@ -62,6 +63,15 @@ export function buildAttendanceRecords(dates: readonly string[], clocks: readonl
     const day = records[date] ?? {}
     day[employeeId] = record
     records[date] = day
+  }
+  for (const row of adjustments) {
+    if (row.minutes == null || !days.has(row.work_date)) continue
+    const day = records[row.work_date] ?? {}
+    const record = day[row.employee_id] ?? EMPTY_ATTENDANCE
+    day[row.employee_id] = row.kind === 'late'
+      ? { ...record, lateMinutes: row.minutes }
+      : { ...record, absenceExcluded: !record.start && (record.status === 'unset' || record.status === 'absent') }
+    records[row.work_date] = day
   }
   return records
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { FilterTabs } from '@/components/ui/filter-tabs'
@@ -9,6 +9,10 @@ import { StatusPill } from '@/components/ui/status-pill'
 import { Input } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { canEditOrgAssignment } from '@/lib/company/capabilities'
+import { useAuth } from '@/lib/supabase/auth'
+import { attendanceIncidentQueryKey, saveAttendanceIncidentAdjustment, useAttendanceIncidentAdjustments, type AttendanceIncidentAdjustment } from '@/lib/supabase/attendance-incident-adjustments'
+import { AttendanceIncidentEditDialog } from './AttendanceIncidentEditDialog'
 import { listCompanyAttendanceClocks, listCompanyDeferredClockOuts, type CompanyAttendanceClock, type CompanyDeferredClockOut } from '@/lib/supabase/attendance-clocks'
 import { countLateStatementsAwaitingHr, listLateArrivalStatements, type LateArrivalStatement } from '@/lib/supabase/late-arrival-statements'
 import { LateArrivalStatementDocument } from '@/features/home/LateArrivalClockIn'
@@ -53,12 +57,14 @@ export type CheckKind = 'all' | 'late' | 'absent' | 'missed'
 type CheckRow = {
   key: string; memberId: string; departmentId: string | null; date: string; dateLabel: string; name: string; team: string
   start: string; clockIn: string; result: string; kind: 'late' | 'absent' | 'missed'
+  originalMinutes?: number
+  adjustment?: AttendanceIncidentAdjustment
   missed?: { pending: boolean; automatic: boolean; detail: string; totalCount: number }
 }
 const KIND_LABEL = { late: '지각', absent: '결근', missed: '퇴근 미처리' } as const
 const KIND_TONE = { late: 'warning', absent: 'danger', missed: 'outline' } as const
 
-/** 근태 > 확인 필요: 지각·결근·퇴근 미처리를 한 표에서 본다. 처리 버튼 없이 기록과 경과일만 보여준다. */
+/** 근태 > 확인 필요: 지각·결근·퇴근 미처리를 확인하고, 지각·결근 집계를 보정한다. */
 export function AttendanceLatePanel({ directory, schedules, initialKind = 'all', onKindChange }: {
   directory: ReturnType<typeof useOpsDirectory>
   schedules: ReturnType<typeof useAttendanceStartSettings>
@@ -66,6 +72,9 @@ export function AttendanceLatePanel({ directory, schedules, initialKind = 'all',
   onKindChange?: (kind: CheckKind) => void
 }) {
   useRenderWatch('AttendanceLatePanel')
+  const { profile } = useAuth()
+  const canEdit = canEditOrgAssignment(profile)
+  const queryClient = useQueryClient()
   const active = useWorkspaceTabActivity()
   const today = localDateKey(new Date())
   const nowMinutes = seoulNowMinutes()
@@ -75,8 +84,14 @@ export function AttendanceLatePanel({ directory, schedules, initialKind = 'all',
   const [kind, setKind] = useState<CheckKind>(initialKind)
   const [page, setPage] = useState(1)
   const [statement, setStatement] = useState<LateArrivalStatement | null>(null)
+  const [editing, setEditing] = useState<CheckRow | null>(null)
+  const [showExcluded, setShowExcluded] = useState(false)
   const monthOk = /^\d{4}-(0[1-9]|1[0-2])$/.test(month)
   const dates = useMemo(() => monthOk ? monthDates(month) : emptyList<string>(), [month, monthOk])
+  const adjustments = useAttendanceIncidentAdjustments(dates[0], dates[dates.length - 1], undefined, monthOk)
+  const adjustmentByKey = useMemo(() => new Map(adjustments.data?.rows.map(row => [
+    `${row.kind}:${row.employee_id}:${row.work_date}`, row,
+  ])), [adjustments.data])
   const clocks = useQuery({
     queryKey: ['company-attendance-clocks', month],
     queryFn: () => listCompanyAttendanceClocks(month),
@@ -132,7 +147,10 @@ export function AttendanceLatePanel({ directory, schedules, initialKind = 'all',
       const team = directory.departmentName(member.departmentId)
       const name = memberLabel(member.displayName)
       if (!matches(member.departmentId, name, team)) continue
-      next.push({ key: `late:${member.id}:${clock.date}`, memberId: member.id, departmentId: member.departmentId, date: clock.date, dateLabel: dateLabel(clock.date), name, team, start: arrivalStart, clockIn: clock.clockIn, result: lateLabel(Math.floor((actual - baseline) / 60)), kind: 'late' })
+      const key = `late:${member.id}:${clock.date}`
+      const adjustment = adjustmentByKey.get(key)
+      const originalMinutes = Math.floor((actual - baseline) / 60)
+      next.push({ key, memberId: member.id, departmentId: member.departmentId, date: clock.date, dateLabel: dateLabel(clock.date), name, team, start: arrivalStart, clockIn: clock.clockIn, result: lateLabel(adjustment?.minutes ?? originalMinutes), kind: 'late', originalMinutes, adjustment })
     }
     for (const member of directory.members) {
       if (member.attendanceExempt) continue
@@ -146,7 +164,9 @@ export function AttendanceLatePanel({ directory, schedules, initialKind = 'all',
         const baseline = timeSeconds(schedule.start)
         if (date > today || !isWorkday(date, {}) || clockByKey.has(`${member.id}:${date}`) || covered.has(`${member.id}:${date}`)) continue
         if (date === today && (baseline == null ? nowMinutes < 18 * 60 : nowMinutes * 60 <= baseline + schedule.grace * 60)) continue
-        next.push({ key: `absent:${member.id}:${date}`, memberId: member.id, departmentId: member.departmentId, date, dateLabel: dateLabel(date), name, team, start: schedule.start || '미설정', clockIn: '없음', result: '결근', kind: 'absent' })
+        const key = `absent:${member.id}:${date}`
+        const adjustment = adjustmentByKey.get(key)
+        next.push({ key, memberId: member.id, departmentId: member.departmentId, date, dateLabel: dateLabel(date), name, team, start: schedule.start || '미설정', clockIn: '없음', result: adjustment?.minutes === 0 ? '집계 제외' : '결근', kind: 'absent', adjustment })
       }
     }
     // 퇴근 미처리는 다음 출근 때 입력했거나 자동 종료된 기록이다(누적은 같은 사람의 전체 횟수).
@@ -163,15 +183,19 @@ export function AttendanceLatePanel({ directory, schedules, initialKind = 'all',
     }
     const order = { absent: 0, late: 1, missed: 2 }
     return next.sort((a, b) => b.date.localeCompare(a.date) || order[a.kind] - order[b.kind] || a.name.localeCompare(b.name, 'ko'))
-  }, [clockRows, clockByKey, covered, dates, directory, schedules.index, leaveRows, needle, today, nowMinutes, lunch.data, deferredRows, month, monthOk])
-  const rows = useMemo(() => searchedRows.filter(row => inDepartmentScope(departmentId, row.departmentId)), [searchedRows, departmentId])
+  }, [clockRows, clockByKey, covered, dates, directory, schedules.index, leaveRows, needle, today, nowMinutes, lunch.data, deferredRows, month, monthOk, adjustmentByKey])
+  const countedRows = useMemo(() => searchedRows.filter(row => row.adjustment?.minutes !== 0), [searchedRows])
+  const rows = useMemo(() => countedRows.filter(row => inDepartmentScope(departmentId, row.departmentId)), [countedRows, departmentId])
+  const excluded = searchedRows.filter(row => row.adjustment?.minutes === 0 && inDepartmentScope(departmentId, row.departmentId))
   const lateRows = rows.filter(row => row.kind === 'late')
   const absentRows = rows.filter(row => row.kind === 'absent')
   const missedRows = rows.filter(row => row.kind === 'missed')
   const latePeople = new Set(lateRows.map(row => row.memberId)).size
   const absentPeople = new Set(absentRows.map(row => row.memberId)).size
   const missedPeople = new Set(missedRows.map(row => row.memberId)).size
-  const visibleRows = kind === 'late' ? lateRows : kind === 'absent' ? absentRows : kind === 'missed' ? missedRows : rows
+  const visibleRows = showExcluded
+    ? searchedRows.filter(row => inDepartmentScope(departmentId, row.departmentId) && (kind === 'all' || row.kind === kind))
+    : kind === 'late' ? lateRows : kind === 'absent' ? absentRows : kind === 'missed' ? missedRows : rows
   const pages = Math.max(1, Math.ceil(visibleRows.length / PAGE_SIZE))
   const currentPage = Math.min(page, pages)
   const pageRows = visibleRows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
@@ -182,18 +206,18 @@ export function AttendanceLatePanel({ directory, schedules, initialKind = 'all',
       : kind === 'missed'
         ? '이 조건에 해당하는 퇴근 미처리 기록이 없습니다.'
         : '이 조건의 지각·결근·퇴근 미처리 기록이 없습니다.'
-  const readError = directory.error || schedules.error || clocks.error || leaves.error || lunch.error
-  const unavailable = directory.loading || schedules.loading || clocks.isPending || leaves.isPending || lunch.isPending || deferred.isPending || Boolean(readError)
+  const readError = directory.error || schedules.error || clocks.error || leaves.error || lunch.error || adjustments.error
+  const unavailable = directory.loading || schedules.loading || clocks.isPending || leaves.isPending || lunch.isPending || deferred.isPending || adjustments.isLoading || Boolean(readError)
   function chooseKind(next: CheckKind) {
     setKind(next)
     setPage(1)
     onKindChange?.(next)
   }
   const deptCards = useMemo(() => departmentScopeCards({
-    items: searchedRows, departments: directory.departments, departmentOf: row => row.departmentId, unavailable,
+    items: countedRows, departments: directory.departments, departmentOf: row => row.departmentId, unavailable,
     count: scoped => new Set(scoped.map(row => row.memberId)).size,
     detail: { label: '건', count: scoped => scoped.length },
-  }), [searchedRows, directory.departments, unavailable])
+  }), [countedRows, directory.departments, unavailable])
   function chooseMonth(next: string) {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(next)) return
     setMonth(next)
@@ -233,30 +257,35 @@ export function AttendanceLatePanel({ directory, schedules, initialKind = 'all',
         { value: 'missed', label: '퇴근 미처리', count: unavailable ? undefined : missedRows.length, ...(unavailable ? {} : { subtitle: `${missedPeople}명` }) },
       ]}
     />
-    {(readError || statements.error) && <p role="alert" className="text-sm text-danger">직원·관리 대상·출근 기준 또는 근태 기록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => { directory.refetch(); void schedules.refresh(); void clocks.refetch(); void leaves.refetch(); void lunch.refetch(); void statements.refetch() }}>다시 불러오기</Button></p>}
+    {canEdit && adjustments.data?.supported === false && <p className="text-sm text-muted-foreground">근태 보정 저장 설정을 적용한 뒤 수정할 수 있습니다.</p>}
+    {kind !== 'missed' && excluded.some(row => kind === 'all' || row.kind === kind) && <label className="flex items-center gap-2 text-sm">
+      <input type="checkbox" checked={showExcluded} onChange={event => { setShowExcluded(event.target.checked); setPage(1) }} />집계 제외 기록 보기
+    </label>}
+    {(readError || statements.error) && <p role="alert" className="text-sm text-danger">직원·관리 대상·출근 기준 또는 근태 기록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => { directory.refetch(); void schedules.refresh(); void clocks.refetch(); void leaves.refetch(); void lunch.refetch(); void statements.refetch(); void adjustments.refetch() }}>다시 불러오기</Button></p>}
     {deferred.error && <p role="alert" className="text-sm text-danger">퇴근 미처리 기록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => void deferred.refetch()}>다시 불러오기</Button></p>}
     {kind === 'missed' && !unavailable && <p role="status" className="text-sm text-muted-foreground">퇴근 미처리 전체 누적 {new Set(deferredRows.map(row => row.employeeId)).size}명 · {deferredRows.length}건</p>}
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <table className="w-full text-left text-sm">
         <caption className="sr-only">{monthLabel(month)} 확인 필요</caption>
         <thead className="bg-primary text-primary-foreground">
-          <tr>{['날짜', '경과', '구분', '직원', '부서', '출근 기준', '출근 시각', '내용', '사유서'].map(label => <th key={label} className={`px-3 py-2 font-medium${label === '사유서' ? ' text-right' : ''}`}>{label}</th>)}</tr>
+          <tr>{['날짜', '경과', '구분', '직원', '부서', '출근 기준', '출근 시각', '내용', ...(canEdit ? ['수정'] : []), '사유서'].map(label => <th key={label} className={`px-3 py-2 font-medium${label === '사유서' ? ' text-right' : ''}`}>{label}</th>)}</tr>
         </thead>
         <tbody>
-          {unavailable ? <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">{readError ? '기록을 확인하지 못해 지각·결근을 집계하지 않습니다.' : '출근과 신청을 확인하고 있습니다.'}</td></tr>
+          {unavailable ? <tr><td colSpan={canEdit ? 10 : 9} className="px-3 py-10 text-center text-muted-foreground">{readError ? '기록을 확인하지 못해 지각·결근을 집계하지 않습니다.' : '출근과 신청을 확인하고 있습니다.'}</td></tr>
             : pageRows.length ? pageRows.map(row => {
               const attached = statementByKey.get(`${row.memberId}:${row.date}`)
               return <tr key={row.key} className="border-t border-border">
               <td className="px-3 py-2">{row.dateLabel}</td>
               <td className="px-3 py-2"><Elapsed days={elapsedDays(row.date, today)} done={row.kind === 'late' ? Boolean(attached?.hrConfirmedAt) : row.kind === 'missed' && !row.missed?.pending} /></td>
-              <td className="px-3 py-2"><StatusPill tone={KIND_TONE[row.kind]}>{KIND_LABEL[row.kind]}</StatusPill></td>
+              <td className="px-3 py-2"><StatusPill tone={row.adjustment?.minutes === 0 ? 'muted' : KIND_TONE[row.kind]}>{KIND_LABEL[row.kind]}{row.adjustment?.minutes === 0 && ' 제외'}</StatusPill></td>
               <td className="px-3 py-2"><MemberCell name={row.name} /></td>
               <td className="px-3 py-2">{row.team}</td>
               <td className="px-3 py-2">{row.start}</td>
               <td className="px-3 py-2">{row.clockIn}</td>
               <td className="px-3 py-2">{row.missed ? <><span className="inline-flex flex-wrap items-center gap-1.5"><StatusPill tone={row.missed.pending ? 'warning' : row.missed.automatic ? 'muted' : 'success'}>{row.missed.pending ? '자동 퇴근 · 확인 필요' : row.missed.automatic ? '자동 종료 후 입력 완료' : '입력 완료'}</StatusPill><span className="font-medium">{row.result}</span><span className="text-xs text-muted-foreground">누적 {row.missed.totalCount}회</span></span><small className="mt-0.5 block text-xs text-muted-foreground">{row.missed.detail}</small></> : <span className="font-medium text-danger">{row.result}</span>}</td>
+              {canEdit && <td className="px-3 py-2">{row.kind === 'missed' ? '—' : <Button type="button" variant="outline" size="sm" disabled={!adjustments.data?.supported} onClick={() => setEditing(row)}>수정</Button>}</td>}
               <td className="px-3 py-2 text-right">{row.kind !== 'late' ? <span className="text-muted-foreground">—</span> : statements.isPending ? '…' : statements.error ? '조회 실패' : attached ? <span className="inline-flex items-center justify-end gap-2">{attached.hrConfirmedAt ? <StatusPill tone="success">확인됨</StatusPill> : attached.managerConfirmedAt ? <StatusPill tone="warning">인사 대기</StatusPill> : null}<Button type="button" size="sm" variant="outline" onClick={() => setStatement(attached)}>사유서</Button></span> : <span className="text-muted-foreground">없음</span>}</td>
-            </tr>}) : <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">{clocks.error || leaves.error ? '기록을 불러오지 못했습니다.' : emptyLabel}</td></tr>}
+            </tr>}) : <tr><td colSpan={canEdit ? 10 : 9} className="px-3 py-10 text-center text-muted-foreground">{clocks.error || leaves.error ? '기록을 불러오지 못했습니다.' : emptyLabel}</td></tr>}
         </tbody>
       </table>
       {!unavailable && visibleRows.length > PAGE_SIZE && <nav className="flex items-center justify-between border-t border-border px-3 py-2 text-xs text-muted-foreground" aria-label="확인 필요 페이지">
@@ -269,6 +298,18 @@ export function AttendanceLatePanel({ directory, schedules, initialKind = 'all',
       </nav>}
     </div>
     {statement && <div className="fixed inset-0 z-50 grid place-items-center bg-background/75 p-4" role="dialog" aria-label="지각 사유서"><LateArrivalStatementDocument statement={statement} review="hr" onClose={() => setStatement(null)} onUpdated={setStatement} /></div>}
+    {canEdit && editing && editing.kind !== 'missed' && <AttendanceIncidentEditDialog
+      target={{ ...editing, kind: editing.kind }} adjustment={editing.adjustment} onClose={() => setEditing(null)}
+      onSave={async (minutes, reason) => {
+        if (editing.kind === 'missed') return
+        try {
+          await saveAttendanceIncidentAdjustment(editing.memberId, editing.date, editing.kind, minutes, reason, editing.adjustment?.revision ?? null)
+        } finally {
+          await queryClient.invalidateQueries({ queryKey: attendanceIncidentQueryKey })
+          await queryClient.invalidateQueries({ queryKey: ['late-arrival-cumulative'] })
+        }
+      }}
+    />}
   </div>
 }
 
