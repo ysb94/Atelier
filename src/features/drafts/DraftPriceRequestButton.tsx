@@ -1,9 +1,12 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Heart } from 'lucide-react'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
+import { elapsedMaterialRequestDays } from '@/features/planning/material-request-days'
 import { draftPriceError, type DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
-import { formatNumber } from '@/lib/utils'
+import type { DraftColorRow } from '@/lib/types'
+import { cn, formatNumber } from '@/lib/utils'
 
 export type DraftPriceControls = {
   latest?: DraftPriceRequest
@@ -12,17 +15,26 @@ export type DraftPriceControls = {
   error: string
   retry: () => void
   request: () => Promise<unknown>
+  confirm?: (reply: DraftPriceRequest) => Promise<void>
 }
 
 const replyDate = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', dateStyle: 'short', timeStyle: 'short',
 })
+const requestDay = new Intl.DateTimeFormat('ko-KR', {
+  timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric',
+})
+const requestClock = new Intl.DateTimeFormat('ko-KR', {
+  timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: true,
+})
 
-export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, controls }: {
+export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, controls, confirmedRequestId, colors }: {
   readOnly: boolean
   hasColors: boolean
   missingColors: string[]
   controls?: DraftPriceControls
+  confirmedRequestId?: string
+  colors?: readonly Pick<DraftColorRow, 'id' | 'name'>[]
 }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -33,7 +45,14 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   const latest = controls?.latest
   const reply = controls?.reply
   const amounts = reply?.amounts
+  const hasReply = Boolean(reply?.answeredAt && reply.id === latest?.id)
+  const confirmed = hasReply && reply?.id === confirmedRequestId
+  const confirm = controls?.confirm
+  const showReplyActions = hasReply && !readOnly
   const waiting = Boolean(latest && !latest.answeredAt)
+  const waitingForRepeat = waiting && (latest?.round ?? 0) > 1
+  const requestedAt = waiting && latest ? new Date(latest.requestedAt) : null
+  const sentAt = requestedAt && Number.isFinite(requestedAt.getTime()) ? requestedAt : null
   const ready = hasColors && missingColors.length === 0
   const canSend = Boolean(controls && ready && !readOnly && !waiting && !controls.loading && !controls.error)
   const visible = open && active && (!readOnly || Boolean(latest))
@@ -58,11 +77,93 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
     }
   }
 
+  async function confirmReply() {
+    if (!showReplyActions || !confirm || !reply || confirmed || busy || controls?.loading || controls?.error) return
+    setBusy(true)
+    setError('')
+    try {
+      await confirm(reply)
+    } catch (cause) {
+      setError(draftPriceError(cause, '단가를 확정하지 못했습니다.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function sendAgain() {
+    if (controls?.error) {
+      setError(controls.error)
+      controls.retry()
+      return
+    }
+    if (!hasColors) {
+      setError('컬러를 먼저 추가해 주세요.')
+      return
+    }
+    if (missingColors.length > 0) {
+      setError(`컬러 문서에서 사진을 첨부하거나 None을 선택해 주세요. 미등록 컬러 · ${missingColors.join(', ')}`)
+      return
+    }
+    void send()
+  }
+
+  function openDetails() {
+    setError('')
+    setOpen(true)
+  }
+
   return <>
-    <Button type="button" size="sm" variant={ready && !waiting && !readOnly ? 'default' : 'outline'} className="h-7 px-2.5"
-      disabled={readOnly && !latest} aria-haspopup="dialog" onClick={() => { setError(''); setOpen(true) }}>
-      {waiting ? '단가 회신 대기' : reply ? '단가 확인' : '단가 요청'}
-    </Button>
+    {amounts && colors?.length ? <>
+      <div className="draft-color-pad justify-center">
+        {confirmed && <span role="img" aria-label="단가 확정" className="text-primary">
+          <Heart size={20} fill="currentColor" aria-hidden="true" />
+        </span>}
+      </div>
+      <div className="draft-color-lines draft-price-amounts">
+        {colors.map((color, index) => {
+          const amount = amounts[color.id]
+          const amountLabel = typeof amount === 'number' ? formatNumber(amount) : '—'
+          return (
+            <div key={color.id} className={cn('draft-color-line', index % 2 === 1 && 'is-alt')}>
+              <span className="group/price relative inline-grid place-items-center px-1 text-sm font-semibold tabular-nums text-blue-700">
+                <span title={`${color.name} 단가 (위안)`}>{amountLabel}</span>
+                {confirmed && !readOnly && typeof amount === 'number' && (
+                  <Button type="button" size="sm" variant="ghost"
+                    className="pointer-events-none absolute inset-y-0 left-1/2 z-10 my-auto h-7 -translate-x-1/2 bg-blue-700 px-1.5 text-white opacity-0 hover:bg-blue-800 group-hover/price:pointer-events-auto group-hover/price:opacity-100 group-focus-within/price:pointer-events-auto group-focus-within/price:opacity-100"
+                    aria-label={`${color.name} 단가 ${amountLabel}위안 재요청`}
+                    disabled={busy || controls?.loading} onClick={sendAgain}>
+                    단가 재요청
+                  </Button>
+                )}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </> : null}
+    {(!confirmed || (error && !visible)) && <div className="grid justify-items-center gap-2.5 text-center">
+      {sentAt && <time dateTime={latest?.requestedAt} className="whitespace-nowrap text-xs leading-snug text-muted-foreground">
+        {requestDay.format(sentAt)}<br />{requestClock.format(sentAt)} 발송
+      </time>}
+      {!confirmed && (waitingForRepeat
+        ? <span role="status" className="inline-flex h-7 items-center whitespace-nowrap rounded-md bg-neutral-500 px-2.5 text-xs font-medium text-white">
+          재요청중
+        </span>
+        : <Button type="button" size="sm" variant={waiting || showReplyActions ? 'ghost' : ready && !readOnly ? 'default' : 'outline'}
+          className={waiting || showReplyActions ? 'h-7 bg-blue-700 px-1.5 text-white hover:bg-blue-800' : 'h-7 px-2.5'}
+          disabled={busy || (readOnly && !latest) || (showReplyActions && controls?.loading)}
+          aria-haspopup={showReplyActions ? undefined : 'dialog'} onClick={showReplyActions ? sendAgain : openDetails}>
+          {waiting ? '단가 계산중' : showReplyActions ? '단가 재요청' : reply ? '단가 확인' : '단가 요청'}
+        </Button>)}
+      {!confirmed && showReplyActions && confirm && <Button type="button" size="sm" className="h-7"
+          disabled={busy || controls?.loading || Boolean(controls?.error)} onClick={() => void confirmReply()}>
+          확정
+        </Button>}
+      {error && !visible && <p role="alert" className="break-words text-xs text-danger">{error}</p>}
+      {sentAt && <p className="whitespace-nowrap text-sm font-semibold tabular-nums text-primary">
+        + {elapsedMaterialRequestDays(sentAt.getTime(), Date.now())}days
+      </p>}
+    </div>}
     {visible && createPortal(
       <dialog ref={dialog} aria-labelledby={titleId} onCancel={event => { event.preventDefault(); if (!busy) setOpen(false) }}
         className="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm overflow-y-auto rounded-xl border border-border bg-card p-5 text-left text-card-foreground shadow-xl backdrop:bg-black/40">
@@ -90,8 +191,8 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
         <div className="mt-4 flex flex-wrap justify-end gap-2">
           <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setOpen(false)}>닫기</Button>
           {controls?.error && <Button type="button" size="sm" variant="outline" onClick={controls.retry}>다시 조회</Button>}
-          {canSend && <Button type="button" size="sm" disabled={busy} onClick={() => void send()}>
-            {busy ? '요청 저장 중' : latest ? '단가 재요청 보내기' : '단가 요청 보내기'}
+          {canSend && !showReplyActions && <Button type="button" size="sm" disabled={busy} onClick={() => void send()}>
+            {busy ? '요청 저장 중' : '단가 요청 보내기'}
           </Button>}
         </div>
       </dialog>, document.body,

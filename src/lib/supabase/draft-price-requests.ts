@@ -20,8 +20,9 @@ export type DraftPriceChange =
   | { action: 'reply'; requestId: string; amounts: Record<string, number> }
 
 export function listDraftPriceRequests(scope: DraftPriceScope, signal: AbortSignal) {
+  const serverScope = scope === 'china' ? 'china_history' : scope
   return diagnosticQuery<DraftPriceRequest[]>('app', 'draft_price_list',
-    getSupabase().rpc('list_draft_price_requests', { p_scope: scope }).abortSignal(signal))
+    getSupabase().rpc('list_draft_price_requests', { p_scope: serverScope }).abortSignal(signal))
 }
 
 export function changeDraftPrice(input: DraftPriceChange, context: DiagnosticContext) {

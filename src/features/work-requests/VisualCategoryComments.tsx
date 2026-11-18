@@ -235,7 +235,7 @@ export function VisualCategoryComments({
       </header>
       <div className="px-4 pb-5 sm:px-8 sm:pb-6 lg:px-10">
         {legacyConversation && <div id={legacyId} hidden={!legacyOpen} className="pt-4">{legacyOpen && legacyConversation}</div>}
-        {!valid || !canDiscuss ? <p className="py-4 text-sm text-muted-foreground">요청자, 업무 관리자, 이 분류의 담당자가 댓글을 확인할 수 있습니다.</p>
+        {!valid || !canDiscuss ? <p className="py-4 text-sm text-muted-foreground">요청자, 총괄·중간 관리자, 작업자 등 이 분류의 관계자가 댓글을 확인할 수 있습니다.</p>
           : query.isError ? <p role="alert" className="py-4 text-sm text-danger">{query.error.message}
               <Button type="button" variant="ghost" size="sm" onClick={() => void query.refetch()}>다시 조회</Button>
             </p>

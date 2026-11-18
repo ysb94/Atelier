@@ -8,8 +8,8 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { cn } from '@/lib/utils'
 import { VisualCategoryComments } from './VisualCategoryComments'
 import { VisualCategoryWorkflowPanel } from './VisualCategoryWorkflowPanel'
+import { useReadVisualWorkflowNotices } from './use-visual-workflow-notices'
 import type { VisualCategoryWorkflow } from './visual-category-workflow'
-import { visualFinalApprover } from './visual-final-approval'
 import type { ContentBlock, LocalTeamMember, WorkRequestRecord } from './work-request-types'
 import { visualWorkDate, type VisualWorkDetail } from './visual-work-detail'
 
@@ -42,10 +42,11 @@ function ContentSection({ title, children }: { title: string; children: ReactNod
 }
 
 export function VisualWorkRequestDrawer({
-  requestId, title, detail, initialCategory, viewerId, canManage, isRequester, requesterView,
+  requestId, requestRevision, title, detail, initialCategory, viewerId, canManage, isRequester, requesterView, isDiscussionSupervisor,
   summary, onClose, headerActions, notice, mainReferences, management, legacyConversation, memberName, renderBody, renderAssignment, workflow,
 }: {
   requestId: string
+  requestRevision?: number
   title: string
   detail: VisualWorkDetail
   initialCategory: string | null
@@ -53,6 +54,7 @@ export function VisualWorkRequestDrawer({
   canManage: boolean
   isRequester: boolean
   requesterView: boolean
+  isDiscussionSupervisor: boolean
   summary: { requesterDepartment: string; requesterName: string; requesterPosition: string; status: string; requestedAt: string; dueDate: string; brand: string; finalApprover?: string }
   onClose: () => void
   headerActions: ReactNode
@@ -74,7 +76,6 @@ export function VisualWorkRequestDrawer({
   const [linkStatus, setLinkStatus] = useState('')
   const [manageOpen, setManageOpen] = useState(false)
   const [feedbackHost, setFeedbackHost] = useState<HTMLDivElement | null>(null)
-  const [reviewRoundsReady, setReviewRoundsReady] = useState(false)
   const [confirmationHost, setConfirmationHost] = useState<HTMLDivElement | null>(null)
   const current = detail.sections.find(section => section.id === chosen) ?? detail.sections[0]
 
@@ -114,17 +115,15 @@ export function VisualWorkRequestDrawer({
 
   const assigned = current?.assignment
   const step = current && workflow?.data.categories[current.id]
-  const workflowSupervisor = workflow && !workflow.data.legacyReceiptPending
-    ? visualFinalApprover(workflow.data, workflow.supervisors) : undefined
   const workflowManager = canManage || Boolean(viewerId && (
-    (workflow && !workflow.data.legacyReceiptPending && workflow.supervisors.includes(viewerId)
-      && (!workflowSupervisor || workflowSupervisor === viewerId))
+    (workflow && !workflow.data.legacyReceiptPending && isDiscussionSupervisor)
     || (assigned?.assigneeId === viewerId && workflow?.members.some(member => member.id === viewerId))
   ))
   const requesterOnly = Boolean(workflow && isRequester && (requesterView || !workflowManager))
+  const contentNotice = useReadVisualWorkflowNotices(requestId, current?.id ?? '', requestRevision, !requesterOnly, 'content')
   const privateWorkflow = Boolean(step && !workflow?.data.legacyReceiptPending)
-  const canDiscussWorkflow = (!requesterOnly && workflowManager)
-    || (reviewRoundsReady && (isRequester || Boolean(viewerId && step?.workerId === viewerId)))
+  const canDiscuss = isRequester || canManage || isDiscussionSupervisor
+    || Boolean(viewerId && (assigned?.assigneeId === viewerId || step?.workerId === viewerId))
   const assignmentDate = assigned?.assignedAt && visualWorkDate(assigned.assignedAt)
   const panelId = instance + '-panel'
   const managementId = instance + '-management'
@@ -133,7 +132,7 @@ export function VisualWorkRequestDrawer({
     request={workflow.request} workflow={workflow.data} category={current} step={step}
     viewerId={viewerId} canManage={canManage} supervisors={workflow.supervisors}
     members={workflow.members} memberName={memberName} confirmationHost={confirmationHost} requesterOnly={requesterOnly}
-    feedbackHost={feedbackHost} onReviewRoundsReady={setReviewRoundsReady}
+    feedbackHost={feedbackHost}
   />
   return (
     <aside aria-label={title + ' 상세'} className="absolute inset-y-0 right-0 flex w-full max-w-5xl flex-col border-l border-border bg-card shadow-2xl lg:w-[calc(100%-3rem)]">
@@ -196,6 +195,10 @@ export function VisualWorkRequestDrawer({
             {linkStatus && <p role="status" className="mt-2 text-sm text-muted-foreground">{linkStatus}</p>}
             <div className="mt-6 space-y-5 sm:mt-8 sm:space-y-6 lg:mt-10">
               {notice}
+              {contentNotice.error && <div className="flex items-center gap-2" role="alert">
+                <span className="text-sm text-danger">수정 알림 읽음 상태를 저장하지 못했습니다.</span>
+                <Button type="button" size="sm" variant="outline" onClick={contentNotice.retry}>다시 시도</Button>
+              </div>}
               {!requesterOnly && manageOpen && <section id={managementId} aria-label="업무 관리" className="space-y-4">
                 {current && <p className="text-sm text-muted-foreground">
                   {current.label} · {assigned?.assigneeId ? '배정됨' : '미배정'}
@@ -224,11 +227,11 @@ export function VisualWorkRequestDrawer({
               {progressPanel}
             </div>
           </div>
-          {current && (privateWorkflow ? canDiscussWorkflow : !requesterOnly) && <VisualCategoryComments
+          {current && (canDiscuss || !privateWorkflow) && <VisualCategoryComments
             key={viewerId + ':' + requestId}
             requestId={requestId}
             category={current}
-            canDiscuss={privateWorkflow || isRequester || canManage || Boolean(viewerId && assigned?.assigneeId === viewerId)}
+            canDiscuss={canDiscuss}
             legacyConversation={requesterOnly || (privateWorkflow && !workflowManager) ? undefined : legacyConversation}
             sharedOnly={requesterOnly}
           />}

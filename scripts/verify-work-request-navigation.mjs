@@ -546,8 +546,8 @@ console.info('PASS: 삭제·존재하지 않는 ID·잘못된 mode·생성/수�
   assert.equal((page.match(/goToView\(\{ type: 'saved'/g) ?? []).length, 2, '수정·새 요청 저장 모두 saved(replace)여야 함')
   assert.match(page, /goToView\(\{ type: 'deleted' \}\)/)
   assert.match(page, /needsReviewStart: auxiliary && canManage && request\.status === 'requested'/)
-  assert.match(page, /editable: isSelfRequest && request\.status === 'requested'/)
-  assert.match(page, /const canEdit = isSelfRequest && selectedRequest\.status === 'requested'/)
+  assert.match(page, /editable: !noticeOnly && session\?\.user\.id === selfId && canEditWorkRequestContent\(request, selfId\)/)
+  assert.match(page, /const canEdit = !noticeOnly && session\?\.user\.id === selfId && canEditWorkRequestContent\(selectedRequest, selfId\)/)
   assert.match(page, /window\.confirm\('작성 중인 변경 내용을 지우고 돌아갈까요\?'\)/)
   assert.match(page, /hasEdited &&\s*!window\.confirm\('작성 중인 변경 내용을 지우고 돌아갈까요\?'\)/, '돌아가기 확인 조건이 바뀜')
   assert.match(
@@ -562,7 +562,7 @@ console.info('PASS: 삭제·존재하지 않는 ID·잘못된 mode·생성/수�
     '저장·돌아가기 뒤 양식이 초안으로 다시 보관될 수 있음',
   )
   assert.match(page, /onChange=\{\(e\) => setFormBrandId\(e\.target\.value\)\}\s*disabled=\{Boolean\(editingRequest\?\.brandId\)\}/, '양식 브랜드 선택 조건이 바뀜')
-  assert.match(page, /brandId: request\.brandId \|\| formBrandId/, '수정 저장의 브랜드 규칙이 바뀜')
+  assert.match(page, /brandId: request\.status === 'requested' \? request\.brandId \|\| formBrandId : request\.brandId/, '접수 후 브랜드는 유지')
   assert.match(page, /window\.confirm\(`"\$\{request\.values\.title\}" 요청을 삭제할까요\?`\)/)
 }
 console.info('PASS: 숨겨진 탭 URL·Escape 보호, 같은 업무 탭 유지, 기존 확인 창·편집 조건 유지')

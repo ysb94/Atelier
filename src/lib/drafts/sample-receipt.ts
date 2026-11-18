@@ -1,7 +1,12 @@
 import type { DraftSampleWorkOrder } from '../types'
 import { latestFilledSampleWorkOrder, newSampleWorkOrder } from './sample-work-order'
 
-export const PROMOTION_DESTINATION = 'PROMOTION [중국]'
+const PROMOTION_DESTINATION = 'PROMOTION [중국]'
+export const SAMPLE_DESTINATIONS = [
+  { value: '중국', label: 'CHINA' },
+  { value: '한국', label: 'KOREA' },
+  { value: PROMOTION_DESTINATION, label: PROMOTION_DESTINATION },
+] as const
 
 export function sampleCountry(country: string) {
   if (/^promotion\s*\[(중국|china)\]$/i.test(country.trim())) return { code: 'PROMO', label: PROMOTION_DESTINATION }
@@ -22,7 +27,7 @@ export function sampleSentToChinaTeam(orderCountry: string | undefined, draftCou
   return sampleCountry(country).code === 'CN'
 }
 
-/** 아직 중국팀이 발송하지 않은 최신 작업지시서에 제조국을 남긴다. 기획안에만 남기는 샘플은 중국 담당을 비운다. */
+/** 최신 작업지시서의 진행처를 저장한다. 기획안에만 남기는 샘플은 중국 담당을 비운다. */
 export function applySampleOrigin(orders: readonly DraftSampleWorkOrder[], country: string) {
   const latest = latestFilledSampleWorkOrder(orders)
   const nextCountry = country.trim()
@@ -70,7 +75,7 @@ export function registerNextReceivedSample(
   const latest = latestFilledSampleWorkOrder(orders)
   if (!sampleReadyForNextStage(latest)) throw new Error('실물 수령을 확인한 뒤 다음 작업지시서를 등록해 주세요.')
   if (!file.url.trim() || !file.name.trim()) throw new Error('새 작업지시서 파일을 선택해 주세요.')
-  if (!country.trim()) throw new Error('제조국을 선택해 주세요.')
+  if (!country.trim()) throw new Error('샘플 진행처를 선택해 주세요.')
   const round = Math.max(0, ...orders.filter(order => order.url?.trim()).map(order => order.round)) + 1
   return [
     ...orders.filter(order => order.url?.trim()).map(order => ({ ...order, originCountry: order.originCountry || previousCountry })),

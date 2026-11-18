@@ -1,11 +1,7 @@
 import { useRef } from 'react'
 import { Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Select } from '@/components/ui/input'
-import { PROMOTION_DESTINATION, sampleCountry } from '@/lib/drafts/sample-receipt'
-import { DRAFT_ORIGIN_OPTIONS } from '@/lib/types'
-
-const sampleDestinations: readonly string[] = [...DRAFT_ORIGIN_OPTIONS, PROMOTION_DESTINATION]
+import { SampleDestinationSelect } from './SampleDestinationSelect'
 
 /** N차·최종·컬러샘플의 저장된 작업지시서를 동일하게 표시한다. */
 export function RegisteredSampleCard({ id, label, status, country, url, name, locked, readOnly = false, saving = false, onUpload, onCountry }: {
@@ -15,8 +11,6 @@ export function RegisteredSampleCard({ id, label, status, country, url, name, lo
   onCountry?: (country: string) => void
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
-  const destination = sampleCountry(country).label
-  const countryValue = sampleDestinations.includes(destination) ? destination : ''
   const disabled = readOnly || locked || saving
   return <section id={`sample-history-${id}`} aria-label={`등록된 ${label}`} className="mt-2 scroll-mt-20 border-t border-border pt-5">
     <input ref={fileRef} type="file" aria-label={`${label} 작업지시서 파일`} accept=".pdf,.png,.jpg,.jpeg,.webp,.xls,.xlsx" className="hidden" disabled={disabled || !onUpload} onChange={event => {
@@ -30,10 +24,9 @@ export function RegisteredSampleCard({ id, label, status, country, url, name, lo
     </div>
     <div className="mt-4 grid items-center gap-4 sm:grid-cols-[240px_minmax(0,1fr)]">
       <div>
-        <Select aria-label={`${label} 샘플 진행처`} className="h-11" value={countryValue} disabled={disabled || !onCountry} onChange={event => onCountry?.(event.target.value)}>
-          <option value="" disabled>샘플 진행처 선택</option>{sampleDestinations.map(option => <option key={option} value={option}>{option}</option>)}
-        </Select>
-        <p className="mt-1 text-xs text-muted-foreground">중국은 중국팀으로 전달되고, 한국과 PROMOTION [중국]은 기획안에 기록만 남습니다.</p>
+        <SampleDestinationSelect label={`${label} 샘플 진행처`} value={country} disabled={disabled || !onCountry}
+          onChange={value => onCountry?.(value)} />
+        <p className="mt-1 text-xs text-muted-foreground">CHINA의 지시서는 중국팀에 전달됩니다. KOREA와 PROMOTION [중국]은 기획안에 기록만 남습니다.</p>
       </div>
       <div className="flex min-h-16 items-center justify-center rounded-xl border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
         {url ? <a href={url} download={name} className="max-w-full truncate text-foreground underline-offset-2 hover:underline">{name}</a> : '올린 파일이 없습니다.'}

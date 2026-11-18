@@ -281,7 +281,6 @@ export function DraftSeasonPickerPage() {
                   출시 예정
                 </span>
                 <Input
-                  placeholder="26.03 말, 일정 미정"
                   value={form.releaseTiming}
                   autoFocus
                   onChange={(e) => {
@@ -298,7 +297,6 @@ export function DraftSeasonPickerPage() {
                   기획 이름
                 </span>
                 <Input
-                  placeholder="SS, 1학기 신학기, 홀리데이"
                   value={form.name}
                   onChange={(e) => {
                     setForm((prev) => ({ ...prev, name: e.target.value }))
@@ -444,7 +442,6 @@ export function DraftSeasonPickerPage() {
                       </span>
                       <Input
                         className="h-8"
-                        placeholder="26.03 말"
                         value={draft.releaseTiming}
                         disabled={updateMutation.isPending}
                         onChange={(e) =>
@@ -462,7 +459,6 @@ export function DraftSeasonPickerPage() {
                       </span>
                       <Input
                         className="h-8"
-                        placeholder="SS, 1학기 신학기"
                         value={draft.name}
                         disabled={updateMutation.isPending}
                         onChange={(e) =>

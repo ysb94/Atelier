@@ -133,7 +133,7 @@ export type VisualWorkflowNotice = {
   categoryId: string
   categoryLabel: string
   title: string
-  kind: 'receipt' | 'registered' | 'rework' | Exclude<VisualCategoryState, 'confirmed'>
+  kind: 'receipt' | 'registered' | 'rework' | 'content_updated' | Exclude<VisualCategoryState, 'confirmed'>
   version: number
   personal: boolean
   createdAt: string

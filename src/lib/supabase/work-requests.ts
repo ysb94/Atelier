@@ -86,6 +86,18 @@ export async function saveWorkRequestChange(before: WorkRequestRecord | undefine
       trace.run('save', context => diagnosticQuery<number>('app', 'visual_category_work_publish', getSupabase().rpc('publish_visual_category_work', {
         p_id: next.id, p_revision: expected, p_patch: patch, p_command: next.id,
       }), context)))
+  } else if (before && next.owner === 'design' && next.kind !== 'internal' && Object.hasOwn(patch, 'values')) {
+    try {
+      expected = await diagnosticOperation('app', 'sent_visual_request_content_edit', trace =>
+        trace.run('save', context => diagnosticQuery<number>('app', 'sent_visual_request_content_edit', getSupabase().rpc('save_work_request', {
+          p_id: next.id, p_revision: expected, p_patch: patch, p_command: crypto.randomUUID(),
+        }), context)))
+    } catch (error) {
+      if (before.status !== 'requested' && error instanceof Error && error.message.includes('접수 전 본인 요청만')) {
+        throw new Error('진행 중인 요청 수정은 서버 업데이트 후 사용할 수 있습니다.', { cause: error })
+      }
+      throw error
+    }
   } else if(Object.keys(patch).length)expected=await rpc<number>(!before && next.kind==='internal'?'save_department_work':'save_work_request',{p_id:next.id,p_revision:expected,p_patch:patch,p_command:crypto.randomUUID()})
   if(selfCompletion)expected=await rpc<number>('complete_department_work',{p_id:next.id,p_revision:expected,p_command:crypto.randomUUID()})
   for(const message of next.messages)if(!before?.messages.some(item=>item.id===message.id))await sendWorkRequestMessage(next.id,message)

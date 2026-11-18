@@ -268,7 +268,7 @@ export function DraftReleaseScheduleDialog({
           {groupId === NEW_GROUP_VALUE ? (
             <div className="grid gap-2 sm:grid-cols-2">
               <Input
-                placeholder="묶음 이름 (예: 26FW, 홀리데이)"
+                aria-label="묶음 이름"
                 value={newName}
                 onChange={(event) => {
                   setNewName(event.target.value)
@@ -276,7 +276,7 @@ export function DraftReleaseScheduleDialog({
                 }}
               />
               <Input
-                placeholder="출시 예정 (예: 2026년 9월)"
+                aria-label="출시 예정"
                 value={newTiming}
                 onChange={(event) => setNewTiming(event.target.value)}
               />

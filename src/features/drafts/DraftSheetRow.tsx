@@ -1,24 +1,32 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEventHandler, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { FileText, GripVertical, Heart, ImageOff, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
+import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Input, Select } from '@/components/ui/input'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { DRAFT_COLOR_PHOTO_ACCEPT, prepareDraftColorPhoto } from '@/lib/drafts/color-photo'
 import { MAX_DRAFT_COLORS } from '@/lib/drafts/empty-draft'
-import { resolveColorSpec } from '@/lib/drafts/color-spec'
+import {
+  DRAFT_INFORMATION_LABELS, colorInformationEditKey, documentEditKey, hasInformationEdits, informationEditText,
+  isColorInformationConfirmed, isSpecDocumentConfirmed, resolveColorSpec, type ColorInformationField,
+  type DraftInformationField, type InformationDrafts, type SaveColorSpec, type UpdateInformationEdits,
+} from '@/lib/drafts/color-spec'
 import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
 import { colorSampleLineStatus, resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
 import { sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
 import { sheetRegisteredDay } from '@/lib/drafts/sample-work-order'
 import { readFileAsDataUrl } from '@/lib/images'
-import { DRAFT_STATUS_LABEL, type Brand, type DraftColorImageChoice, type DraftColorRow, type DraftSpecs, type ProductDraft } from '@/lib/types'
+import type { DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
+import type { DraftColorEdit } from '@/lib/supabase/product-drafts'
+import { DRAFT_STATUS_LABEL, type Brand, type DraftColorImageChoice, type DraftColorRow, type DraftSpecs, type ProductDraft, type Season } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
 import { RELEASE_CERTAINTY_LABEL, formatReleaseGroupLabel, formatTargetDate, type ResolvedReleaseSchedule } from './release-schedule-preview'
 import './draft-board.css'
 import { DraftSampleProgress } from './DraftSampleProgress'
 import { DraftColorSampleProgress } from './DraftColorSampleProgress'
 import { DraftPriceRequestButton, type DraftPriceControls } from './DraftPriceRequestButton'
+import { DraftInformationPanel } from './DraftInformationPanel'
 
 const SAMPLE_WORK_ORDER_ACCEPT =
   'application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp,.xls,.xlsx'
@@ -141,15 +149,8 @@ function SheetConfirmButton({
 
 const COLOR_IMAGE_CHOICES: readonly DraftColorImageChoice[] = ['Image', 'None']
 
-type ColorPhotoChange = { choice: 'Image'; url: string } | { choice: 'None'; url: null }
-
-type ColorFormValue = {
-  id: string | null
-  name: string
-  photoChange?: ColorPhotoChange
-}
-
-type ColorFormRow = ColorFormValue & { key: number }
+type ColorPhotoChange = NonNullable<DraftColorEdit['photoChange']>
+type ColorFormRow = DraftColorEdit & { key: number }
 
 function colorImageConfigured(choice?: DraftColorImageChoice, photoUrl?: string | null) {
   return choice === 'None' || (choice === 'Image' && Boolean(photoUrl))
@@ -190,13 +191,15 @@ function ColorDocumentButton({
   colors,
   imageChoices,
   photoUrls,
+  revision,
   onSaveColors,
 }: {
   readOnly?: boolean
   colors: DraftColorRow[]
   imageChoices: DraftSpecs['colorImageChoices']
   photoUrls: DraftSpecs['colorPhotoUrls']
-  onSaveColors: (colors: ColorFormValue[]) => Promise<void>
+  revision: string
+  onSaveColors: (colors: DraftColorEdit[], revision: string) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
   const [rows, setRows] = useState<ColorFormRow[]>([{ key: 1, id: null, name: '' }])
@@ -208,6 +211,7 @@ function ColorDocumentButton({
   const photoInputRef = useRef<HTMLInputElement>(null)
   const photoTargetKey = useRef<number | null>(null)
   const nextKey = useRef(1)
+  const openedRevision = useRef(revision)
   const layoutTops = useRef(new Map<number, number>())
   const shiftRef = useRef(0)
   const dragRef = useRef<{ key: number; pointerId: number; startY: number; y: number } | null>(null)
@@ -371,6 +375,7 @@ function ColorDocumentButton({
         onClick={() => {
           setError('')
           if (!open) {
+            openedRevision.current = revision
             layoutTops.current.clear()
             setRows(freshRows(colors))
           }
@@ -402,7 +407,7 @@ function ColorDocumentButton({
             }
             setBusy(true)
             setError('')
-            void onSaveColors(next)
+            void onSaveColors(next, openedRevision.current)
               .then(() => setOpen(false))
               .catch((err: unknown) => {
                 setError(err instanceof Error ? err.message : '컬러를 저장하지 못했습니다.')
@@ -449,7 +454,6 @@ function ColorDocumentButton({
                 <Input
                   className="h-8 min-w-0 flex-1 text-sm"
                   aria-label={rows.length > 1 ? `컬러 이름 ${index + 1}` : '컬러 이름'}
-                  placeholder="컬러 이름"
                   value={row.name}
                   disabled={locked}
                   onChange={(event) => {
@@ -529,7 +533,6 @@ function SheetInlineField({
   readOnly = false,
   label,
   value,
-  placeholder,
   className,
   showError = false,
   multiline = false,
@@ -538,7 +541,6 @@ function SheetInlineField({
   readOnly?: boolean
   label: string
   value: string
-  placeholder?: string
   className: string
   showError?: boolean
   multiline?: boolean
@@ -593,7 +595,6 @@ function SheetInlineField({
     title: error || undefined,
     className,
     value: readOnly ? value : text,
-    placeholder,
     disabled: busy,
     readOnly,
     autoComplete: 'off' as const,
@@ -650,98 +651,20 @@ function SheetInlineField({
   )
 }
 
-function EntryButton({
-  readOnly = false,
-  label,
-  value,
-  placeholder,
-  tone = 'neutral',
-  icon,
-  canApplyAll = false,
-  disabled = false,
-  onSave,
-}: {
-  readOnly?: boolean
-  label: string
-  value: string
-  placeholder: string
-  tone?: 'neutral' | 'pending' | 'done'
-  icon?: ReactNode
-  canApplyAll?: boolean
-  disabled?: boolean
-  onSave: (value: string, applyAll: boolean) => Promise<void>
+function InformationButton({ label, value, tone, expanded, panelId, disabled, icon, onClick }: {
+  label: string; value: string; tone: ReturnType<typeof specTone>; expanded: boolean
+  panelId: string; disabled: boolean; icon?: ReactNode; onClick: MouseEventHandler<HTMLButtonElement>
 }) {
-  const [open, setOpen] = useState(false)
-  const [text, setText] = useState(value)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const shown = value.trim()
-
-  useEffect(() => {
-    if (!open || readOnly) setText(value)
-  }, [open, value, readOnly])
-
-  function save(applyAll: boolean) {
-    if (readOnly) return
-    setBusy(true)
-    setError('')
-    void onSave(text.trim(), applyAll)
-      .then(() => setOpen(false))
-      .catch((err: unknown) => {
-        console.warn('[drafts] 시트 값 저장 실패', err)
-        setError(err instanceof Error ? err.message : '저장하지 못했습니다.')
-      })
-      .finally(() => setBusy(false))
-  }
-
+  const activeRing = tone === 'editing' ? 'ring-2 ring-border' : 'ring-2 ring-primary/40'
+  const tooltip = value.trim() || label
   return (
-    <div className="draft-sheet-entry">
-      <button
-        type="button"
-        className={`draft-sheet-action is-${tone}`}
-        aria-expanded={open}
-        aria-label={label}
-        title={shown || label}
-        disabled={disabled}
-        onClick={() => {
-          setError('')
-          setText(value)
-          setOpen((current) => !current)
-        }}
-      >
-        {icon}
-        <span className="draft-sheet-entry-label">{label}</span>
-      </button>
-      {open ? (
-        <form
-          className="draft-sheet-entry-form"
-          onSubmit={(event) => {
-            event.preventDefault()
-            save(false)
-          }}
-        >
-          <input
-            aria-label={`${label} 값`}
-            placeholder={placeholder}
-            value={readOnly ? value : text}
-            readOnly={readOnly}
-            disabled={busy}
-            onChange={(event) => { if (!readOnly) setText(event.target.value) }}
-          />
-          <div className="draft-sheet-entry-actions">
-            <button type="submit" disabled={readOnly || busy}>
-              {busy ? '저장 중…' : '저장'}
-            </button>
-            {canApplyAll ? (
-              <button type="button" className="is-ghost" disabled={readOnly || busy} onClick={() => save(true)}>
-                전체 컬러에 적용
-              </button>
-            ) : null}
-          </div>
-          {error ? <p>{error}</p> : null}
-        </form>
-      ) : null}
-    </div>
+    <button type="button" className={`draft-sheet-action draft-information-action is-${tone}${expanded ? ` ${activeRing}` : ''}`}
+      aria-haspopup="dialog" aria-expanded={expanded} aria-controls={expanded ? panelId : undefined}
+      aria-label={label} aria-description={tone === 'editing' ? '기입 중' : undefined}
+      title={tone === 'editing' ? `${tooltip} · 기입 중` : tooltip} disabled={disabled} onClick={onClick}>
+      {icon}
+      {label}
+    </button>
   )
 }
 
@@ -775,17 +698,18 @@ function SampleStatus({
   )
 }
 
-function specTone(value: string, confirmed: boolean): 'neutral' | 'pending' | 'done' {
+function specTone(value: string, confirmed: boolean, hasEdits: boolean): 'neutral' | 'editing' | 'done' {
+  if (hasEdits) return 'editing'
   if (!value.trim()) return 'neutral'
-  return confirmed ? 'done' : 'pending'
+  return confirmed ? 'done' : 'editing'
 }
 
-export function DraftPhoto({ src, name, onOpen, compact = false }: { src: string | null; name: string; onOpen?: () => void; compact?: boolean }) {
+export function DraftPhoto({ src, name, onOpen }: { src: string | null; name: string; onOpen?: () => void }) {
   const [open, setOpen] = useState(false)
   const dialog = useRef<HTMLDialogElement>(null)
   useEffect(() => { if (open) dialog.current?.showModal() }, [open])
   return <>
-    <button type="button" className={`draft-sheet-photo${onOpen ? ' is-editor' : ''}${compact ? ' is-compact' : ''}`} disabled={!onOpen && !src} aria-label={onOpen ? `${name} 기획안 편집` : `${name} 사진 크게 보기`} onClick={() => { if (onOpen) onOpen(); else if (src) setOpen(true) }}>
+    <button type="button" className={`draft-sheet-photo${onOpen ? ' is-editor' : ''}`} disabled={!onOpen && !src} aria-label={onOpen ? `${name} 기획안 편집` : `${name} 사진 크게 보기`} onClick={() => { if (onOpen) onOpen(); else if (src) setOpen(true) }}>
       {src ? <img src={src} alt={name} loading="lazy" /> : <span><ImageOff size={25} /><small>등록된 사진 없음</small></span>}
     </button>
     {open && src && createPortal(<dialog ref={dialog} className="draft-photo-dialog" aria-label={`${name} 사진 크게 보기`} onCancel={() => setOpen(false)} onClose={() => setOpen(false)} onClick={event => { if (event.target === event.currentTarget) setOpen(false) }}>
@@ -797,17 +721,61 @@ export function DraftPhoto({ src, name, onOpen, compact = false }: { src: string
 
 export type DraftConfirmFlag = 'nameConfirmed' | 'colorsConfirmed'
 
-export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price, onOpen, onNextSample, onSchedule, onSaveColors, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
+function DraftReleaseFolderSelect({ draft, folders, readOnly, onChange }: {
+  draft: ProductDraft
+  folders: Pick<Season, 'id' | 'name' | 'releaseTiming'>[]
+  readOnly: boolean
+  onChange: (seasonId: string | null) => Promise<void>
+}) {
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const selected = folders.find((folder) => folder.id === draft.seasonId)
+
+  async function selectFolder(seasonId: string) {
+    setSaving(true)
+    setError('')
+    try {
+      await onChange(seasonId || null)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '출시 폴더를 저장하지 못했습니다.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return <>
+    <Select
+      aria-label={`${draft.draftNo} 출시 폴더`}
+      aria-busy={saving}
+      className="draft-sheet-release-folder"
+      value={selected?.id ?? ''}
+      disabled={readOnly || saving || folders.length === 0}
+      title={folders.length ? (selected ? formatReleaseGroupLabel(selected) : '출시 폴더 선택') : '이 브랜드에 선택할 수 있는 출시 폴더가 없습니다.'}
+      onChange={(event) => { void selectFolder(event.currentTarget.value) }}
+    >
+      <option value="">출시미정</option>
+      {folders.map((folder) => <option key={folder.id} value={folder.id}>{formatReleaseGroupLabel(folder)}</option>)}
+    </Select>
+    {error && <p className="draft-sheet-release-error" role="alert">{error}</p>}
+  </>
+}
+
+export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releaseFolders, onChangeReleaseFolder, price, informationEditorId, informationTemporaryStore, onOpen, onNextSample, onSchedule, onSaveColors, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
   readOnly?: boolean
   draft: ProductDraft; schedule: ResolvedReleaseSchedule | undefined; brand: Brand | undefined
+  releaseFolders: Pick<Season, 'id' | 'name' | 'releaseTiming'>[]
+  onChangeReleaseFolder: (seasonId: string | null) => Promise<void>
   price?: DraftPriceControls
   onOpen: () => void
   onNextSample?: () => void
   onSchedule: () => void
-  onSaveColors: (colors: ColorFormValue[]) => Promise<void>
+  onSaveColors: (colors: DraftColorEdit[], revision: string) => Promise<void>
   onRenameProduct: (field: 'nameKo' | 'nameEn', name: string) => Promise<void>
   onRenameColor: (colorId: string, name: string) => Promise<void>
-  onSaveSheetValue: (colorId: string, field: 'size' | 'fabric' | 'weight' | 'specDoc', value: string, applyAll: boolean) => Promise<void>
+  onSaveSheetValue: SaveColorSpec
+  onSaveSpecDocument: (value: string, temporaryRevision?: string) => Promise<void>
+  informationEditorId?: string
+  informationTemporaryStore?: DraftInformationTemporaryStore
   onUploadSampleWorkOrder: (file: { url: string; name: string }) => Promise<void>
   onReceiveSample: (id: string) => Promise<void>
   onRequestNextSampleRound: (file: { url: string; name: string }, country?: string) => Promise<void>
@@ -827,7 +795,18 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
   const colorSampleReceived = Boolean(latestColorRound?.receivedAt)
   const doneColorIds = new Set(latestColorRound ? draft.specs.colorSampleDone?.[latestColorRound.id] ?? [] : [])
   const [pendingDone, setPendingDone] = useState<Record<string, boolean>>({})
+  const informationId = useId()
+  const [information, setInformation] = useState<{ anchor: HTMLButtonElement; colorId: string | null; field: DraftInformationField } | null>(null)
+  const [informationEdits, setInformationEdits] = useState<InformationDrafts>({})
+  useEffect(() => {
+    setInformationEdits({})
+  }, [readOnly, informationEditorId])
+  function updateInformationEdits(key: string, update: UpdateInformationEdits) {
+    if (!readOnly) setInformationEdits(current => ({ ...current, [key]: update(current[key]) }))
+  }
+  const closeInformation = useCallback(() => setInformation(null), [])
   const name = draft.nameEn.trim() || draft.nameKo.trim() || '이름 미정'
+  const proposerName = draft.specs.proposer?.name?.trim()
   const named = Boolean(draft.nameEn.trim() || draft.nameKo.trim())
   const hasColor = draft.colors.length > 0
   const missingPriceColors = draft.colors.flatMap((color, index) =>
@@ -838,13 +817,13 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
   const nameConfirmed = Boolean(draft.specs.nameConfirmed)
   const colorsConfirmed = Boolean(draft.specs.colorsConfirmed)
   const registeredDay = sheetRegisteredDay(draft.createdAt)
-  const specsConfirmed = draft.specs.size.confirmed && draft.specs.fabric.confirmed && draft.specs.weight.confirmed
+  const documentConfirmed = isSpecDocumentConfirmed(draft.specs)
+  const specDocument = draft.specs.coating.note
+  const documentEditing = !readOnly &&
+    informationEditText(specDocument, informationEdits[documentEditKey]?.specDoc).trim() !== specDocument.trim()
+  const documentOpen = information?.field === 'specDoc'
   const colorRows: Array<DraftColorRow | null> = draft.colors.length ? draft.colors : [null]
-  const canApplyAll = draft.colors.length > 1
-
-  function saveColorSpec(colorId: string, field: 'size' | 'fabric' | 'weight' | 'specDoc') {
-    return (value: string, applyAll: boolean) => onSaveSheetValue(colorId, field, value, applyAll)
-  }
+  const priceAmounts = price?.reply?.amounts
   function colorSampleDone(colorId: string) {
     return colorId in pendingDone ? pendingDone[colorId] : doneColorIds.has(colorId)
   }
@@ -869,15 +848,23 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
     })
   }
 
-  return <tr className="draft-sheet-row">
+  return <><tr className="draft-sheet-row">
     <td><div className="draft-sheet-image-cell">
-      <strong className="draft-sheet-brand">{brand?.name ?? '브랜드 미정'}</strong>
+      <DraftReleaseFolderSelect draft={draft} folders={releaseFolders} readOnly={readOnly} onChange={onChangeReleaseFolder} />
       <DraftPhoto src={draft.imageUrl} name={name === '이름 미정' ? draft.draftNo : name} onOpen={onOpen} />
       <div className="draft-sheet-names">
-        <div className="draft-sheet-owner">Designer <strong>{draft.owner.trim() || '미정'}</strong></div>
-        <strong className="draft-sheet-number">No. {draft.draftNo}</strong>
-        <button type="button" className={`draft-sheet-product-name${draft.nameKo.trim() ? '' : ' is-placeholder'}`} aria-label={`${draft.draftNo} 한글명`} onClick={onOpen}>{draft.nameKo.trim() || '투웨이 셔링 호보백_글로우'}</button>
-        <button type="button" className={`draft-sheet-product-name is-en${draft.nameEn.trim() ? '' : ' is-placeholder'}`} aria-label={`${draft.draftNo} 영문명`} onClick={onOpen}>{draft.nameEn.trim() || '2way shirring hobo bag_Glow'}</button>
+        <div className="draft-sheet-brand-info">
+          <div>
+            <div className="draft-sheet-owner">Designer <strong>{draft.owner.trim() || '미정'}</strong></div>
+            <strong className="draft-sheet-number">No. {draft.draftNo}</strong>
+            {proposerName && <p className="draft-sheet-proposer">제안자 : {proposerName}</p>}
+          </div>
+          {brand && <div role="img" aria-label={`${brand.name} 브랜드`} title={brand.name}>
+            <BrandAvatar brand={brand} className="size-10 rounded-full [&>img]:object-contain" />
+          </div>}
+        </div>
+        <button type="button" className="draft-sheet-product-name" aria-label={`${draft.draftNo} 한글명`} onClick={onOpen}>{draft.nameKo.trim()}</button>
+        <button type="button" className="draft-sheet-product-name is-en" aria-label={`${draft.draftNo} 영문명`} onClick={onOpen}>{draft.nameEn.trim()}</button>
       </div>
       <SheetConfirmButton
         className="draft-sheet-name-confirm"
@@ -905,8 +892,9 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
         <div className="draft-sheet-actions draft-sheet-sample-launch"><SampleWorkOrderButton readOnly={readOnly} onUpload={onUploadSampleWorkOrder} onOpen={onOpen} /></div>
       )}
     </td>
-    <td className="draft-sheet-price-cell">
-      <DraftPriceRequestButton readOnly={readOnly} hasColors={hasColor} missingColors={missingPriceColors} controls={price} />
+    <td className={`draft-sheet-price-cell${priceAmounts && hasColor ? ' has-reply' : ''}`}>
+      <DraftPriceRequestButton readOnly={readOnly} hasColors={hasColor} colors={draft.colors} missingColors={missingPriceColors} controls={price}
+        confirmedRequestId={draft.specs.confirmedPriceRequestId} />
     </td>
     <td>
       <div className="draft-color-pad draft-sheet-color-tools">
@@ -915,6 +903,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
           colors={draft.colors}
           imageChoices={draft.specs.colorImageChoices}
           photoUrls={draft.specs.colorPhotoUrls}
+          revision={draft.updatedAt}
           onSaveColors={onSaveColors}
         />
         <SheetConfirmButton
@@ -940,10 +929,8 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
                 label={`${draft.draftNo} 컬러 ${index + 1} 이름`}
                 className="draft-sheet-color-name"
                 value={color.name}
-                placeholder="컬러 이름"
                 onCommit={(next) => onRenameColor(color.id, next)}
               />
-              {photoUrl ? <DraftPhoto src={photoUrl} name={`${color.name} 컬러`} compact /> : null}
               {color.orderQty != null && color.orderQty > 0 ? <small>{formatNumber(color.orderQty)}</small> : null}
             </ColorLine>
           )
@@ -952,67 +939,53 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
     </td>
     <td>
       <div className="draft-color-pad" />
-      <div className="draft-color-lines">
-        {colorRows.map((color, index) => {
-          const spec = color ? resolveColorSpec(draft.specs, color.id) : null
-          const specDocLabel = specsConfirmed && spec?.specDoc.trim() ? '스펙 확정' : '스펙 문서'
-          return (
-            <ColorLine key={color?.id ?? 'none'} index={index}>
-              <div className="draft-sheet-info">
-                <SampleStatus
-                  status={colorSampleLineStatus(colorSampleStarted, colorSampleReceived, Boolean(color && colorSampleDone(color.id)))}
-                  canToggle={!readOnly && Boolean(color) && colorSampleReceived}
-                  onToggle={color ? () => toggleColorSampleDone(color.id, !colorSampleDone(color.id)) : undefined}
-                />
-                <div className="draft-sheet-specs">
-                  <EntryButton
-                    readOnly={readOnly}
-                    label="size"
-                    value={formatSizeSpecLabel(spec?.size ?? '')}
-                    placeholder="300×120×210"
-                    tone={specTone(spec?.size ?? '', draft.specs.size.confirmed)}
-                    canApplyAll={canApplyAll}
-                    disabled={!color}
-                    onSave={color ? saveColorSpec(color.id, 'size') : async () => undefined}
+      <div className="draft-sheet-information grid w-fit grid-cols-[max-content_auto]">
+        <div className="draft-color-lines">
+          {colorRows.map((color, index) => {
+            const spec = color ? resolveColorSpec(draft.specs, color.id) : null
+            function informationButton(field: ColorInformationField) {
+              const value = spec?.[field] ?? ''
+              const displayValue = field === 'size'
+                ? [formatSizeSpecLabel(value), spec?.weight.trim()].filter(Boolean).join(' · ')
+                : value || spec?.coating || ''
+              const confirmed = spec ? isColorInformationConfirmed(draft.specs, spec, field) : false
+              const editing = !readOnly && color && spec
+                ? hasInformationEdits(spec, informationEdits[colorInformationEditKey(color.id, field)])
+                : false
+              const expanded = information?.colorId === color?.id && information?.field === field
+              return (
+                <InformationButton key={field} label={DRAFT_INFORMATION_LABELS[field]}
+                  value={displayValue}
+                  tone={specTone(displayValue || (field === 'size' ? spec?.sizeNote ?? '' : ''), confirmed, editing)}
+                  panelId={informationId} expanded={expanded} disabled={!color}
+                  onClick={event => {
+                    if (!color) return
+                    setInformation(expanded ? null : { anchor: event.currentTarget, colorId: color.id, field })
+                  }} />
+              )
+            }
+            return (
+              <ColorLine key={color?.id ?? 'none'} index={index}>
+                <div className="draft-sheet-info">
+                  <SampleStatus
+                    status={colorSampleLineStatus(colorSampleStarted, colorSampleReceived, Boolean(color && colorSampleDone(color.id)))}
+                    canToggle={!readOnly && Boolean(color) && colorSampleReceived}
+                    onToggle={color ? () => toggleColorSampleDone(color.id, !colorSampleDone(color.id)) : undefined}
                   />
-                  <EntryButton
-                    readOnly={readOnly}
-                    label="Fabric"
-                    value={spec?.fabric ?? ''}
-                    placeholder="원단"
-                    tone={specTone(spec?.fabric ?? '', draft.specs.fabric.confirmed)}
-                    canApplyAll={canApplyAll}
-                    disabled={!color}
-                    onSave={color ? saveColorSpec(color.id, 'fabric') : async () => undefined}
-                  />
-                  <EntryButton
-                    readOnly={readOnly}
-                    label="Weight"
-                    value={spec?.weight ?? ''}
-                    placeholder="무게"
-                    tone={specTone(spec?.weight ?? '', draft.specs.weight.confirmed)}
-                    canApplyAll={canApplyAll}
-                    disabled={!color}
-                    onSave={color ? saveColorSpec(color.id, 'weight') : async () => undefined}
-                  />
+                  <div className="draft-sheet-specs">
+                    {(['size', 'fabric'] as const).map(informationButton)}
+                  </div>
                 </div>
-                <div className="draft-sheet-actions">
-                  <EntryButton
-                    readOnly={readOnly}
-                    label={specDocLabel}
-                    value={spec?.specDoc ?? ''}
-                    placeholder="스펙 내용"
-                    tone={specTone(spec?.specDoc ?? '', specsConfirmed)}
-                    icon={<FileText size={16} />}
-                    canApplyAll={canApplyAll}
-                    disabled={!color}
-                    onSave={color ? saveColorSpec(color.id, 'specDoc') : async () => undefined}
-                  />
-                </div>
-              </div>
-            </ColorLine>
-          )
-        })}
+              </ColorLine>
+            )
+          })}
+        </div>
+        <div className="flex items-center justify-center bg-card pl-2">
+          <InformationButton label={documentConfirmed && specDocument.trim() && !documentEditing ? '스펙 확정' : '스펙 문서'}
+            value={specDocument} tone={specTone(specDocument, documentConfirmed, documentEditing)} panelId={informationId}
+            expanded={documentOpen} disabled={false} icon={<FileText size={16} aria-hidden="true" />}
+            onClick={event => setInformation(documentOpen ? null : { anchor: event.currentTarget, colorId: null, field: 'specDoc' })} />
+        </div>
       </div>
     </td>
     <td className="draft-sheet-md-cell">
@@ -1033,5 +1006,16 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
         <button type="button" className="draft-sheet-schedule-button" disabled={readOnly} onClick={onSchedule}>{schedule?.group ? '일정 수정' : '일정 정하기'}</button>
       </div>
     </div></td>
-  </tr>
+    </tr>
+    {information && (
+      <DraftInformationPanel key={informationEditorId} id={informationId} anchor={information.anchor}
+        editorId={informationEditorId} temporaryStore={informationTemporaryStore}
+        edits={informationEdits} onEditsChange={updateInformationEdits}
+        draft={draft} field={information.field} colorId={information.colorId} readOnly={readOnly}
+        onSave={onSaveSheetValue}
+        onSaveSpecDocument={onSaveSpecDocument}
+        onFieldChange={field => setInformation(current => current && { ...current, field })}
+        onClose={closeInformation} />
+    )}
+  </>
 }

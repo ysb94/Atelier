@@ -48,10 +48,10 @@ export function releaseAccess(profile: ReleaseProfile | null | undefined) {
   }
 }
 export function releasePersonalPart(profile: ReleaseProfile | null | undefined, part: string | null, approver = false) {
-  if (part === 'my-work') return profile?.status === 'active' && profile.companyId === RELEASE_COMPANY_ID
+  if (part === 'my-work') return false
+  if (part === 'work') return profile?.status === 'active' && profile.companyId === RELEASE_COMPANY_ID
   if ((part === 'overtime' || part === 'attendance') && !isHeadOfficeMember(profile)) return false
-  if (part === 'work' && !releaseAccess(profile).unrestricted) return false // 직원 공개 보류: 기존 예외 계정과 업무 권한은 유지한다.
-  return releaseAccess(profile).unrestricted || !part || part === 'my-attendance' || part === 'overtime' || part === 'meetings' || (part === 'work' && profile?.status === 'active' && profile.companyId === RELEASE_COMPANY_ID) || ((part === 'approvals' || part === 'attendance') && approver)
+  return releaseAccess(profile).unrestricted || !part || part === 'my-attendance' || part === 'overtime' || part === 'meetings' || ((part === 'approvals' || part === 'attendance') && approver)
 }
 const under = (path: string, root: string) => path === root || path.startsWith(root + '/')
 
@@ -60,15 +60,16 @@ export function releaseHref(profile: ReleaseProfile | null | undefined, href: st
   let url: URL
   try { url = new URL(href, 'https://atelier.invalid') } catch { return null /* 잘못된 링크는 화면 진입 경로로 취급하지 않는다. */ }
   if (url.origin !== 'https://atelier.invalid' || !href.startsWith('/') || href.startsWith('//')) return null
+  const path = url.pathname.replace(/\/$/, '') || '/'
   const scope = releaseAccess(profile)
   if (url.pathname === LOGISTICS_OPERATIONS_HREF || url.pathname.startsWith(LOGISTICS_OPERATIONS_HREF + '/')) return canManageLogisticsOperations(profile) ? href : null
+  if (path === RELEASE_HOME) return releasePersonalPart(profile, url.searchParams.get('part'), approver) ? href : null
+  if (path === '/work') return releasePersonalPart(profile, 'work') ? href : null
   if (scope.unrestricted) return href
-  if (url.pathname.replace(/\/$/, '') === '/work' || url.pathname === '/work-requests' || (url.pathname === RELEASE_HOME && url.searchParams.get('part') === 'work')) return null
-  const path = url.pathname.replace(/\/$/, '') || '/'
+  if (path === '/work-requests') return null
   if (path === MATERIAL_REQUESTS_PATH && materialNudgeViewer && profile?.status === 'active'
     && profile.companyId === RELEASE_COMPANY_ID && profile.email !== 'ui-preview@example.invalid') return href
   if (/^\/work-requests\/(planning|design|md|logistics)$/.test(path)) return scope.departmentSite?.pages.some(page => page === path) || (scope.logistics && path === '/work-requests/logistics') ? href : null
-  if (path === RELEASE_HOME) return releasePersonalPart(profile, url.searchParams.get('part'), approver) ? href : null
   if (/^\/chat\/room\/[^/]+$/.test(path)) return href
   if (path === '/meetings') { url.pathname = RELEASE_HOME; url.searchParams.set('part', 'meetings'); return url.pathname + url.search }
   if (scope.operations && (under(path, '/operations-support') || ['/members', '/settings/permissions'].includes(path))) return href

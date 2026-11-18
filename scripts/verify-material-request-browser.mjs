@@ -10,7 +10,7 @@ const { outputFiles } = await build({
   stdin: { resolveDir: process.cwd(), loader: 'tsx', contents: `
     import {BrowserRouter,useLocation,useNavigate,Link} from 'react-router-dom'
     import {useState} from 'react'
-    import {QueryClient,QueryClientProvider,useQuery} from '@tanstack/react-query'
+    import {QueryClient,QueryClientProvider,useQuery,useQueryClient} from '@tanstack/react-query'
     import {ChinaMaterialRequests} from './src/features/china/ChinaMaterialRequests'
     import {ChinaAssignedWorkOrders} from './src/features/china/ChinaAssignedWorkOrders'
     import {ChinaWorkOrderTabs} from './src/features/china/ChinaWorkOrderTabs'
@@ -28,19 +28,35 @@ const { outputFiles } = await build({
     const ids = ${JSON.stringify(ids)}
     const actors = { planning: ids.requester, pricePlanning: ids.requester, manager: ids.manager, managerBoard: ids.manager, worker: ids.worker, other: ids.other, recipient: ids.worker, scoreRecipient: ids.viewer, dualRecipient: ids.colleague }
     const priceDraft = ${JSON.stringify(draftPriceFixture)}
-    const priceDrafts=[{ id:priceDraft.id,draftNo:'PL-0007',brandId:null,imageUrl:null,owner:'테스트 디자이너',nameKo:'검증용 상품',nameEn:'Fixture Product' }]
+    const priceDraftFields={id:priceDraft.id,draftNo:'PL-0007',brandId:null,imageUrl:null,owner:'테스트 디자이너',nameKo:'검증용 상품',nameEn:'Fixture Product'}
+    async function readPriceDraft(confirmId) {
+      const response=await fetch('/rpc/fixture_price_draft',{
+        method:'POST',headers:{'x-actor':window.actor},body:JSON.stringify({confirmId}),
+      })
+      const result=await response.json()
+      if (result.error) throw new Error(result.error.message)
+      return {...priceDraftFields,...result.data}
+    }
     function PricePlanning() {
       const prices=useDraftPriceRequests('planning')
+      const cache=useQueryClient()
+      const key=['fixture-planning-price-draft']
+      const draft=useQuery({queryKey:key,queryFn:()=>readPriceDraft()})
       const requests=prices.requests.filter(row=>row.draftId===priceDraft.id).sort((a,b)=>b.round-a.round)
       const latest=requests[0]
-      return <DraftPriceRequestButton readOnly={false} hasColors missingColors={[]} controls={{
+      return <DraftPriceRequestButton readOnly={false} hasColors missingColors={[]}
+        colors={[{id:priceDraft.black,name:'Black'},{id:priceDraft.yellow,name:'Yellow'}]}
+        confirmedRequestId={draft.data?.specs.confirmedPriceRequestId} controls={{
         latest,reply:requests.find(row=>row.answeredAt),loading:prices.query.isPending,error:prices.query.error?.message ?? '',
-        retry:()=>void prices.query.refetch(),request:()=>prices.change({action:'request',draftId:priceDraft.id,revision:priceDraft.updatedAt,previousId:latest?.id ?? null}),
+        retry:()=>void prices.query.refetch(),
+        request:()=>prices.change({action:'request',draftId:priceDraft.id,revision:draft.data?.updatedAt ?? priceDraft.updatedAt,previousId:latest?.id ?? null}),
+        confirm:async reply=>cache.setQueryData(key,await readPriceDraft(reply.id)),
       }}/>
     }
     function ManagerBoard() {
-      const screen=useQuery({queryKey:['china-work-screen',window.actor],queryFn:getMyChinaWorkOrders})
-      return <ChinaWorkOrderTabs workloads={screen.data?.workloads} unchecked={new Map()} unreceived={0} priceDrafts={priceDrafts}>{()=>null}</ChinaWorkOrderTabs>
+      const screen=useQuery({queryKey:['china-work-screen',window.actor],queryFn:getMyChinaWorkOrders,refetchInterval:30_000})
+      const draft=useQuery({queryKey:['fixture-china-price-draft',screen.data?.revision],queryFn:()=>readPriceDraft(),enabled:screen.isSuccess})
+      return <ChinaWorkOrderTabs workloads={screen.data?.workloads} unchecked={new Map()} unreceived={0} priceDrafts={draft.data ? [draft.data] : []}>{()=>null}</ChinaWorkOrderTabs>
     }
     function NudgeInbox() {
       const [item,setItem]=useState(null)
@@ -177,6 +193,16 @@ try {
         }
         const p = req.postDataJSON()
         const rpc = path.slice('/rpc/'.length)
+        if (rpc === 'fixture_price_draft') {
+          const {rows} = p.confirmId
+            ? await tx.query(`update public.product_drafts
+                set specs=specs || jsonb_build_object('confirmedPriceRequestId',$2::text),
+                    updated_at=date_trunc('milliseconds',clock_timestamp())
+                where id=$1 returning specs,updated_at as "updatedAt"`,[draftPriceFixture.id,p.confirmId])
+            : await tx.query('select specs,updated_at as "updatedAt" from public.product_drafts where id=$1',[draftPriceFixture.id])
+          if (!rows.length) throw Error('Fixture draft unavailable')
+          return {data:rows[0],error:null}
+        }
         if (Object.hasOwn(draftPriceRpcArgs, rpc)) return { data:await callDraftPriceFixture(tx,rpc,p),error:null }
         if (path.endsWith('/material_nudge_recipients')) {
           const { rows } = await tx.query('select profile_id from public.material_nudge_recipients order by profile_id')
@@ -392,6 +418,7 @@ try {
   const firstPriceRow=priceTable.getByRole('row').filter({hasText:'1차 요청'})
   const repeatPriceRow=priceTable.getByRole('row').filter({hasText:'단가 재요청'})
   await firstPriceRow.getByText('No. PL-0007',{exact:true}).waitFor()
+  assert.match(await firstPriceRow.getByText(/^\+ \d+ days$/).getAttribute('class'),/\btext-primary\b/)
   assert.equal(await managerPricesTab.getByTitle('미확인 건수').textContent(),'1')
   await priceFilters.getByRole('button',{name:'1차 요청 (1)',exact:true}).click()
   assert.equal(await firstPriceRow.getByRole('button',{name:'Yellow 컬러 사진 크게 보기'}).count(),0)
@@ -415,6 +442,7 @@ try {
   assert.equal(await managerPricesTab.getByTitle('미확인 건수').textContent(),'1')
   await firstPriceRow.getByRole('button',{name:'단가 전송',exact:true}).click()
   await firstPriceRow.getByText('전송 완료',{exact:true}).waitFor()
+  assert.match(await firstPriceRow.getByText(/^\d+ days$/).getAttribute('class'),/\btext-foreground\b/)
   assert.equal(await managerPricesTab.getByTitle('미확인 건수').count(),0)
   await priceFilters.getByRole('button',{name:'ALL (0)',exact:true}).waitFor()
   assert.equal(Number(await blackPrice.inputValue()),17.5)
@@ -429,17 +457,74 @@ try {
   await planningPriceDialog.getByText('1차 회신 단가',{exact:true}).waitFor()
   await planningPriceDialog.getByText('¥17.5',{exact:true}).waitFor()
   await planningPriceDialog.getByText('¥0',{exact:true}).waitFor()
-  await planningPriceDialog.getByRole('button',{name:'단가 재요청 보내기',exact:true}).click()
-  await planningPriceDialog.getByText('2차 요청이 접수되어 중국팀 회신을 기다리고 있습니다.').waitFor()
-  await planningPriceDialog.getByText('¥17.5',{exact:true}).waitFor()
+  await planningPriceDialog.getByRole('button',{name:'닫기',exact:true}).click()
+  await page.getByRole('button',{name:'단가 재요청',exact:true}).click()
+  await page.getByRole('status').filter({hasText:'재요청중'}).waitFor()
+  assert.equal(await page.getByRole('dialog').count(),0)
   await priceManager.bringToFront()
   await priceManager.clock.fastForward(31_000)
+  await repeatPriceRow.waitFor()
+  assert.equal(await priceTable.locator('tbody tr').count(),1)
+  assert.deepEqual(await repeatPriceRow.getByRole('list',{name:'요청 차수'}).getByRole('listitem').allTextContents().then(rows =>
+    rows.map(row=>row.includes('1차 요청') ? 1 : row.includes('단가 재요청 · 2차') ? 2 : 0)),[1,2])
+  const previousPrices=repeatPriceRow.getByRole('region',{name:'이전 전송 단가'})
+  await previousPrices.getByText('1차 회신',{exact:true}).waitFor()
+  await previousPrices.getByText('¥17.5',{exact:true}).waitFor()
+  await previousPrices.getByText('¥0',{exact:true}).waitFor()
   await priceFilters.getByRole('button',{name:'재요청 (1)',exact:true}).click()
   await repeatPriceRow.waitFor()
-  assert.equal(await firstPriceRow.count(),0)
-  assert.equal(await repeatPriceRow.getByRole('spinbutton',{name:'Black 단가 (위안)',exact:true}).inputValue(),'')
+  assert.equal(await priceTable.locator('tbody tr').count(),1)
+  const repeatBlack=repeatPriceRow.getByRole('spinbutton',{name:'Black 단가 (위안)',exact:true})
+  const repeatYellow=repeatPriceRow.getByRole('spinbutton',{name:'Yellow 단가 (위안)',exact:true})
+  assert.equal(await repeatBlack.inputValue(),'')
+  assert.equal(await repeatYellow.inputValue(),'')
+  await repeatBlack.fill('18.25')
+  await repeatYellow.fill('4')
+  await repeatPriceRow.getByRole('button',{name:'단가 전송',exact:true}).click()
+  await repeatPriceRow.getByText('전송 완료',{exact:true}).waitFor()
+  assert.equal(await repeatBlack.inputValue(),'18.25')
+  await priceManager.reload()
+  await managerPricesTab.click()
+  await repeatPriceRow.getByText('전송 완료',{exact:true}).waitFor()
+  await previousPrices.getByText('¥17.5',{exact:true}).waitFor()
+  assert.equal(await priceTable.locator('tbody tr').count(),1)
+
+  await page.bringToFront()
+  await page.clock.fastForward(31_000)
+  await page.getByText('18.25',{exact:true}).waitFor()
+  await page.getByRole('button',{name:'확정',exact:true}).click()
+  await page.getByRole('img',{name:'단가 확정'}).waitFor()
+  await priceManager.bringToFront()
+  await priceManager.clock.fastForward(31_000)
+  const confirmedPriceTab=priceFilters.getByRole('button',{name:'확정 (1)',exact:true})
+  await confirmedPriceTab.waitFor()
+  await priceFilters.getByRole('button',{name:'ALL (0)',exact:true}).click()
+  assert.equal(await repeatPriceRow.count(),0)
+  await priceFilters.getByRole('button',{name:'재요청 (0)',exact:true}).click()
+  assert.equal(await repeatPriceRow.count(),0)
+  await confirmedPriceTab.click()
+  const rounds=repeatPriceRow.getByRole('list',{name:'요청 차수'})
+  await rounds.getByText('확정',{exact:true}).waitFor()
+  await previousPrices.getByText('¥17.5',{exact:true}).waitFor()
+
+  await page.bringToFront()
+  await page.getByRole('button',{name:'Black 단가 18.25위안 재요청',exact:true}).click()
+  await page.getByRole('status').filter({hasText:'재요청중'}).waitFor()
+  await priceManager.bringToFront()
+  await priceManager.clock.fastForward(31_000)
+  await priceFilters.getByRole('button',{name:'확정 (0)',exact:true}).waitFor()
+  assert.equal(await repeatPriceRow.count(),0)
+  await priceFilters.getByRole('button',{name:'재요청 (1)',exact:true}).click()
+  await rounds.getByText('단가 재요청 · 3차',{exact:true}).waitFor()
+  assert.equal(await rounds.getByText('확정',{exact:true}).count(),0)
+  assert.equal(await repeatBlack.inputValue(),'')
+  await previousPrices.getByText('¥18.25',{exact:true}).waitFor()
+  const previousRoundLabels=previousPrices.getByRole('listitem').getByText(/^\d+차 회신$/)
+  assert.deepEqual(await previousRoundLabels.allTextContents(),['1차 회신','2차 회신'])
+  await priceFilters.getByRole('button',{name:'ALL (1)',exact:true}).click()
+  await rounds.getByText('단가 재요청 · 3차',{exact:true}).waitFor()
   await priceManager.close()
-  console.log('Draft price browser: planning request, cross-page refresh, manager photo/reply, failure retry, pending count and re-request passed')
+  console.log('Draft price browser: grouped replies and history, planning confirmation, and confirmed-to-re-request transition passed')
   await open('managerBoard')
   const assigneeTabs=page.getByRole('group',{name:'자재요청 담당자',exact:true})
   const workerTab=assigneeTabs.getByRole('button',{name:/김영인/})
