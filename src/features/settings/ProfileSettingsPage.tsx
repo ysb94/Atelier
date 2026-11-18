@@ -13,7 +13,6 @@ import { useAuth } from '@/lib/supabase/auth'
 import { capabilityLabel } from '@/lib/company/capabilities'
 import { usePagePreview } from '@/lib/company/page-preview-context'
 import { Fragment, useEffect } from 'react'
-import { ListTodo } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { LeaveApprovalPanel } from '@/features/operations-support/LeaveApprovalPanel'
@@ -88,12 +87,12 @@ function ProfileSettingsContent() {
   const permitted = releasePersonalPart(release.profile, part, release.approver) && (part !== 'attendance' || showDepartmentTab)
   const visiblePart = !permitted || (part === 'attendance' && !showDepartmentTab) ? 'my-attendance' : part
   const tabs: { id: PersonalPart; label: string }[] = release.scope.unrestricted ? [
-    { id: 'my-attendance', label: 'My Schedule' }, { id: 'my-work', label: '내업무' }, { id: 'profile', label: '내 정보' },
+    { id: 'my-attendance', label: 'My Schedule' }, { id: 'profile', label: '내 정보' },
     { id: 'overtime', label: '야근' }, { id: 'work', label: '작업 요청' },
     { id: 'approvals', label: '승인할 신청' }, { id: 'company-notice', label: '회사 공지' },
     { id: 'department-notice', label: '부서 공지' }, { id: 'meetings', label: '회의' },
     ...(showDepartmentTab ? [{ id: 'attendance' as const, label: '담당 부서 출근시간' }] : []),
-  ] : [{ id: 'my-attendance', label: 'My Schedule' }, { id: 'my-work', label: '내업무' }, { id: 'overtime', label: '야근' }, { id: 'meetings', label: '회의' }, { id: 'work', label: '작업 요청' },
+  ] : [{ id: 'my-attendance', label: 'My Schedule' }, { id: 'overtime', label: '야근' }, { id: 'meetings', label: '회의' }, { id: 'work', label: '작업 요청' },
     ...(release.approver ? [{ id: 'approvals' as const, label: '승인할 신청' }, { id: 'attendance' as const, label: '담당 부서 출근시간' }] : [])]
   useEffect(() => {
     if (!active || permitted || ((part === 'approvals' || part === 'attendance') && approvals.loading)) return
@@ -109,22 +108,14 @@ function ProfileSettingsContent() {
       </div>
 
       <div className="personal-page-tabs" role="tablist" aria-label="My home 메뉴">
-        {tabs.filter(tab => (tab.id !== 'work' || release.scope.unrestricted) && releasePersonalPart(release.profile, tab.id, release.approver)).map(tab => <Fragment key={tab.id}>
+        {tabs.filter(tab => releasePersonalPart(release.profile, tab.id, release.approver)).map(tab => <Fragment key={tab.id}>
           {release.scope.unrestricted && tab.id === 'approvals' && <span className="personal-page-tab-split" aria-hidden="true" />}
-          <button type="button" role="tab" id={`personal-${tab.id}-tab`} className={tab.id === 'attendance' ? 'personal-page-tab-end' : undefined} aria-selected={visiblePart === tab.id} aria-controls={`personal-${tab.id}-panel`} onClick={() => selectPart(tab.id)}>{tab.label}{tab.id !== 'my-work' && <MyHomeNotificationBadge tab={tab.id} />}</button>
+          <button type="button" role="tab" id={`personal-${tab.id}-tab`} className={tab.id === 'attendance' ? 'personal-page-tab-end' : undefined} aria-selected={visiblePart === tab.id} aria-controls={`personal-${tab.id}-panel`} onClick={() => selectPart(tab.id)}>{tab.label}<MyHomeNotificationBadge tab={tab.id} /></button>
         </Fragment>)}
       </div>
       {['meetings','my-attendance','approvals','overtime','attendance'].includes(visiblePart) && <MyHomeNotificationList key={visiblePart} tab={visiblePart as 'meetings'|'my-attendance'|'approvals'|'overtime'|'attendance'} />}
       <MyHomeWorkNoticeDetail />
       {visiblePart !== 'work' && <VisualWorkNoticeDetail />}
-      {visiblePart === 'my-work' && (
-        <Card id="personal-my-work-panel" role="tabpanel" aria-labelledby="personal-my-work-tab">
-          <div className="flex min-h-48 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground">
-            <ListTodo className="size-6" aria-hidden="true" />
-            <p>표시할 업무가 없습니다.</p>
-          </div>
-        </Card>
-      )}
       {visiblePart === 'work' && <div id="personal-work-panel" role="tabpanel" aria-labelledby="personal-work-tab"><VisualWorkflowNotificationList /><WorkRequestHubPage /></div>}
       {visiblePart === 'company-notice' && <div id="personal-company-notice-panel" role="tabpanel" aria-labelledby="personal-company-notice-tab"><HomeNoticeBoard kind="company" /></div>}
       {visiblePart === 'department-notice' && <div id="personal-department-notice-panel" role="tabpanel" aria-labelledby="personal-department-notice-tab"><HomeNoticeBoard kind="department" /></div>}

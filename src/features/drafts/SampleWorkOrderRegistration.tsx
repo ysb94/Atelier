@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Select } from '@/components/ui/input'
+import { SampleDestinationSelect } from './SampleDestinationSelect'
 import { readFileAsDataUrl } from '@/lib/images'
-import { sampleCountry } from '@/lib/drafts/sample-receipt'
+import { isSampleDestination } from '@/lib/drafts/sample-receipt'
 import { nextRegistrationStages, sampleRegistrationLabel, type SampleRegistrationStage } from '@/lib/drafts/sample-registration'
 
 type WorkOrderFile = { url: string; name: string }
@@ -15,7 +15,7 @@ export function SampleWorkOrderRegistration({ originCountry, nextRound, nextColo
   const fileRef = useRef<HTMLInputElement>(null)
   const countryTouched = useRef(false)
   const pending = useRef(false)
-  const [country, setCountry] = useState(sampleCountry(originCountry).label)
+  const [country, setCountry] = useState(originCountry)
   const stages = nextRegistrationStages(latestIsFinal)
   const [stage, setStage] = useState<SampleRegistrationStage>(stages[0])
   useEffect(() => {
@@ -27,7 +27,7 @@ export function SampleWorkOrderRegistration({ originCountry, nextRound, nextColo
   const [reading, setReading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  useEffect(() => { if (!countryTouched.current) setCountry(sampleCountry(originCountry).label) }, [originCountry])
+  useEffect(() => { if (!countryTouched.current) setCountry(originCountry) }, [originCountry])
   const label = sampleRegistrationLabel(stage, nextRound, finalCount, nextColorRound)
   const shown = file ?? registered
   const disabled = readOnly || saving || busy || reading
@@ -35,7 +35,7 @@ export function SampleWorkOrderRegistration({ originCountry, nextRound, nextColo
   async function register() {
     if (disabled || pending.current) return
     if (!file) { setError('작업지시서 파일을 먼저 선택해 주세요.'); return }
-    if (!['CN','KO'].includes(sampleCountry(country).code)) { setError('제조국을 선택해 주세요.'); return }
+    if (!isSampleDestination(country)) { setError('샘플 진행처를 선택해 주세요.'); return }
     pending.current = true; setBusy(true); setError('')
     try { await onRegister(stage, file, country); setRegistered({ ...file, label }); setFile(null) }
     catch (cause) { console.warn('[drafts] 샘플 단계 작업지시서 등록 실패', cause); setError(cause instanceof Error ? cause.message : '작업지시서를 등록하지 못했습니다. 다시 시도해 주세요.') }
@@ -64,9 +64,9 @@ export function SampleWorkOrderRegistration({ originCountry, nextRound, nextColo
       </div>
     </div>
     <div className="mt-4 grid items-center gap-4 sm:grid-cols-[240px_minmax(0,1fr)]">
-      <Select aria-label="다음 샘플 제조국" className="h-11" value={country} disabled={disabled} onChange={event => { countryTouched.current = true; setCountry(event.target.value); setError('') }}>
-        <option value="국가 미정">제조국 선택</option><option value="중국">중국</option><option value="한국">한국</option>
-      </Select>
+      <SampleDestinationSelect label="다음 샘플 진행처" value={country} disabled={disabled} onChange={value => {
+        countryTouched.current = true; setCountry(value); setError('')
+      }} />
       <div className="flex min-h-16 items-center justify-center rounded-xl border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
         {shown ? <a href={shown.url} download={shown.name} className="max-w-full truncate text-foreground underline-offset-2 hover:underline">{shown.name}</a> : '올린 파일이 없습니다.'}
       </div>

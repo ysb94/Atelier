@@ -313,13 +313,20 @@ export type DraftSpecKey = 'size' | 'weight' | 'fabric' | 'coating'
 /** 시트 INFORMATION 칸의 컬러 한 줄. 상품 공통 스펙과 따로 저장한다. */
 export type DraftColorSpec = {
   size: string
+  sizeNote: string
   fabric: string
+  coating?: string
   weight: string
   specDoc: string
+  sizeConfirmed?: boolean
+  fabricConfirmed?: boolean
 }
 
 export type DraftSpecs = Record<DraftSpecKey, DraftSpec> & {
   colorSpecs: Record<string, DraftColorSpec>
+  specDocumentConfirmed?: boolean
+  proposer?: { id: string; name: string }
+  confirmedPriceRequestId?: string
   colorImageChoices?: Record<string, DraftColorImageChoice>
   colorPhotoUrls?: Record<string, string>
   /** 상품명 최종 확정. 출시 전에도 이름은 고칠 수 있다. */
@@ -452,11 +459,6 @@ export const DRAFT_OWNER_OPTIONS = [
   '이디자인',
   '박MD',
   '최물류',
-] as const
-
-export const DRAFT_ORIGIN_OPTIONS = [
-  '중국',
-  '한국',
 ] as const
 
 export const DRAFT_REGISTER_TYPE_OPTIONS = [

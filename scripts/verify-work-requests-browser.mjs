@@ -23,6 +23,7 @@ async function localApi(req,res){
    let data
    if(route==='rpc'){
     if(body.name==='list_org_chart_members'){await db.exec('reset role');data=(await db.query("select p.id,p.display_name,p.department_id,p.position,p.job_grade,p.hire_date,d.name as department_name from public.profiles p left join public.departments d on d.id=p.department_id where p.company_id='e0000000-0000-4000-8000-000000000001' and p.status='active'")).rows}
+    else if(body.name==='list_company_attendance_exempt')data=[]
     else {if(!rpcNames.has(body.name))throw Error('Unsupported test RPC '+body.name);if(body.name==='save_work_request'&&failNextSave){failNextSave=false;throw Error('저장 실패 재시도 검증')}const names=Object.keys(body.args);if(names.some(name=>!/^p_[a-z_]+$/.test(name)))throw Error('Invalid argument');data=(await db.query(`select public.${body.name}(${names.map((name,i)=>name+'=>$'+(i+1)).join(',')}) as data`,Object.values(body.args))).rows[0].data}
    }else if(route==='table'){
     if(!['brands','product_drafts','draft_colors','draft_options','seasons','styles'].includes(body.table))throw Error('Unsupported table '+body.table)
@@ -42,7 +43,7 @@ async function localApi(req,res){
    }else if(route==='remove'){for(const name of body.paths){await db.query("delete from storage.objects where bucket_id='company-work-requests' and name=$1",[name]);objects.delete(name)}data={}}
    else throw Error('Unknown test route')
    res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data,error:null}))
-   if(route==='rpc'&&!['get_my_basic_work_access','list_work_requests','list_org_chart_members'].includes(body.name))for(const stream of events)stream.write('data: changed\n\n')
+   if(route==='rpc'&&!['get_my_basic_work_access','list_work_requests','list_org_chart_members','list_company_attendance_exempt'].includes(body.name))for(const stream of events)stream.write('data: changed\n\n')
   }catch(error){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:null,error:{message:error.message,code:error.code}}))}
  });queue=task.catch(()=>{});await task
 }
@@ -95,11 +96,43 @@ try{
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:'.tmp/work-requests-live-mobile.png',fullPage:true})
  await page.setViewportSize({width:1440,height:1000})
  await page.goto(origin+'/drafts/new?actor=planner')
- await page.getByPlaceholder('투웨이 셔링 호보백_글로우').fill('작성자 계정 검증 기획안')
+ await page.getByRole('textbox',{name:'한글명',exact:true}).fill('작성자 계정 검증 기획안')
+ const brandSelect=page.getByRole('combobox',{name:'브랜드 선택',exact:true})
+ const destination=page.getByRole('combobox',{name:'샘플 진행처 선택',exact:true})
+ const brandMark=page.getByRole('img',{name:'ATELIER 브랜드',exact:true})
+ assert.equal(await brandSelect.inputValue(),'')
+ assert.equal(await brandMark.count(),0)
+ await page.getByText('No. 저장 시 발급',{exact:true}).waitFor()
+ assert.deepEqual(await brandSelect.locator('option').allTextContents(),['브랜드 미정','ATELIER'])
+ await brandSelect.selectOption({label:'ATELIER'})
+ await brandMark.waitFor()
+ assert.match(await brandMark.locator('img').getAttribute('src'),/^data:image\/png/)
+ await brandSelect.selectOption('')
+ assert.equal(await brandMark.count(),0)
+ await brandSelect.selectOption({label:'ATELIER'})
+ await destination.selectOption({label:'PROMOTION [중국]'})
+ await page.locator('summary[aria-label="제안자 선택 (선택 사항)"]').click()
+ await page.getByRole('textbox',{name:'제안자 이름 검색'}).fill('design')
+ await page.getByRole('button',{name:'design',exact:true}).click()
+ await page.getByText('제안자 design',{exact:true}).waitFor()
+ const photo=page.getByRole('button',{name:'사진 선택',exact:true})
+ const [photoBox,brandBox]=await Promise.all([photo.boundingBox(),brandMark.boundingBox()])
+ assert.ok(photoBox.x+photoBox.width<brandBox.x&&Math.abs(photoBox.y-brandBox.y)<1)
+ await page.setViewportSize({width:390,height:844})
+ assert.ok((await photo.boundingBox()).y<(await brandMark.boundingBox()).y)
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false)
+ await page.setViewportSize({width:1440,height:1000})
  await page.getByRole('button',{name:'저장',exact:true}).click()
  await page.waitForURL(url=>/\/drafts\/[0-9a-f-]{36}/.test(url.pathname))
  await page.getByRole('button',{name:'저장',exact:true}).waitFor()
  assert.equal(await page.getByRole('button',{name:'저장',exact:true}).isEnabled(),true)
+ await page.reload()
+ await brandSelect.waitFor()
+ assert.equal(await brandSelect.locator('option:checked').textContent(),'ATELIER')
+ await brandMark.waitFor()
+ await page.getByText('제안자 design',{exact:true}).waitFor()
+ assert.equal(await destination.inputValue(),'PROMOTION [중국]')
+ assert.match(await page.locator('summary[aria-label="제안자 선택 (선택 사항)"]').textContent(),/design/)
  await page.getByRole('combobox',{name:'직원 계정 전환'}).selectOption('planner2')
  await page.waitForFunction(()=>[...document.querySelectorAll('button')].find(button=>button.textContent?.trim()==='저장')?.disabled===true)
  assert.equal(await page.getByRole('button',{name:'삭제',exact:true}).count(),0)
@@ -108,7 +141,7 @@ try{
  assert.equal(await page.getByRole('button',{name:'삭제',exact:true}).count(),1)
  await page.getByRole('combobox',{name:'직원 계정 전환'}).selectOption('planner')
  await page.getByRole('button',{name:'저장',exact:true}).waitFor({state:'visible'})
- assert.equal(await page.getByPlaceholder('투웨이 셔링 호보백_글로우').inputValue(),'작성자 계정 검증 기획안')
+ assert.equal(await page.getByRole('textbox',{name:'한글명',exact:true}).inputValue(),'작성자 계정 검증 기획안')
  await page.goto(origin+'/work-requests/design?actor=planner&mode=new')
  await page.locator('#work-request-title').fill('저장 실패 후 재시도 요청')
  await page.locator('input[type=date]').first().fill('2030-01-03')

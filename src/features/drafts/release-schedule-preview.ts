@@ -29,6 +29,10 @@ export type ResolvedReleaseSchedule = {
   isPreview: boolean
 }
 
+export function isUnassignedReleaseFolder(season: Season | undefined) {
+  return season?.code === 'UNASSIGNED'
+}
+
 export function seasonToPreviewGroup(season: Season): PreviewReleaseGroup {
   return {
     id: season.id,
@@ -60,30 +64,21 @@ export function resolveReleaseSchedule(
 ): ResolvedReleaseSchedule {
   const assignment = assignments[draft.id]
   if (assignment) {
-    if (!assignment.groupId) {
-      return {
-        group: null,
-        targetDate: null,
-        certainty: null,
-        brandId: assignment.brandId ?? draft.brandId,
-        isPreview: true,
-      }
-    }
-    const season = seasonMap.get(assignment.groupId)
+    const season = assignment.groupId ? seasonMap.get(assignment.groupId) : undefined
     const group =
       tempGroups.find((item) => item.id === assignment.groupId) ??
-      (season ? seasonToPreviewGroup(season) : null)
+      (season && !isUnassignedReleaseFolder(season) ? seasonToPreviewGroup(season) : null)
     return {
       group,
-      targetDate: assignment.targetDate,
-      certainty: assignment.certainty,
+      targetDate: group ? assignment.targetDate : null,
+      certainty: group ? assignment.certainty : null,
       brandId: assignment.brandId ?? group?.brandId ?? draft.brandId,
       isPreview: true,
     }
   }
 
   const season = draft.seasonId ? seasonMap.get(draft.seasonId) : undefined
-  if (!season) {
+  if (!season || isUnassignedReleaseFolder(season)) {
     return {
       group: null,
       targetDate: null,

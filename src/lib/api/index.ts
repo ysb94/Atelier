@@ -2316,9 +2316,10 @@ export async function createProductDraft(
 export async function updateProductDraft(
   id: string,
   input: ProductDraftInput,
+  temporaryInformationRevision?: string,
 ): Promise<ProductDraft> {
   await delay()
-  return productDraftStore.updateProductDraft(id, input)
+  return productDraftStore.updateProductDraft(id, input, temporaryInformationRevision)
 }
 
 export async function deleteProductDraft(id: string): Promise<void> {

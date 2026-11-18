@@ -360,15 +360,7 @@ export function getListTypeIconMeta(
   return getFileTypeIconMetaByExtension(getItemExtension(item))
 }
 
-export async function copyText(text: string): Promise<boolean> {
-  if (!globalThis.isSecureContext || !navigator.clipboard) return false
-  try {
-    await navigator.clipboard.writeText(text)
-    return true
-  } catch {
-    return false
-  }
-}
+export { copyText } from '@/lib/clipboard'
 
 export function stripTrailingSlash(path: string): string {
   return String(path || '').replace(/\/+$/, '')
