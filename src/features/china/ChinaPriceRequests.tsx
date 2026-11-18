@@ -14,14 +14,32 @@ import { sampleElapsedDays } from '@/lib/drafts/sample-work-order'
 import { useAuth } from '@/lib/supabase/auth'
 import { draftPriceError, getDraftPricePhoto, type DraftPriceColor, type DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
 import type { ProductDraft } from '@/lib/types'
+import { cn } from '@/lib/utils'
 
 const requestDate = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
 })
+const quoteAmount = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 })
 
 type RequestFilter = 'all' | 'first' | 'repeat'
 type SelectedPhoto = { requestId: string; color: DraftPriceColor }
 export type DraftPriceInputs = Record<string, Record<string, string>>
+
+function groupPriceRequests(requests: readonly DraftPriceRequest[]) {
+  const byDraft = new Map<string, DraftPriceRequest[]>()
+  for (const request of requests) {
+    const rounds = byDraft.get(request.draftId)
+    if (rounds) rounds.push(request)
+    else byDraft.set(request.draftId, [request])
+  }
+  return Array.from(byDraft.values(), rounds => {
+    rounds.sort((a, b) => a.round - b.round)
+    return { request: rounds[rounds.length - 1], earlier: rounds.slice(0, -1) }
+  }).sort(({ request: a }, { request: b }) =>
+    Number(a.round > 1) - Number(b.round > 1)
+    || Number(Boolean(a.answeredAt)) - Number(Boolean(b.answeredAt))
+    || Date.parse(a.requestedAt) - Date.parse(b.requestedAt))
+}
 
 function ChinaPricePhoto({ photo, onClose }: { photo: SelectedPhoto; onClose: () => void }) {
   const { session } = useAuth()
@@ -49,8 +67,9 @@ function ChinaPricePhoto({ photo, onClose }: { photo: SelectedPhoto; onClose: ()
   </dialog>, document.body)
 }
 
-function ChinaPriceRequestRow({ request, draft, brandName, amounts, disabled, onEdit, onReply, onPhoto }: {
+function ChinaPriceRequestRow({ request, earlier, draft, brandName, amounts, disabled, onEdit, onReply, onPhoto }: {
   request: DraftPriceRequest
+  earlier: readonly DraftPriceRequest[]
   draft: ProductDraft | undefined
   brandName: string | undefined
   amounts: Record<string, string> | undefined
@@ -62,8 +81,8 @@ function ChinaPriceRequestRow({ request, draft, brandName, amounts, disabled, on
   const formId = useId()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const { requestedAt, answeredAt, draftNo, round, colors } = request
-  const first = round === 1
+  const { answeredAt, draftNo, colors } = request
+  const sentEarlier = earlier.filter(round => round.answeredAt).reverse()
 
   async function reply() {
     if (busy || disabled || answeredAt) return
@@ -98,14 +117,26 @@ function ChinaPriceRequestRow({ request, draft, brandName, amounts, disabled, on
         </div>
       </div>
     </td>
-    <td className="border-r border-border/60 px-3 py-12 text-center align-top">
-      <div className="space-y-1.5">
-        <p className="text-xs text-muted-foreground"><time dateTime={requestedAt}>{requestDate.format(new Date(requestedAt))}</time> 발송</p>
-        <Badge variant={first ? 'default' : 'warning'} className={first ? 'rounded-md border-transparent bg-primary text-primary-foreground' : 'rounded-md'}>{first ? '1차 요청' : `단가 재요청 · ${round}차`}</Badge>
-        <p className="text-sm font-medium tabular-nums text-primary">{answeredAt ? `${sampleElapsedDays(requestedAt, new Date(answeredAt))} days` : `+ ${sampleElapsedDays(requestedAt)} days`}</p>
-      </div>
+    <td className="border-r border-border/60 px-3 py-4 text-center align-top">
+      <ol aria-label="요청 차수" className="divide-y divide-border/60">
+        {[...earlier, request].map(round => {
+          const current = round.id === request.id
+          const first = round.round === 1
+          const days = sampleElapsedDays(round.requestedAt, round.answeredAt ? new Date(round.answeredAt) : undefined)
+          return <li key={round.id} aria-current={current ? 'step' : undefined} className="space-y-1.5 py-2 first:pt-0 last:pb-0">
+            <p className="whitespace-nowrap text-[10px] text-muted-foreground"><time dateTime={round.requestedAt}>{requestDate.format(new Date(round.requestedAt))}</time> 발송</p>
+            <Badge variant={!current ? 'muted' : first ? 'default' : 'warning'}
+              className={cn('rounded-md', current && first && 'border-transparent bg-primary text-primary-foreground')}>
+              {first ? '1차 요청' : `단가 재요청 · ${round.round}차`}
+            </Badge>
+            <p className={cn('text-sm font-medium tabular-nums', !current ? 'text-muted-foreground' : round.answeredAt ? 'text-foreground' : 'text-primary')}>
+              {round.answeredAt ? `${days} days` : `+ ${days} days`}
+            </p>
+          </li>
+        })}
+      </ol>
     </td>
-    <td className="py-11 pl-3 align-top">
+    <td className="py-4 pl-3 align-top">
       <div className="divide-y divide-primary/20">
         {colors.map(color => <div key={color.id} className="flex h-9 items-center gap-2 pr-2">
           <span className="flex w-2 shrink-0 justify-center" aria-hidden="true">{color.hasPhoto && <span className="size-1 rounded-full bg-primary" />}</span>
@@ -115,7 +146,7 @@ function ChinaPriceRequestRow({ request, draft, brandName, amounts, disabled, on
         </div>)}
       </div>
     </td>
-    <td className="border-r border-border/60 py-11 pr-4 align-top">
+    <td className="border-r border-border/60 py-4 pr-4 align-top">
       <div className="divide-y divide-primary/20">
         {colors.map(color => <div key={color.id} className="flex h-9 items-center justify-center gap-2">
           <Input form={formId} aria-label={`${color.name} 단가 (위안)`} type="number" inputMode="decimal" min="0" max="99999999.99" step="0.01" required readOnly={Boolean(answeredAt) || busy}
@@ -125,17 +156,36 @@ function ChinaPriceRequestRow({ request, draft, brandName, amounts, disabled, on
         </div>)}
       </div>
     </td>
-    <td className="px-4 pt-16 align-top">
-      <form id={formId} className="flex max-w-64 flex-col items-center gap-2" onSubmit={event => {
-        event.preventDefault()
-        void reply()
-      }}>
-        {answeredAt ? <>
-          <Badge variant="success" role="status">전송 완료</Badge>
-          <time dateTime={answeredAt} className="text-xs text-muted-foreground">{requestDate.format(new Date(answeredAt))}</time>
-        </> : <Button type="submit" variant="outline" size="sm" disabled={busy || disabled}>{busy ? '전송 중' : '단가 전송'}</Button>}
-        {error && !answeredAt && <p role="alert" className="text-sm text-danger">{error}</p>}
-      </form>
+    <td className="px-4 py-4 align-top">
+      <div className="flex flex-wrap items-start gap-3">
+        <form id={formId} className="flex max-w-32 shrink-0 flex-col items-center gap-2" onSubmit={event => {
+          event.preventDefault()
+          void reply()
+        }}>
+          {answeredAt ? <>
+            <Badge variant="success" role="status">전송 완료</Badge>
+            <time dateTime={answeredAt} className="text-xs text-muted-foreground">{requestDate.format(new Date(answeredAt))}</time>
+          </> : <Button type="submit" variant="outline" size="sm" disabled={busy || disabled}>{busy ? '전송 중' : '단가 전송'}</Button>}
+          {error && !answeredAt && <p role="alert" className="text-sm text-danger">{error}</p>}
+        </form>
+        {sentEarlier.length > 0 && <section aria-label="이전 전송 단가" className="min-w-32 flex-1 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
+          <p className="font-medium text-muted-foreground">이전 전송 단가</p>
+          <ol className="mt-1 divide-y divide-border/70">
+            {sentEarlier.map(round => <li key={round.id} className="space-y-1 py-2 last:pb-0">
+              <p className="font-medium">{round.round}차 회신</p>
+              <dl className="space-y-1">
+                {round.colors.map(color => {
+                  const amount = round.amounts?.[color.id]
+                  return <div key={color.id} className="flex items-baseline justify-between gap-2">
+                    <dt className="min-w-0 break-words text-muted-foreground">{color.name}</dt>
+                    <dd className="shrink-0 font-medium tabular-nums">{amount == null ? '—' : `¥${quoteAmount.format(amount)}`}</dd>
+                  </div>
+                })}
+              </dl>
+            </li>)}
+          </ol>
+        </section>}
+      </div>
     </td>
   </tr>
 }
@@ -155,11 +205,9 @@ export function ChinaPriceRequests({ requests, drafts, brandById, inputs, loadin
   const [filter, setFilter] = useState<RequestFilter>('all')
   const [photo, setPhoto] = useState<SelectedPhoto | null>(null)
   const byDraft = useMemo(() => new Map(drafts.map(draft => [draft.id, draft])), [drafts])
-  const pending = requests.filter(request => !request.answeredAt)
-  const shown = requests.filter(request => filter === 'all' || (request.round === 1) === (filter === 'first'))
-    .sort((a, b) => Number(a.round > 1) - Number(b.round > 1)
-      || Number(Boolean(a.answeredAt)) - Number(Boolean(b.answeredAt))
-      || Date.parse(a.requestedAt) - Date.parse(b.requestedAt))
+  const groups = useMemo(() => groupPriceRequests(requests), [requests])
+  const pending = groups.filter(({ request }) => !request.answeredAt)
+  const shown = groups.filter(({ request }) => filter === 'all' || (request.round === 1) === (filter === 'first'))
 
   return <section aria-labelledby="china-price-requests-title">
     <h2 id="china-price-requests-title" className="sr-only">단가요청</h2>
@@ -167,8 +215,8 @@ export function ChinaPriceRequests({ requests, drafts, brandById, inputs, loadin
       <FilterTabs<RequestFilter> value={filter} onChange={setFilter} ariaLabel="단가요청 구분" variant="underline" className="border-b-0"
         tabs={[
           { value: 'all', label: `ALL (${pending.length})` },
-          { value: 'first', label: `1차 요청 (${pending.filter(request => request.round === 1).length})` },
-          { value: 'repeat', label: `재요청 (${pending.filter(request => request.round > 1).length})` },
+          { value: 'first', label: `1차 요청 (${pending.filter(({ request }) => request.round === 1).length})` },
+          { value: 'repeat', label: `재요청 (${pending.filter(({ request }) => request.round > 1).length})` },
         ]} />
       <p className="px-4 py-2 text-xs text-muted-foreground">위안화(¥) · 기획안에 컬러별 단가 회신</p>
     </div>
@@ -176,8 +224,8 @@ export function ChinaPriceRequests({ requests, drafts, brandById, inputs, loadin
       <p role="alert">{error}</p><Button type="button" variant="outline" size="sm" onClick={onRetry}>다시 조회</Button>
     </div>}
     <Card className="overflow-x-auto">
-      <table aria-label="단가요청 목록" className="w-full min-w-[760px] table-fixed text-left">
-        <colgroup><col className="w-44" /><col className="w-40" /><col className="w-36" /><col className="w-36" /><col /></colgroup>
+      <table aria-label="단가요청 목록" className="w-full min-w-[880px] table-fixed text-left">
+        <colgroup><col className="w-40" /><col className="w-36" /><col className="w-36" /><col className="w-36" /><col /></colgroup>
         <thead className="bg-primary text-primary-foreground">
           <tr>
             <th scope="col" className="px-4 py-3 text-center text-sm font-medium">Product</th>
@@ -188,9 +236,9 @@ export function ChinaPriceRequests({ requests, drafts, brandById, inputs, loadin
           </tr>
         </thead>
         <tbody>
-          {shown.map(request => {
+          {shown.map(({ request, earlier }) => {
             const draft = byDraft.get(request.draftId)
-            return <ChinaPriceRequestRow key={request.id} request={request} draft={draft}
+            return <ChinaPriceRequestRow key={request.id} request={request} earlier={earlier} draft={draft}
               brandName={draft?.brandId ? brandById?.get(draft.brandId)?.name : undefined} amounts={inputs[request.id]} disabled={Boolean(error)}
               onEdit={(id, value) => onEdit(request.id, id, value)} onReply={values => onReply(request.id, values)}
               onPhoto={color => setPhoto({ requestId: request.id, color })} />
