@@ -108,7 +108,7 @@ try {
   `)
   const oldStatement = await scalar('select to_jsonb(s) from public.late_arrival_statements s')
   const originalClock = await scalar('select to_jsonb(s) from public.attendance_clock_ins s')
-  await db.exec(await readFile('supabase/migrations/20261118111604_attendance_incident_adjustments.sql', 'utf8'))
+  await db.exec(await readFile('supabase/migrations/20261118114126_attendance_incident_adjustments.sql', 'utf8'))
   const actingAs = async (id, role = 'authenticated') => {
     await db.exec('reset role')
     await db.query("select set_config('request.jwt.claim.sub',$1,false)", [id])

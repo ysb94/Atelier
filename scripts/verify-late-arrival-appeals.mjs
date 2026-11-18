@@ -44,7 +44,7 @@ try {
   const [incidentMigration] = (await readdir(migrationDirectory)).filter(name => name.endsWith('_attendance_incident_adjustments.sql'))
   const incidentSource = await readFile(`${migrationDirectory}/${incidentMigration}`, 'utf8')
   await db.exec(incidentSource.split('create function app.list_attendance_incident_adjustments')[0])
-  const migration = await readFile('supabase/migrations/20261118112600_late_arrival_appeals.sql', 'utf8')
+  const migration = await readFile('supabase/migrations/20261118114135_late_arrival_appeals.sql', 'utf8')
   await db.exec(migration.replace("(clock_timestamp() at time zone 'Asia/Seoul')::date", "date '2026-11-18'"))
 
   await act(employee)
