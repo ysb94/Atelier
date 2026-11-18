@@ -700,12 +700,12 @@ function specTone(value: string, confirmed: boolean): 'neutral' | 'pending' | 'd
   return confirmed ? 'done' : 'pending'
 }
 
-export function DraftPhoto({ src, name, onOpen, compact = false }: { src: string | null; name: string; onOpen?: () => void; compact?: boolean }) {
+export function DraftPhoto({ src, name, onOpen }: { src: string | null; name: string; onOpen?: () => void }) {
   const [open, setOpen] = useState(false)
   const dialog = useRef<HTMLDialogElement>(null)
   useEffect(() => { if (open) dialog.current?.showModal() }, [open])
   return <>
-    <button type="button" className={`draft-sheet-photo${onOpen ? ' is-editor' : ''}${compact ? ' is-compact' : ''}`} disabled={!onOpen && !src} aria-label={onOpen ? `${name} 기획안 편집` : `${name} 사진 크게 보기`} onClick={() => { if (onOpen) onOpen(); else if (src) setOpen(true) }}>
+    <button type="button" className={`draft-sheet-photo${onOpen ? ' is-editor' : ''}`} disabled={!onOpen && !src} aria-label={onOpen ? `${name} 기획안 편집` : `${name} 사진 크게 보기`} onClick={() => { if (onOpen) onOpen(); else if (src) setOpen(true) }}>
       {src ? <img src={src} alt={name} loading="lazy" /> : <span><ImageOff size={25} /><small>등록된 사진 없음</small></span>}
     </button>
     {open && src && createPortal(<dialog ref={dialog} className="draft-photo-dialog" aria-label={`${name} 사진 크게 보기`} onCancel={() => setOpen(false)} onClose={() => setOpen(false)} onClick={event => { if (event.target === event.currentTarget) setOpen(false) }}>
@@ -861,7 +861,6 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
                 placeholder="컬러 이름"
                 onCommit={(next) => onRenameColor(color.id, next)}
               />
-              {photoUrl ? <DraftPhoto src={photoUrl} name={`${color.name} 컬러`} compact /> : null}
               {color.orderQty != null && color.orderQty > 0 ? <small>{formatNumber(color.orderQty)}</small> : null}
             </ColorLine>
           )

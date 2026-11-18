@@ -19,7 +19,10 @@ function Fixture() {
       imageUrl:'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="gray"/></svg>'),
       colors:[{...newColorRow(),id:'black',name:'블랙',orderQty:12},{...newColorRow(),id:'ivory',name:'아이보리',orderQty:8}],
       sampleWorkOrders:[{...newSampleWorkOrder(),id:'sample',url:'sample.pdf',shippedAt:'2026-10-01T00:00:00Z',receivedAt:'2026-10-02T00:00:00Z',passed:false}],
-      specs:{...base.specs,nameConfirmed:true,colorsConfirmed:true,colorNamesConfirmed:true,colorSpecs:normalizeColorSpecs({
+      specs:{...base.specs,nameConfirmed:true,colorsConfirmed:true,colorNamesConfirmed:true,
+        colorImageChoices:{black:'Image',ivory:'None'},
+        colorPhotoUrls:{black:'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50"><rect width="50" height="50" fill="black"/></svg>')},
+        colorSpecs:normalizeColorSpecs({
         black:{size:'300×120×210',fabric:'나일론',weight:'250g',specDoc:'공유 스펙 본문'},
         ivory:{size:'310×130×200',sizeNote:'아이보리 별도 메모',fabric:'면',weight:'240g',specDoc:'아이보리 스펙'},
       }),colorSampleRounds:[{id:'round',round:1,url:'color.pdf',name:'컬러 지시서',shippedAt:'2026-10-14T00:00:00Z',returnedAt:'2026-10-15T00:00:00Z',passed:false}]}}
