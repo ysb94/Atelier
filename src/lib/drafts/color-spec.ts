@@ -1,13 +1,15 @@
 import type { DraftColorSpec, DraftSpecKey, DraftSpecs } from '@/lib/types'
+import { parseSizeSpecInput } from './spec-format'
 
-export type ColorSpecField = 'size' | 'fabric' | 'weight' | 'specDoc'
+export type ColorSpecField = keyof DraftColorSpec
+export type DraftInformationField = Exclude<ColorSpecField, 'weight'>
+export type SaveColorSpec = (colorId: string, changes: Partial<DraftColorSpec>, applyAll: boolean) => Promise<void>
 
 export const DRAFT_INFORMATION_LABELS = {
   size: 'size',
   fabric: 'Fabric',
-  weight: 'Weight',
   specDoc: '스펙 문서',
-} satisfies Record<ColorSpecField, string>
+} satisfies Record<DraftInformationField, string>
 
 export function colorSpecFromProduct(
   specs: Pick<DraftSpecs, DraftSpecKey>,
@@ -28,13 +30,17 @@ export function resolveColorSpec(specs: DraftSpecs, colorId: string): DraftColor
 export function writeColorSpec(
   specs: DraftSpecs,
   colorIds: string[],
-  field: ColorSpecField,
-  value: string,
+  changes: Partial<DraftColorSpec>,
 ): DraftSpecs {
+  const patch: Partial<DraftColorSpec> = {}
+  for (const field of Object.keys(changes) as ColorSpecField[]) {
+    const value = changes[field]
+    if (value !== undefined) patch[field] = field === 'size' ? parseSizeSpecInput(value) : value.trim()
+  }
   const colorSpecs = { ...specs.colorSpecs }
   for (const id of colorIds) {
     const current = colorSpecs[id] ?? colorSpecFromProduct(specs)
-    colorSpecs[id] = { ...current, [field]: value }
+    colorSpecs[id] = { ...current, ...patch }
   }
   return { ...specs, colorSpecs }
 }

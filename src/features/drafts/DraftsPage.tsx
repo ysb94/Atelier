@@ -23,7 +23,6 @@ import { receiveColorSample, resolveColorSampleRounds, setColorSampleDone } from
 import { registerDraftSampleStage } from '@/lib/drafts/sample-registration'
 import { draftToInput, attachSampleWorkOrderFile, latestFilledSampleWorkOrder, legacyWorkOrderFields } from '@/lib/drafts/sample-work-order'
 import { receiveSample, registerNextReceivedSample } from '@/lib/drafts/sample-receipt'
-import { parseSizeSpecInput } from '@/lib/drafts/spec-format'
 import { writeColorSpec } from '@/lib/drafts/color-spec'
 import { useAuth } from '@/lib/supabase/auth'
 import { useBasicWorkAccess, canWriteDraft } from '@/lib/supabase/basic-work-access'
@@ -654,7 +653,7 @@ export function CompanyDraftsPage() {
                         return { ...input, [field]: name }
                       })
                     }}
-                    onSaveSheetValue={async (colorId, field, value, applyAll) => {
+                    onSaveSheetValue={async (colorId, changes, applyAll) => {
                       await saveDraftChange(draft.id, (current) => {
                         const input = draftToInput(current)
                         const ids = applyAll
@@ -663,10 +662,9 @@ export function CompanyDraftsPage() {
                         if (!ids.length || (!applyAll && !input.colors.some((color) => color.id === colorId))) {
                           throw new Error('컬러를 찾지 못했습니다.')
                         }
-                        const stored = field === 'size' ? parseSizeSpecInput(value) : value.trim()
                         return {
                           ...input,
-                          specs: writeColorSpec(input.specs, ids, field, stored),
+                          specs: writeColorSpec(input.specs, ids, changes),
                         }
                       })
                     }}

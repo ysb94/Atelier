@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { DRAFT_COLOR_PHOTO_ACCEPT, prepareDraftColorPhoto } from '@/lib/drafts/color-photo'
 import { MAX_DRAFT_COLORS } from '@/lib/drafts/empty-draft'
-import { DRAFT_INFORMATION_LABELS, resolveColorSpec, type ColorSpecField } from '@/lib/drafts/color-spec'
+import { DRAFT_INFORMATION_LABELS, resolveColorSpec, type DraftInformationField, type SaveColorSpec } from '@/lib/drafts/color-spec'
 import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
 import { colorSampleLineStatus, resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
 import { sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
@@ -727,7 +727,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
   onSaveColors: (colors: ColorFormValue[]) => Promise<void>
   onRenameProduct: (field: 'nameKo' | 'nameEn', name: string) => Promise<void>
   onRenameColor: (colorId: string, name: string) => Promise<void>
-  onSaveSheetValue: (colorId: string, field: ColorSpecField, value: string, applyAll: boolean) => Promise<void>
+  onSaveSheetValue: SaveColorSpec
   onUploadSampleWorkOrder: (file: { url: string; name: string }) => Promise<void>
   onReceiveSample: (id: string) => Promise<void>
   onRequestNextSampleRound: (file: { url: string; name: string }, country?: string) => Promise<void>
@@ -748,7 +748,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
   const doneColorIds = new Set(latestColorRound ? draft.specs.colorSampleDone?.[latestColorRound.id] ?? [] : [])
   const [pendingDone, setPendingDone] = useState<Record<string, boolean>>({})
   const informationId = useId()
-  const [information, setInformation] = useState<{ anchor: HTMLButtonElement; colorId: string; field: ColorSpecField } | null>(null)
+  const [information, setInformation] = useState<{ anchor: HTMLButtonElement; colorId: string; field: DraftInformationField } | null>(null)
   const closeInformation = useCallback(() => setInformation(null), [])
   const name = draft.nameEn.trim() || draft.nameKo.trim() || '이름 미정'
   const named = Boolean(draft.nameEn.trim() || draft.nameKo.trim())
@@ -874,13 +874,17 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
         {colorRows.map((color, index) => {
           const spec = color ? resolveColorSpec(draft.specs, color.id) : null
           const specDocLabel = specsConfirmed && spec?.specDoc.trim() ? '스펙 확정' : '스펙 문서'
-          function informationButton(field: ColorSpecField) {
+          function informationButton(field: DraftInformationField) {
             const value = spec?.[field] ?? ''
+            const displayValue = field === 'size' ? [formatSizeSpecLabel(value), spec?.weight.trim()].filter(Boolean).join(' · ') : value
+            const confirmed = field === 'specDoc' ? specsConfirmed : field === 'size'
+              ? (!value.trim() || draft.specs.size.confirmed) && (!spec?.weight.trim() || draft.specs.weight.confirmed)
+              : draft.specs[field].confirmed
             const expanded = information?.colorId === color?.id && information?.field === field
             return (
               <InformationButton key={field} label={field === 'specDoc' ? specDocLabel : DRAFT_INFORMATION_LABELS[field]}
-                value={field === 'size' ? formatSizeSpecLabel(value) : value}
-                tone={specTone(value, field === 'specDoc' ? specsConfirmed : draft.specs[field].confirmed)}
+                value={displayValue}
+                tone={specTone(displayValue, confirmed)}
                 panelId={informationId} expanded={expanded} disabled={!color}
                 icon={field === 'specDoc' ? <FileText size={16} aria-hidden="true" /> : undefined}
                 onClick={event => {
@@ -898,7 +902,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
                   onToggle={color ? () => toggleColorSampleDone(color.id, !colorSampleDone(color.id)) : undefined}
                 />
                 <div className="draft-sheet-specs">
-                  {(['size', 'fabric', 'weight'] as const).map(informationButton)}
+                  {(['size', 'fabric'] as const).map(informationButton)}
                 </div>
                 <div className="draft-sheet-actions">
                   {informationButton('specDoc')}

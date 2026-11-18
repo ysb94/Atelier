@@ -1,23 +1,22 @@
-import { useLayoutEffect, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react'
+import { useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { FileText, ImagePlus, X } from 'lucide-react'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Textarea } from '@/components/ui/input'
-import { DRAFT_INFORMATION_LABELS, resolveColorSpec, type ColorSpecField } from '@/lib/drafts/color-spec'
+import { DRAFT_INFORMATION_LABELS, resolveColorSpec, type ColorSpecField, type DraftInformationField, type SaveColorSpec } from '@/lib/drafts/color-spec'
 import { formatSizeSpec, parseSizeSpec, type SizeParts } from '@/lib/drafts/spec-format'
-import type { DraftColorRow, ProductDraft } from '@/lib/types'
+import type { DraftColorRow, DraftColorSpec, ProductDraft } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
-const FIELDS: readonly ColorSpecField[] = ['size', 'fabric', 'weight', 'specDoc']
+const FIELDS: readonly DraftInformationField[] = ['size', 'fabric', 'specDoc']
+const SIZE_FIELDS = ['size', 'weight'] as const
 const DIMENSIONS = [
   ['width', '가로', 'W'],
   ['depth', '세로', 'D'],
   ['height', '높이', 'H'],
 ] as const
-
-type SaveColorSpec = (colorId: string, field: ColorSpecField, value: string, applyAll: boolean) => Promise<void>
 
 function informationPanelPosition(anchor: HTMLButtonElement): CSSProperties | null {
   const margin = 12
@@ -103,33 +102,40 @@ function SizeFields({ text, locked, onChange }: { text: string; locked: boolean;
   )
 }
 
-function ColorInformationForm({ color, photo, field, value, confirmed, readOnly, highlighted, canApplyAll, onSave }: {
-  color: DraftColorRow; photo?: string | null; field: ColorSpecField; value: string; confirmed: boolean
+function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, highlighted, canApplyAll, onSave }: {
+  color: DraftColorRow; photo?: string | null; field: DraftInformationField; spec: DraftColorSpec; confirmed: boolean
   readOnly: boolean; highlighted: boolean; canApplyAll: boolean; onSave: SaveColorSpec
 }) {
-  const [edit, setEdit] = useState<{ source: string; text: string } | null>(null)
+  const [edits, setEdits] = useState<Partial<Record<ColorSpecField, { source: string; text: string }>>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const text = !readOnly && edit?.source === value ? edit.text : value
   const locked = readOnly || busy
   const colorName = color.name.trim() || '컬러 미정'
   const fieldLabel = DRAFT_INFORMATION_LABELS[field]
-  const inputProps = {
-    'aria-label': `${fieldLabel} 값`,
-    value: text,
-    readOnly: locked,
-    onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setEdit({ source: value, text: event.target.value }),
+  function valueFor(key: ColorSpecField) {
+    const edit = edits[key]
+    return !readOnly && edit?.source === spec[key] ? edit.text : spec[key]
   }
+  function editField(key: ColorSpecField, text: string) {
+    setEdits(current => ({ ...current, [key]: { source: spec[key], text } }))
+  }
+  const changes: Partial<DraftColorSpec> = {}
+  for (const key of field === 'size' ? SIZE_FIELDS : [field]) {
+    const value = valueFor(key).trim()
+    if (value !== spec[key].trim()) changes[key] = value
+  }
+  const hasChanges = Object.keys(changes).length > 0
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (locked) return
+    const applyAll = (event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'all'
+    if (!applyAll && !hasChanges) return
     setBusy(true)
     setError('')
-    const applyAll = (event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'all'
     try {
-      await onSave(color.id, field, text.trim(), applyAll)
-      setEdit(null)
+      await onSave(color.id, hasChanges ? changes : { [field]: valueFor(field).trim() }, applyAll)
+      setEdits({})
     } catch (err) {
       setError(err instanceof Error ? err.message : '저장하지 못했습니다.')
     } finally {
@@ -147,24 +153,29 @@ function ColorInformationForm({ color, photo, field, value, confirmed, readOnly,
           <Input value={colorName} readOnly className="h-8 min-w-0 text-foreground" />
         </label>
       </div>
-      {field === 'size' ? <SizeFields text={text} locked={locked} onChange={next => setEdit({ source: value, text: next })} />
-        : field === 'fabric' || field === 'specDoc' ? (
+      {field === 'size' ? (
+        <div className="min-w-0 space-y-2">
+          <SizeFields text={valueFor('size')} locked={locked} onChange={next => editField('size', next)} />
           <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
-            {fieldLabel}
-            <Textarea {...inputProps} rows={3} className="min-h-20 text-foreground" />
+            Weight
+            <Input aria-label="Weight 값" value={valueFor('weight')} readOnly={locked} placeholder="예: 250g"
+              className="h-8 min-w-0 text-foreground" onChange={event => editField('weight', event.target.value)} />
           </label>
-        ) : (
-          <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
-            {fieldLabel}
-            <Input {...inputProps} className="min-w-0 text-foreground" />
-          </label>
-        )}
+        </div>
+      ) : (
+        <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+          {fieldLabel}
+          <Textarea aria-label={`${fieldLabel} 값`} value={valueFor(field)} readOnly={locked}
+            rows={3} className="min-h-20 text-foreground"
+            onChange={event => editField(field, event.target.value)} />
+        </label>
+      )}
       <div className="flex flex-wrap items-center gap-2 @[720px]:flex-col @[720px]:items-end">
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           {confirmed ? '확인 완료' : '미확인'}
           <span aria-hidden="true" className={cn('size-3 rounded-sm border border-border', confirmed && 'border-primary bg-primary')} />
         </span>
-        <Button size="sm" type="submit" disabled={locked}>{busy ? '저장 중…' : '저장'}</Button>
+        <Button size="sm" type="submit" disabled={locked || !hasChanges}>{busy ? '저장 중…' : '저장'}</Button>
         {canApplyAll && (
           <Button size="sm" type="submit" value="all" variant="outline" disabled={locked}>다른 컬러에 적용</Button>
         )}
@@ -175,8 +186,8 @@ function ColorInformationForm({ color, photo, field, value, confirmed, readOnly,
 }
 
 export function DraftInformationPanel({ id, anchor, draft, field, colorId, readOnly, onFieldChange, onClose, onSave }: {
-  id: string; anchor: HTMLButtonElement; draft: ProductDraft; field: ColorSpecField; colorId: string; readOnly: boolean
-  onFieldChange: (field: ColorSpecField) => void; onClose: () => void; onSave: SaveColorSpec
+  id: string; anchor: HTMLButtonElement; draft: ProductDraft; field: DraftInformationField; colorId: string; readOnly: boolean
+  onFieldChange: (field: DraftInformationField) => void; onClose: () => void; onSave: SaveColorSpec
 }) {
   const active = useWorkspaceTabActivity()
   const overlay = useRef<HTMLDivElement>(null)
@@ -264,9 +275,13 @@ export function DraftInformationPanel({ id, anchor, draft, field, colorId, readO
           </div>
         </div>
         {colors.length ? colors.map(color => {
-          const value = resolveColorSpec(draft.specs, color.id)[field]
+          const spec = resolveColorSpec(draft.specs, color.id)
+          const confirmed = field === 'size'
+            ? SIZE_FIELDS.some(key => spec[key].trim()) &&
+              SIZE_FIELDS.every(key => !spec[key].trim() || draft.specs[key].confirmed)
+            : specConfirmed && Boolean(spec[field].trim())
           return <ColorInformationForm key={`${color.id}:${field}:${readOnly}`} color={color} field={field}
-            photo={draft.specs.colorPhotoUrls?.[color.id]} value={value} confirmed={specConfirmed && Boolean(value.trim())}
+            photo={draft.specs.colorPhotoUrls?.[color.id]} spec={spec} confirmed={confirmed}
             highlighted={color.id === colorId} readOnly={readOnly} canApplyAll={colors.length > 1} onSave={onSave} />
         }) : <p className="border-t border-border px-4 py-3 text-sm text-muted-foreground">등록된 컬러가 없습니다.</p>}
       </div>
