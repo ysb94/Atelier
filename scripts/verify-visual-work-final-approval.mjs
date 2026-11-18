@@ -156,7 +156,7 @@ try {
 
   await db.exec('reset role')
   const accessBeforeFormEdit = await snapshot()
-  await migration('20261118113029_visual_supervisor_request_form_edit')
+  await migration('20261118114233_visual_supervisor_request_form_edit')
   assert.deepEqual(await snapshot(), accessBeforeFormEdit)
   await actor(ids.manager)
   const beforeFormEdit = await rpc('get_work_request_settings', ['design'])

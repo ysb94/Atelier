@@ -12,7 +12,7 @@ const migrations = [
   '20261102093634_department_work_board',
   '20261109052445_visual_work_category_comments',
   '20261109062457_visual_work_final_approval',
-  '20261118113029_visual_supervisor_request_form_edit',
+  '20261118114233_visual_supervisor_request_form_edit',
 ]
 let setup = original.slice(0, original.indexOf(' const managerPage='))
 setup = setup.replace("from './work-request-test-db.mjs'", "from '../../scripts/work-request-test-db.mjs'")
