@@ -640,14 +640,15 @@ export async function getWarehouseStockSummary(brandId: string, setId: string) {
   }))
 }
 
-/** Box conversion needs only product names, pack sizes and zones, not full stock records. */
+/** Read only the fields needed for box conversion and current picking box totals. */
 export function listWarehouseOutboundBoxQuantities(brandId: string, setId: string, signal?: AbortSignal) {
-  type BoxRow = Pick<PositionRow, 'source_product_name' | 'units_per_box' | 'warehouse_locations'>
+  type BoxRow = Pick<PositionRow, 'source_product_name' | 'units_per_box' | 'remaining_boxes' | 'warehouse_locations'>
   return diagnosticOperation('app', 'warehouse_organization_boxes', async trace => {
     const rows = await trace.run('read_box_quantities', context => readPositionRows<BoxRow>(brandId, setId, {
-      columns: 'source_product_name, units_per_box, warehouse_locations!inner(zone)', context, signal,
+      columns: 'source_product_name, units_per_box, remaining_boxes, warehouse_locations!inner(code, zone)', context, signal,
     }))
-    return rows.map(row => ({ styleName: row.source_product_name, unitsPerBox: row.units_per_box,
+    return rows.map(row => ({ styleName: row.source_product_name, unitsPerBox: row.units_per_box, remainingBoxes: row.remaining_boxes,
+      locationCode: (Array.isArray(row.warehouse_locations) ? row.warehouse_locations[0] : row.warehouse_locations)?.code ?? '',
       zone: (Array.isArray(row.warehouse_locations) ? row.warehouse_locations[0] : row.warehouse_locations)?.zone ?? 'box_storage',
     }))
   })
