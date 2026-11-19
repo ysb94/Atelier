@@ -110,7 +110,7 @@ try {
   await db.exec('reset role')
   const settingsBefore = await read()
   const policiesBefore = (await db.query('select to_jsonb(p) as policy from pg_policies p order by policyname')).rows
-  await db.exec(await readFile(new URL('../supabase/migrations/20261119015113_warehouse_popular_product_list.sql', import.meta.url), 'utf8'))
+  await db.exec(await readFile(new URL('../supabase/migrations/20261119020309_warehouse_popular_product_list.sql', import.meta.url), 'utf8'))
   assert.deepEqual(await read(), settingsBefore)
   assert.deepEqual((await db.query('select to_jsonb(p) as policy from pg_policies p order by policyname')).rows, policiesBefore)
   const readProducts = async () => (await db.query('select location_codes,product_entries,revision from public.warehouse_popular_locations where brand_id=$1',[brand])).rows
