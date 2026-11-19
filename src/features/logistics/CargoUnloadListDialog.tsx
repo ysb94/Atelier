@@ -68,13 +68,16 @@ import {
 import { resolveWarehouseTidyShippedOn } from '@/lib/cargo/warehouse-tidy'
 import { buildWarehouseTidyPreviewRows } from '@/lib/cargo/warehouse-tidy-preview'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { normalizeStyleNo } from '@/lib/import/transform'
 import {
   LOGISTICS_IMAGE_KEY,
   ruleImageUrls,
 } from '@/lib/products/product-image'
 import type { WarehouseStockPosition } from '@/lib/types'
+import { listWarehousePopularProductLabels } from '@/lib/supabase/warehouse-popular-product-labels'
 import { cn, emptyList, formatNumber } from '@/lib/utils'
 import { resolveLatestReceivedStockByStyle } from '@/lib/warehouse/stock'
+import { warehouseProductNameKey } from '@/lib/warehouse/fixed-location-styles'
 
 export type CargoLineListPurpose = 'unload' | 'warehouse'
 
@@ -409,6 +412,13 @@ export function CargoUnloadListDialog({
     enabled: listSource === 'live' && Boolean(brandId),
   })
   const positions = stockQuery.data ?? emptyList<WarehouseStockPosition>()
+  const popularQuery = useQuery({
+    queryKey: ['warehouse-popular-product-labels', brandId],
+    queryFn: ({ signal }) => listWarehousePopularProductLabels(brandId, signal),
+    enabled: purpose === 'warehouse' && Boolean(brandId),
+    retry: false,
+  })
+  const popularLabelsLoading = purpose === 'warehouse' && popularQuery.isLoading
   const previewStockUnavailable = previewOnly && (!stockQuery.isSuccess || stockQuery.data === null)
   const loading =
     listSource === 'saved'
@@ -536,8 +546,19 @@ export function CargoUnloadListDialog({
     [previewOnly, sourceRows, sort],
   )
   const printRows = useMemo(
-    () => rows.filter((row) => !uncheckedKeys.has(row.key)),
-    [rows, uncheckedKeys],
+    () => {
+      const selected = rows.filter((row) => !uncheckedKeys.has(row.key))
+      if (purpose !== 'warehouse' || !popularQuery.data?.length) return selected
+      const styles = new Set(popularQuery.data.map(row => normalizeStyleNo(row.style_no)).filter(Boolean))
+      const names = new Set(popularQuery.data.map(row => warehouseProductNameKey(row.product_name)).filter(Boolean))
+      return selected.map(row => {
+        const style = normalizeStyleNo(row.cells.styleNo)
+        const popular = style ? styles.has(style) : names.has(warehouseProductNameKey(row.cells.name))
+        // Annotate the output cells so print fitting measures the full displayed name.
+        return popular ? { ...row, cells: { ...row.cells, name: `${row.cells.name} [인기상품]`.trim() } } : row
+      })
+    },
+    [rows, uncheckedKeys, purpose, popularQuery.data],
   )
   const printCells = useMemo(
     () => printRows.map((row) => row.cells),
@@ -685,7 +706,7 @@ export function CargoUnloadListDialog({
   }
 
   async function handlePrint() {
-    if (previewStockUnavailable || loading || savingList || refreshingRequests || printRows.length === 0) return
+    if (previewStockUnavailable || loading || popularLabelsLoading || savingList || refreshingRequests || printRows.length === 0) return
     if (!requestNotesReady()) return
     const saved = await ensureWarehouseListSaved()
     if (!saved) return
@@ -701,7 +722,7 @@ export function CargoUnloadListDialog({
   }
 
   async function handleDownloadExcel() {
-    if (previewStockUnavailable || loading || downloadingExcel || savingList || refreshingRequests || printRows.length === 0) return
+    if (previewStockUnavailable || loading || popularLabelsLoading || downloadingExcel || savingList || refreshingRequests || printRows.length === 0) return
     if (!requestNotesReady()) return
     const saved = await ensureWarehouseListSaved()
     if (!saved) return
@@ -919,7 +940,7 @@ export function CargoUnloadListDialog({
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={previewStockUnavailable || loading || savingList || refreshingRequests || printRows.length === 0}
+                disabled={previewStockUnavailable || loading || popularLabelsLoading || savingList || refreshingRequests || printRows.length === 0}
                 onClick={() => void handlePrint()}
               >
                 {savingList ? (
@@ -935,7 +956,7 @@ export function CargoUnloadListDialog({
                   size="sm"
                   variant="outline"
                   disabled={
-                    previewStockUnavailable || loading ||
+                    previewStockUnavailable || loading || popularLabelsLoading ||
                     savingList ||
                     refreshingRequests ||
                     downloadingExcel ||
@@ -954,6 +975,12 @@ export function CargoUnloadListDialog({
             </div>
           </div>
 
+          {purpose === 'warehouse' && popularQuery.isError && (
+            <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2 text-sm" role="status">
+              <span>인기상품 표시를 불러오지 못했습니다.</span>
+              <Button type="button" size="sm" variant="outline" disabled={popularQuery.isFetching} onClick={() => void popularQuery.refetch()}>다시 조회</Button>
+            </div>
+          )}
           {previewOnly && (
             <div className="space-y-2 border-b border-border bg-muted/30 px-4 py-2">
               <div className="flex flex-wrap items-center gap-2">
