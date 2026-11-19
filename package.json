@@ -65,6 +65,7 @@
     "verify:stock-hold-match": "node scripts/verify-stock-hold-match.mjs",
     "verify:product-list-order-shape": "node scripts/verify-product-list-order-shape.mjs",
     "verify:warehouse-stock": "node scripts/verify-warehouse-stock.mjs",
+    "verify:warehouse-activity": "node scripts/verify-warehouse-activity-db.mjs",
     "verify:warehouse-organization-outbound": "tsx --tsconfig tsconfig.app.json scripts/verify-warehouse-organization-outbound.mjs",
     "verify:warehouse-qr": "node --experimental-strip-types src/lib/warehouse/outbound-qr.verify.ts",
     "verify:warehouse-slots-db": "node scripts/verify-warehouse-slot-reclassify-db.mjs",
