@@ -1225,6 +1225,62 @@ try {
   assert.equal(query(`select jsonb_agg(to_jsonb(r) order by code)
     from public.warehouse_registered_slots r where warehouse_id='${warehouse}';`), beforeRepeatedSync)
   console.log('PASS: Atelier slots backfill Finder, resolve conflicting zones, survive sheet import, permit intake and QR audit, preserve empty slots and reject independent occupied-slot relabeling')
+
+  query(atelierSql('20261116062854_warehouse_popular_locations'))
+  query(finderSql('20261119074500_finder_works_missing_style_stock'))
+  query(finderSql('20261119081000_finder_works_edit_missing_style_stock'))
+  query(atelierSql('20261119125500_warehouse_popular_picking_capacity'))
+  const popularSlot = 'P-12-1'
+  const ordinarySlot = 'P-12-11'
+  const beforeBulk = [...refreshed(), pickingRow('popular-old-aa', popularSlot, 610),
+    pickingRow('ordinary-old-aa', ordinarySlot, 611), row('popular-atelier-source', '', '6-2-19')]
+  query(asService + sheet(beforeBulk, 'clock_timestamp()'))
+  query(`insert into public.warehouse_popular_locations (brand_id,location_codes)
+    values ('${brand}',array['p-12-1']);`)
+  const capacity = `select jsonb_agg(x) from public.list_masma_finder_slots_with_capacity('${brand}','${warehouse}') x;`
+  const configuredSlots = JSON.parse(query(asReader + capacity))
+  assert.ok(configuredSlots.some(r => r.code === popularSlot && r.zone === 'picking' && r.allows_multiple))
+  assert.ok(configuredSlots.some(r => r.code === ordinarySlot && !r.allows_multiple), 'match complete slot codes')
+  query('set role anon;' + capacity, '42501')
+  assert.equal(readSlot(popularSlot).slotToken, null)
+  assert.match(readSlot(ordinarySlot).slotToken, /^[a-f0-9]{32}$/)
+  const popularIntake = (place, qr, suffix) => backgroundMove('prepare', {
+    ...intake, place, qr, backgroundJobId: 'c0000000-0000-4000-8000-' + suffix + ':0',
+  })
+  assert.equal(JSON.parse(query(asService + popularIntake(ordinarySlot, 'REGULAR-SLOT-CHECK', '000000000551'))).status, 'occupied')
+  for (const [qr, suffix] of [['POPULAR-BOX-A', '000000000552'], ['POPULAR-BOX-B', '000000000553']]) {
+    const saved = JSON.parse(query(asService + popularIntake(popularSlot, qr, suffix)))
+    assert.equal(saved.status, 'saved')
+    assert.equal(saved.clearedRows, 0)
+    assert.equal(lookup(qr, popularSlot).box.place, popularSlot)
+  }
+  const namedPopularQr = 'POPULAR-NAMED-QR'
+  query(asReader + unplaced(namedPopularQr, null, '테이프'))
+  assert.equal(JSON.parse(query(asReader + `select public.finder_place_named_qr(
+    '${brand}','${namedPopularQr}','${popularSlot}','2026-11-13',24,null);`)).sheetPending, true)
+  const popularPhotoPath = `${brand}/${actor}/c0000000-0000-4000-8000-000000000555/c0000000-0000-4000-8000-000000000556.jpg`
+  query(asReader + `insert into storage.objects(bucket_id,name) values ('warehouse-qr-audit',${quote(popularPhotoPath)});`)
+  query(asReader + `select public.finder_link_box_qr_photo(
+    '${brand}', 'POPULAR-PHOTO-QR', ${quote(popularPhotoPath)}, null, null, null, false);`)
+  assert.equal(JSON.parse(query(asReader + `select public.finder_place_photo_qr(
+    '${brand}','POPULAR-PHOTO-QR','${popularSlot}',null);`)).pendingReview, true)
+  assert.equal(query(asEditor + work(560, readPosition('popular-atelier-source'), 'move',
+    { to_location_code: popularSlot, box_count: 1 })), 'true')
+  assert.equal(readPosition('popular-atelier-source').place, popularSlot)
+  assert.equal(readPosition('popular-old-aa').place, popularSlot)
+  // A sheet read taken before these commits includes the untouched neighbor.
+  // The import must retain that row as well as all pending QR additions.
+  query(asService + sheet(beforeBulk, 'clock_timestamp()'))
+  assert.equal(readPosition('popular-old-aa').place, popularSlot)
+  assert.equal(readPosition('ordinary-old-aa').place, ordinarySlot)
+  for (const qr of ['POPULAR-BOX-A', 'POPULAR-BOX-B', 'POPULAR-NAMED-QR', 'POPULAR-PHOTO-QR']) {
+    assert.equal(lookup(qr, popularSlot).box.place, popularSlot)
+  }
+  const popularJob = claimJobs().jobs.find(job => job.after.some(entry => entry.qr === 'POPULAR-BOX-A'))
+  assert.ok(popularJob, 'the existing sheet queue claims the bulk placement')
+  assert.ok(!popularJob.picking.includes(popularSlot), 'sheet writer skips exclusive picking occupancy on popular slots')
+  assert.ok(!popularJob.before.some(entry => entry.id === 'popular-old-aa'))
+  console.log('PASS: popular picking allows multiple distinct QR rows and Atelier moves; regular picking remains exclusive; sheet refresh preserves neighbors')
 } finally {
   if (started) command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore' })
   assert.equal(path.dirname(fixture), tempRoot)
