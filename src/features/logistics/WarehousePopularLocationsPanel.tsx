@@ -258,6 +258,7 @@ function SharedPopularLocations({ brandId, viewerId, month, onMonthChange }: Pop
             {(hasLocations || products.length > 0) && inventory.data === null && (
               <p role="status" className="text-xs text-muted-foreground">조회할 창고 재고가 없습니다.</p>
             )}
+            <p className="text-xs text-muted-foreground">저장된 전용 자리가 출고창고로 등록돼 있으면 한 자리에 여러 박스 QR을 대량 입고할 수 있습니다.</p>
             <div aria-label="인기상품 배치 요약" role="status" className="space-y-1 rounded-md bg-muted/50 px-2 py-1.5 text-xs">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 tabular-nums">
                 <span>전용 자리 <strong>{codes.length}</strong>개</span>
