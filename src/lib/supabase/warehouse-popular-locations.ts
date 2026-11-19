@@ -4,27 +4,31 @@ import { getSupabase } from './client'
 
 const TABLE = 'warehouse_popular_locations'
 const COLUMNS = 'location_codes, revision, updated_at'
+const PRODUCT_COLUMNS = 'location_codes, revision, updated_at, product_entries'
 
 type PopularLocationsRow = {
   location_codes: string[]
   revision: number
   updated_at: string
+  product_entries?: string[]
 }
 
 type PopularLocations = {
   codes: string[]
   revision: number
   updatedAt: string | null
+  products: string[]
+  productsReady: boolean
 }
 
 type PopularLocationsRead =
   | { ready: false }
   | { ready: true; list: PopularLocations }
 
-function toList(row: PopularLocationsRow | null): PopularLocations {
+function toList(row: PopularLocationsRow | null, productsReady = true): PopularLocations {
   return row
-    ? { codes: row.location_codes, revision: row.revision, updatedAt: row.updated_at }
-    : { codes: [], revision: 0, updatedAt: null }
+    ? { codes: row.location_codes, revision: row.revision, updatedAt: row.updated_at, products: row.product_entries ?? [], productsReady }
+    : { codes: [], revision: 0, updatedAt: null, products: [], productsReady }
 }
 
 export class WarehousePopularLocationsChangedError extends Error {
@@ -36,26 +40,32 @@ export class WarehousePopularLocationsChangedError extends Error {
 
 export function readWarehousePopularLocations(brandId: string, signal: AbortSignal): Promise<PopularLocationsRead> {
   return diagnosticOperation('app', 'warehouse_popular_locations', async trace => {
-    const query = getSupabase().from(TABLE).select(COLUMNS).eq('brand_id', brandId).abortSignal(signal).maybeSingle()
-    const { data, error } = await trace.run('read_shared_list', context => tracedQuery(query, context))
+    const query = (columns: string) => getSupabase().from(TABLE).select(columns).eq('brand_id', brandId).abortSignal(signal).maybeSingle()
+    let { data, error } = await trace.run('read_shared_list', context => tracedQuery(query(PRODUCT_COLUMNS), context))
+    const productsReady = error?.code !== '42703' && error?.code !== 'PGRST204'
+    if (!productsReady) {
+      ({ data, error } = await trace.run('read_legacy_list', context => tracedQuery(query(COLUMNS), context)))
+    }
     if (error) {
       trace.fail(error)
       if (error.code === 'PGRST205' || error.code === '42P01') return { ready: false }
       throw error
     }
-    return { ready: true, list: toList(data as PopularLocationsRow | null) }
+    return { ready: true, list: toList(data as PopularLocationsRow | null, productsReady) }
   })
 }
 
-export function saveWarehousePopularLocations(brandId: string, codes: string[], revision: number) {
+export function saveWarehousePopularLocations(brandId: string, codes: string[], revision: number, products?: string[]) {
   return diagnosticOperation('app', 'warehouse_popular_locations_save', async trace => {
     const table = getSupabase().from(TABLE)
+    const changes = { location_codes: codes, ...(products === undefined ? {} : { product_entries: products }) }
     const query = revision === 0
-      ? table.insert({ brand_id: brandId, location_codes: codes })
-      : table.update({ location_codes: codes, revision: revision + 1 }).eq('brand_id', brandId).eq('revision', revision)
+      ? table.insert({ brand_id: brandId, ...changes })
+      : table.update({ ...changes, revision: revision + 1 }).eq('brand_id', brandId).eq('revision', revision)
+    const columns = products === undefined ? COLUMNS : PRODUCT_COLUMNS
 
     const { data, error } = await trace.run('save_shared_list', context =>
-      tracedQuery(query.select(COLUMNS).maybeSingle(), context),
+      tracedQuery(query.select(columns).maybeSingle().overrideTypes<PopularLocationsRow, { merge: false }>(), context),
     )
     if (error) {
       trace.fail(error)
@@ -70,6 +80,6 @@ export function saveWarehousePopularLocations(brandId: string, codes: string[], 
       throw new WarehousePopularLocationsChangedError()
     }
     trace.step('saved', { writeOutcome: 'committed' })
-    return toList(data as PopularLocationsRow)
+    return toList(data, products !== undefined)
   })
 }
