@@ -27,6 +27,7 @@ import {
 } from '@/lib/warehouse/stock'
 import { getSupabase } from '@/lib/supabase/client'
 import type { PopularProductPosition } from '@/lib/warehouse/popular-products'
+import { missingStyleWarehouseProducts, type MissingStyleWarehousePosition } from '@/lib/warehouse/missing-style-products'
 import { diagnosticOperation, tracedQuery, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
 
@@ -578,12 +579,13 @@ export async function listWarehouseLocations(
 async function readPositionRows<T = PositionRow>(
   brandId: string,
   setId: string,
-  { zone, columns = POSITION_COLUMNS, context, locationCode, signal, lookup }: {
+  { zone, columns = POSITION_COLUMNS, context, locationCode, signal, lookup, withoutStyleNo }: {
     zone?: WarehouseZone
     columns?: string
     context?: DiagnosticContext
     locationCode?: string
     signal?: AbortSignal
+    withoutStyleNo?: boolean
     lookup?: { column: 'normalized_style_no' | 'source_style_no' | 'source_product_name'; values: string[] }
   } = {},
 ): Promise<T[]> {
@@ -601,6 +603,7 @@ async function readPositionRows<T = PositionRow>(
     if (zone) query = query.eq('warehouse_locations.zone', zone)
     if (locationCode !== undefined) query = query.eq('warehouse_locations.code', locationCode)
     if (lookup) query = query.in(lookup.column, lookup.values)
+    if (withoutStyleNo) query = query.eq('normalized_style_no', '')
     if (signal) query = query.abortSignal(signal)
     const { data, error } = await tracedQuery(query, context)
     if (error) {
@@ -650,6 +653,26 @@ export function listWarehouseOutboundBoxQuantities(brandId: string, setId: strin
     return rows.map(row => ({ styleName: row.source_product_name, unitsPerBox: row.units_per_box, remainingBoxes: row.remaining_boxes,
       locationCode: (Array.isArray(row.warehouse_locations) ? row.warehouse_locations[0] : row.warehouse_locations)?.code ?? '',
       zone: (Array.isArray(row.warehouse_locations) ? row.warehouse_locations[0] : row.warehouse_locations)?.zone ?? 'box_storage',
+    }))
+  })
+}
+
+export function listWarehouseMissingStyleProducts(brandId: string, setId: string, signal?: AbortSignal): Promise<MissingStyleWarehousePosition[]> {
+  type MissingStyleRow = Pick<PositionRow, 'id' | 'source_style_no' | 'normalized_style_no' | 'source_product_name'
+    | 'received_on' | 'received_on_raw' | 'is_final_location' | 'quantity_status' | 'units_per_box'
+    | 'remaining_boxes' | 'opened_units' | 'warehouse_locations'>
+  return diagnosticOperation('app', 'warehouse_missing_style_products', async trace => {
+    const rows = await trace.run('read_box_stock_without_number', context => readPositionRows<MissingStyleRow>(brandId, setId, {
+      zone: 'box_storage', withoutStyleNo: true, signal, context,
+      columns: 'id, source_style_no, normalized_style_no, source_product_name, received_on, received_on_raw, is_final_location, quantity_status, units_per_box, remaining_boxes, opened_units, warehouse_locations!inner(code, zone)',
+    }))
+    return missingStyleWarehouseProducts(rows.map(row => {
+      const location = Array.isArray(row.warehouse_locations) ? row.warehouse_locations[0] : row.warehouse_locations
+      return { id: row.id, styleNo: row.normalized_style_no, sourceStyleNo: row.source_style_no,
+        styleName: row.source_product_name, receivedOn: row.received_on, receivedOnRaw: row.received_on_raw,
+        locationCode: location?.code ?? '', zone: location?.zone ?? 'box_storage', isFinalLocation: row.is_final_location,
+        quantityStatus: row.quantity_status === 'unknown' || row.units_per_box == null || row.remaining_boxes == null ? 'unknown' as const : 'known' as const,
+        unitsPerBox: row.units_per_box, remainingBoxes: row.remaining_boxes, openedUnits: row.opened_units }
     }))
   })
 }

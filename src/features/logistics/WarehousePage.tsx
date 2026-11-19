@@ -17,7 +17,7 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { cn } from '@/lib/utils'
 import { WarehouseInventoryPanel } from './WarehouseInventoryPanel'
 import { WarehouseFixedLocationsPanel } from './WarehouseFixedLocationsPanel'
-import { WarehouseOrganizationOutboundPanel } from './WarehouseOrganizationOutboundPanel'
+import { WarehouseOrganizationPanel } from './WarehouseOrganizationPanel'
 import { WarehousePopularLocationsPanel } from './WarehousePopularLocationsPanel'
 import { previousWarehouseOutboundMonth } from './warehouse-organization-outbound'
 import { WarehouseQrPanel } from './WarehouseQrPanel'
@@ -220,7 +220,7 @@ export function WarehousePage() {
         </CardHeader>
         <CardContent>
           {activeView === 'organize' ? (
-            <WarehouseOrganizationOutboundPanel brandId={brand.id} month={outboundMonth} onMonthChange={setOutboundMonth} />
+            <WarehouseOrganizationPanel key={brand.id} brandId={brand.id} month={outboundMonth} onMonthChange={setOutboundMonth} />
           ) : activeView === 'qr' ? (
             <WarehouseQrPanel brandName={brand.name} brandId={brand.id} />
           ) : activeView === 'boxes' ? (
