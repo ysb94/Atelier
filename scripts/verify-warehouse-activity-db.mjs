@@ -6,7 +6,7 @@ const db = await PGlite.create()
 const id = value => '00000000-0000-4000-8000-' + String(value).padStart(12, '0')
 const brand = id(1), otherBrand = id(2), company = id(3)
 const atelier = id(10), finder = id(11), style = id(20), box = id(21), position = id(22)
-const migration = new URL('../supabase/migrations/20261119045000_warehouse_activity_history.sql', import.meta.url)
+const migration = new URL('../supabase/migrations/20261119060101_warehouse_activity_history.sql', import.meta.url)
 const sql = async (query, params) => (await db.query(query, params)).rows
 const list = (selectedBrand = brand, qr = null, search = null, beforeAt = null, beforeId = null) => sql(
   'select * from public.list_warehouse_activity($1,$2,$3,$4,$5)', [selectedBrand, qr, search, beforeAt, beforeId],
