@@ -545,20 +545,24 @@ export function CargoUnloadListDialog({
     () => previewOnly ? [...sourceRows].sort((left, right) => compareCargoListRows(left, right, sort)) : sourceRows,
     [previewOnly, sourceRows, sort],
   )
+  const popularRowKeys = useMemo(() => {
+    const keys = new Set<string>()
+    if (purpose !== 'warehouse' || !popularQuery.data?.length) return keys
+    const styles = new Set(popularQuery.data.map(row => normalizeStyleNo(row.style_no)).filter(Boolean))
+    const names = new Set(popularQuery.data.map(row => warehouseProductNameKey(row.product_name)).filter(Boolean))
+    for (const row of rows) {
+      const style = normalizeStyleNo(row.cells.styleNo)
+      if (style ? styles.has(style) : names.has(warehouseProductNameKey(row.cells.name))) keys.add(row.key)
+    }
+    return keys
+  }, [rows, purpose, popularQuery.data])
   const printRows = useMemo(
-    () => {
-      const selected = rows.filter((row) => !uncheckedKeys.has(row.key))
-      if (purpose !== 'warehouse' || !popularQuery.data?.length) return selected
-      const styles = new Set(popularQuery.data.map(row => normalizeStyleNo(row.style_no)).filter(Boolean))
-      const names = new Set(popularQuery.data.map(row => warehouseProductNameKey(row.product_name)).filter(Boolean))
-      return selected.map(row => {
-        const style = normalizeStyleNo(row.cells.styleNo)
-        const popular = style ? styles.has(style) : names.has(warehouseProductNameKey(row.cells.name))
-        // Annotate the output cells so print fitting measures the full displayed name.
-        return popular ? { ...row, cells: { ...row.cells, name: `${row.cells.name} [인기상품]`.trim() } } : row
-      })
-    },
-    [rows, uncheckedKeys, purpose, popularQuery.data],
+    () => rows.filter(row => !uncheckedKeys.has(row.key)).map(row => {
+      if (!popularRowKeys.has(row.key)) return row
+      // Include the label in the measured print text and the exported cell.
+      return { ...row, cells: { ...row.cells, name: `${row.cells.name} [인기상품]`.trim() } }
+    }),
+    [rows, uncheckedKeys, popularRowKeys],
   )
   const printCells = useMemo(
     () => printRows.map((row) => row.cells),
@@ -1113,6 +1117,7 @@ export function CargoUnloadListDialog({
 
                         const value = listCell(row, column.key)
                         const isNote = column.key === 'note'
+                        const showPopular = column.key === 'name' && popularRowKeys.has(row.key)
                         return (
                           <td
                             key={`${row.key}-${column.key}`}
@@ -1120,7 +1125,9 @@ export function CargoUnloadListDialog({
                               'border-b border-r border-border px-1 align-middle text-sm leading-tight text-foreground last:border-r-0',
                               isNote
                                 ? 'min-h-11 whitespace-pre-line'
-                                : 'h-11 overflow-hidden whitespace-nowrap',
+                                : showPopular
+                                  ? 'h-11 whitespace-normal break-words'
+                                  : 'h-11 overflow-hidden whitespace-nowrap',
                               column.align === 'left'
                                 ? 'text-left'
                                 : 'text-center',
@@ -1138,7 +1145,12 @@ export function CargoUnloadListDialog({
                           >
                             {previewOnly && column.key === 'latestSlot'
                               ? <Badge variant={value === 'NEW' ? 'default' : value === '확인 필요' ? 'warning' : 'muted'}>{value}</Badge>
-                              : value}
+                              : (
+                                <>
+                                  {value}
+                                  {showPopular && <> <Badge className="whitespace-nowrap px-1.5 py-0 align-middle">인기상품</Badge></>}
+                                </>
+                              )}
                           </td>
                         )
                       })}
