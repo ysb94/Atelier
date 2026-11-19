@@ -465,10 +465,8 @@ try {
   await priceManager.clock.fastForward(31_000)
   await repeatPriceRow.waitFor()
   assert.equal(await priceTable.locator('tbody tr').count(),1)
-  const requestRounds=repeatPriceRow.getByRole('list',{name:'요청 차수'}).getByRole('listitem')
-  await requestRounds.nth(0).getByText('1차 요청',{exact:true}).waitFor()
-  await requestRounds.nth(1).getByText('단가 재요청 · 2차',{exact:true}).waitFor()
-  assert.equal(await requestRounds.count(),2)
+  assert.deepEqual(await repeatPriceRow.getByRole('list',{name:'요청 차수'}).getByRole('listitem').allTextContents().then(rows =>
+    rows.map(row=>row.includes('1차 요청') ? 1 : row.includes('단가 재요청 · 2차') ? 2 : 0)),[1,2])
   const previousPrices=repeatPriceRow.getByRole('region',{name:'이전 전송 단가'})
   await previousPrices.getByText('1차 회신',{exact:true}).waitFor()
   await previousPrices.getByText('¥17.5',{exact:true}).waitFor()

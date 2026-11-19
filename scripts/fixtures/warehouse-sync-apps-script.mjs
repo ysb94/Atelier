@@ -458,6 +458,107 @@ export function verifyWarehouseSyncAppsScript() {
   assert.equal(get(5710, 27), '')
   assert.equal(get(5710, 20), '예약 열')
   assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, noId, recordRepair), /SHEET_STOCK_CHANGED/)
+
+  // M0049 was depleted in Atelier while M0954 legitimately remained at its source slot.
+  const depleted = { id: 'inb_d82dedaacfd54b80', qr: '', rawNote: '', preserveNote: false,
+    values: ['M0049', '플랩백팩 블랙', '3-1-4_B3', '261027', '50', '10', ''] }
+  const neighbor = { id: 'inb_1c08946ebcc3413d', qr: '',
+    values: ['M0954', '데일리백팩 글로우 블랙', '3-1-4_B3', '260623', '35', '1', ''] }
+  put(1828, 2, neighbor.values)
+  put(1828, 27, [neighbor.id, '정상 재고 WPS 원본'])
+  put(1828, 20, ['다른 재고 예약 열'])
+  formulas.set(coordinate(1828, 9), '=KEEP()')
+  notes.set(coordinate(1828, 27), '정상 재고 메모')
+  const neighborBefore = Array.from({ length: 35 }, (_, i) => get(1828, i + 1))
+  const seedDepleted = (values = depleted.values, qr = '') => {
+    put(2451, 2, values)
+    put(2451, 19, [qr])
+    put(2451, 20, ['대상 행 예약 열'])
+    put(2451, 27, [depleted.id, '대상 행 WPS 원본'])
+    notes.delete(coordinate(2451, 27))
+  }
+  const depletion = toJob('m0049-depletion', [depleted], [], ['3-1-4_B3'])
+  seedDepleted()
+  let batchCount = stockBatches.length
+  const depletionProof = ctx.writeAtelierQrAuditSheet(sheet, depletion)
+  assert.deepEqual(Array.from(depletionProof.absent), [depleted.id])
+  assert.equal(depletionProof.cleared.get(depleted.id), 2451)
+  assert.equal(stockBatches.length, batchCount + 1)
+  assert.ok(stockBatches.at(-1).every(({ row }) => row === 2451))
+  assert.equal(get(2451, 20), '대상 행 예약 열')
+
+  // Leaving an occupied source is safe; entering an occupied destination is still blocked.
+  seedDepleted()
+  const movedOut = project(depleted, { 2: '4-6-8' })
+  assert.equal(ctx.writeAtelierQrAuditSheet(sheet,
+    toJob('leave-source', [depleted], [movedOut], ['3-1-4_B3'])).rows[0].values[2], '4-6-8')
+  batchCount = stockBatches.length
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet,
+    toJob('occupied-destination', [movedOut], [depleted], ['3-1-4_B3'])), /PICKING_OCCUPIED/)
+  assert.equal(stockBatches.length, batchCount)
+
+  // Replay the manually cleared production row through audit, finish and marker release.
+  seedDepleted(Array(7).fill(''))
+  calls.length = 0
+  ctx._atelierStockConditionCall = (action, body) => {
+    calls.push({ action, body })
+    if (action === 'list-qr-audit-exports') return { entries: [] }
+    if (action === 'claim-stock-sheet-jobs') return { jobs: [depletion] }
+    return { ok: true }
+  }
+  assert.deepEqual({ ...ctx.syncAtelierWarehouseQrAuditSheet() }, { synced: 1, pending: false })
+  assert.deepEqual(calls.map(({ action }) => action), [
+    'list-qr-audit-exports', 'claim-stock-sheet-jobs', 'record-stock-sheet-repair',
+    'finish-stock-sheet-job', 'cleanup-stock-sheet-job',
+  ])
+  const completion = calls.find(({ action }) => action === 'finish-stock-sheet-job').body
+  assert.deepEqual(Array.from(completion.rows), [])
+  assert.deepEqual(Array.from(completion.absent), [depleted.id])
+  assert.equal(completion.id, depletion.id)
+  assert.equal(completion.lease, depletion.lease)
+  assert.ok(calls[2].body.differences.every(d => d.id === depleted.id && d.target === null))
+  for (const column of [2, 3, 4, 5, 6, 7, 8, 19, 27]) assert.equal(get(2451, column), '')
+  assert.equal(notes.get(coordinate(2451, 27)), 'Finder 지운 행 ID: ' + depleted.id)
+
+  seedDepleted(Array(7).fill(''))
+  batchCount = stockBatches.length
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet,
+    toJob('blank-retained-row', [depleted], [movedOut], ['3-1-4_B3']), recordRepair), /SHEET_STOCK_CHANGED/)
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, depletion, recordFailure), /AUDIT_UNAVAILABLE/)
+  assert.equal(stockBatches.length, batchCount, 'no AA cleanup without the persisted repair observation')
+  assert.equal(get(2451, 27), depleted.id)
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, depletion,
+    () => put(2451, 3, ['다른 직원이 입력한 상품'])), /SHEET_STOCK_CHANGED/)
+  assert.equal(stockBatches.length, batchCount)
+
+  seedDepleted(Array(7).fill(''))
+  formulas.set(coordinate(2451, 3), '=IF(TRUE,"","")')
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, depletion, recordRepair), /FORMULA_CELL/)
+  formulas.delete(coordinate(2451, 3))
+  put(2451, 19, ['DIFFERENT-QR'])
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, depletion, recordRepair), /SHEET_STOCK_CHANGED/)
+  seedDepleted(['M0954', '다른 상품', '', '', '', '', ''])
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, depletion, recordRepair), /SHEET_STOCK_CHANGED/)
+  seedDepleted(['', '', '', '', '', '', '수기 메모'])
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, depletion, recordRepair), /SHEET_STOCK_CHANGED/)
+  seedDepleted(Array(7).fill(''))
+  put(2452, 27, [depleted.id])
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, depletion, recordRepair), /AA_MISSING_OR_DUPLICATE/)
+  put(2452, 27, [''])
+  assert.equal(stockBatches.length, batchCount, 'unsafe identities and formulas leave every row intact')
+
+  // A lost batch reply can be retried using the AA removal marker without rewriting.
+  lostReply = true
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, depletion, recordRepair), /LOST_BATCH_RESPONSE/)
+  batchCount = stockBatches.length
+  const retriedRemoval = ctx.writeAtelierQrAuditSheet(sheet, depletion, recordRepair)
+  assert.deepEqual(Array.from(retriedRemoval.absent), [depleted.id])
+  assert.equal(retriedRemoval.cleared.get(depleted.id), 2451)
+  assert.equal(stockBatches.length, batchCount)
+  assert.deepEqual(Array.from({ length: 35 }, (_, i) => get(1828, i + 1)), neighborBefore)
+  assert.equal(formulas.get(coordinate(1828, 9)), '=KEEP()')
+  assert.equal(notes.get(coordinate(1828, 27)), '정상 재고 메모')
+  console.log('warehouse-sheet-sync Apps Script: M0049 source-only deletion, cleared-AA recovery, M0954 preservation and destination guards verified')
   console.log('warehouse-sheet-sync Apps Script: verified inventory drift repair, pre-write audit, QR-only removal and unsafe matches blocked')
   console.log('warehouse-sheet-sync Apps Script: coalesced AA write, readback, independent conflict, split and depletion retry verified')
   console.log('warehouse-sheet-sync Apps Script: trailing swatches, AA identity, product search and removal verified')

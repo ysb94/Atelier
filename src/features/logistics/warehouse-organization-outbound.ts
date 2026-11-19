@@ -1,6 +1,8 @@
 import type { WarehouseOrganizationOutboundItem } from '@/lib/supabase/warehouse-organization-outbound'
 import type { StyleRef, WarehouseStockPosition } from '@/lib/types'
 import { warehouseProductNameKey } from '@/lib/warehouse/fixed-location-styles'
+import { EMPTY_WAREHOUSE_LOCATION_CODE, isWarehouseQuantityKnown } from '@/lib/warehouse/stock'
+import { compareRoomListPositions } from './room-list-locations'
 import { parseRoomListPaste } from './room-list-paste'
 
 const MAX_ROWS = 10_000
@@ -29,24 +31,34 @@ export function warehouseOutboundBoxQuantities(positions: readonly Pick<Warehous
   return quantities
 }
 
-export function warehouseOutboundPickingBoxes(positions: readonly Pick<WarehouseStockPosition, 'styleName' | 'zone' | 'remainingBoxes' | 'locationCode'>[]) {
-  const products = new Map<string, Map<string, number | null>>()
+type OutboundPickingPosition = Pick<WarehouseStockPosition, 'styleName' | 'zone' | 'remainingBoxes' | 'locationCode'
+  | 'receivedOn' | 'receivedOnRaw' | 'sourceRowNumber' | 'quantityStatus' | 'unitsPerBox' | 'openedUnits'>
+
+export function warehouseOutboundPickingBoxes(positions: readonly OutboundPickingPosition[]) {
+  const products = new Map<string, OutboundPickingPosition[]>()
   for (const position of positions) {
-    if (position.zone !== 'picking') continue
+    if (position.zone !== 'picking' && position.zone !== 'box_storage') continue
     const name = warehouseProductNameKey(position.styleName)
-    if (!name) continue
-    const locations = products.get(name) ?? new Map<string, number | null>()
-    const location = position.locationCode.trim()
-    const boxes = position.remainingBoxes
-    const current = locations.get(location)
-    locations.set(location, current === null || boxes == null || !Number.isFinite(boxes) || boxes < 0
-      ? null : (current ?? 0) + boxes)
-    products.set(name, locations)
+    const code = position.locationCode.trim()
+    if (!name || !code || code === EMPTY_WAREHOUSE_LOCATION_CODE) continue
+    if (isWarehouseQuantityKnown(position) && position.remainingBoxes! * position.unitsPerBox! + position.openedUnits <= 0) continue
+    const rows = products.get(name) ?? []
+    rows.push(position)
+    products.set(name, rows)
   }
-  const order = new Intl.Collator('ko-KR', { numeric: true })
-  return new Map([...products].map(([name, locations]) => [name, [...locations]
-    .map(([locationCode, boxes]) => ({ locationCode, boxes }))
-    .sort((a, b) => order.compare(a.locationCode, b.locationCode))]))
+  return new Map([...products].map(([name, rows]) => {
+    const locations = new Map<string, number | null>()
+    for (const row of rows.sort(compareRoomListPositions)) {
+      // Only the leading picking segment can ship before the next box-storage receipt.
+      if (row.zone !== 'picking') break
+      const code = row.locationCode.trim()
+      const boxes = row.remainingBoxes
+      const current = locations.get(code)
+      locations.set(code, current === null || boxes == null || !Number.isFinite(boxes) || boxes < 0
+        ? null : (current ?? 0) + boxes)
+    }
+    return [name, [...locations].map(([locationCode, boxes]) => ({ locationCode, boxes }))]
+  }))
 }
 
 export function previousWarehouseOutboundMonth(now = new Date()) {

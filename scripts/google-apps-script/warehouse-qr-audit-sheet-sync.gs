@@ -18,7 +18,10 @@ function writeAtelierQrAuditSheet(sheet, entry, recordRepair) {
   const stockWork = entry.kind === 'stock';
   const versioned = Array.isArray(entry.ids);
   const plannedIds = new Set(entry.ids || [...before.keys(), ...after.keys()]);
-  const picking = new Set(entry.picking || []);
+  // Locks include both source and destination slots. Only a destination that
+  // retains stock needs to be empty of other rows; depletion must leave them alone.
+  const pickingLocks = new Set((entry.picking || []).map(placeOf));
+  const picking = new Set(entry.after.map(row => placeOf(row.values[2])).filter(place => pickingLocks.has(place)));
   const afterQrs = entry.after.map(row => qrOf(row.qr));
   const desiredQrs = new Set((stockWork ? entry.before.concat(entry.after) : entry.after)
     .map(row => qrOf(row.qr)).filter(Boolean));
@@ -151,6 +154,13 @@ function writeAtelierQrAuditSheet(sheet, entry, recordRepair) {
     return Boolean(number || name) && actual.values[0] === number && actual.values[1] === name;
   }
 
+  function manuallyClearedRemoval(actual, id) {
+    // A unique AA still identifies an already emptied deletion target. Never
+    // adopt a missing AA, a partial edit, a remaining QR or a row being retained.
+    return versioned && stockWork && before.has(id) && !after.has(id) && actual &&
+      !actual.qr && actual.values.every(value => !value);
+  }
+
   const snapshot = read();
   const { display, relevant } = snapshot;
   const alreadyWritten = verified(snapshot);
@@ -169,7 +179,8 @@ function writeAtelierQrAuditSheet(sheet, entry, recordRepair) {
     const differences = rowDifferences(baseline, before, after, true);
     const sameRows = baseline.size === before.size && [...before].every(([id, row]) => {
       const current = baseline.get(id);
-      return sameStockIdentity(current, row) || sameStockIdentity(current, after.get(id));
+      return sameStockIdentity(current, row) || sameStockIdentity(current, after.get(id)) ||
+        manuallyClearedRemoval(current, id);
     });
     if (!versioned || !stockWork || !recordRepair || !sameRows) fail('SHEET_STOCK_CHANGED', differences);
     repair = differences;
