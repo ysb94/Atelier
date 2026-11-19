@@ -1,8 +1,22 @@
 import type { WarehouseOrganizationOutboundItem } from '@/lib/supabase/warehouse-organization-outbound'
+import type { WarehouseStockPosition } from '@/lib/types'
+import { warehouseProductNameKey } from '@/lib/warehouse/fixed-location-styles'
 import { parseRoomListPaste } from './room-list-paste'
 
 const MAX_ROWS = 10_000
 const MAX_QUANTITY = 2_147_483_647
+
+export function warehouseOutboundBoxQuantities(positions: readonly Pick<WarehouseStockPosition, 'styleName' | 'zone' | 'unitsPerBox'>[]) {
+  const quantities = new Map<string, number>()
+  for (const position of positions) {
+    if (position.zone !== 'box_storage' && position.zone !== 'picking') continue
+    const name = warehouseProductNameKey(position.styleName)
+    const quantity = position.unitsPerBox
+    if (!name || quantity == null || !Number.isFinite(quantity) || quantity <= 0) continue
+    quantities.set(name, Math.max(quantity, quantities.get(name) ?? 0))
+  }
+  return quantities
+}
 
 export function previousWarehouseOutboundMonth(now = new Date()) {
   const parts = new Intl.DateTimeFormat('ko-KR', {
