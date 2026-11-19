@@ -1,10 +1,21 @@
 import type { WarehouseOrganizationOutboundItem } from '@/lib/supabase/warehouse-organization-outbound'
-import type { WarehouseStockPosition } from '@/lib/types'
+import type { StyleRef, WarehouseStockPosition } from '@/lib/types'
 import { warehouseProductNameKey } from '@/lib/warehouse/fixed-location-styles'
 import { parseRoomListPaste } from './room-list-paste'
 
 const MAX_ROWS = 10_000
 const MAX_QUANTITY = 2_147_483_647
+
+export function warehouseOutboundStyleNumbers(styles: readonly StyleRef[]) {
+  const numbers = new Map<string, string | null>()
+  for (const style of styles) {
+    const name = warehouseProductNameKey(style.name)
+    if (!name) continue
+    // A name shared by multiple SKUs cannot identify one M number safely.
+    numbers.set(name, numbers.has(name) ? null : style.styleNo.trim() || null)
+  }
+  return numbers
+}
 
 export function warehouseOutboundBoxQuantities(positions: readonly Pick<WarehouseStockPosition, 'styleName' | 'zone' | 'unitsPerBox'>[]) {
   const quantities = new Map<string, number>()

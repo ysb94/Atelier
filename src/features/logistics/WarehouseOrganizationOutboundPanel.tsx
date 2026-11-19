@@ -8,9 +8,10 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { useBasicWorkAccess } from '@/lib/supabase/basic-work-access'
 import { diagnosticOperation } from '@/lib/diagnostics/workflow-trace'
 import { getActiveWarehouseInventorySet, listWarehouseStockPositions } from '@/lib/supabase/warehouse-stock'
+import { listAllStyleRefs } from '@/lib/supabase/styles'
 import { warehouseProductNameKey } from '@/lib/warehouse/fixed-location-styles'
 import { emptyList } from '@/lib/utils'
-import type { WarehouseStockPosition } from '@/lib/types'
+import type { StyleRef, WarehouseStockPosition } from '@/lib/types'
 import {
   readWarehouseOrganizationOutbound,
   saveWarehouseOrganizationOutbound,
@@ -22,6 +23,7 @@ import {
   previousWarehouseOutboundMonth,
   warehouseOutboundMonthDays,
   warehouseOutboundBoxQuantities,
+  warehouseOutboundStyleNumbers,
 } from './warehouse-organization-outbound'
 
 const PAGE_SIZE = 25
@@ -34,6 +36,7 @@ const BOX_ESTIMATE_PERIODS = [
 ] as const
 const OUTBOUND_COLUMNS = [
   { key: 'row', label: '행', width: 'w-16' },
+  { key: 'styleNo', label: 'M번호', width: 'w-28' },
   { key: 'productName', label: '상품명', width: '' },
   { key: 'quantity', label: '출고 수량', width: 'w-28' },
   { key: 'dailyQuantity', label: '하루 출고량', width: 'w-32' },
@@ -46,9 +49,10 @@ const savedAtFormat = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short',
 })
 
-function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockError }: {
+function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockError, styleNumbers, stylesLoading, stylesError }: {
   items: WarehouseOrganizationOutboundItem[]; title: string; month: string
   boxQuantities: ReadonlyMap<string, number>; stockLoading: boolean; stockError: boolean
+  styleNumbers: ReadonlyMap<string, string | null>; stylesLoading: boolean; stylesError: boolean
 }) {
   const [page, setPage] = useState(0)
   const [sort, setSort] = useState<{ key: OutboundSortKey; direction: 'asc' | 'desc' }>({ key: 'row', direction: 'asc' })
@@ -59,12 +63,13 @@ function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockE
   const monthDays = warehouseOutboundMonthDays(month)
   const sortedRows = useMemo(() => items.map((item, index) => {
     const unitsPerBox = boxQuantities.get(warehouseProductNameKey(item.productName))
+    const styleNo = !stylesLoading && !stylesError ? styleNumbers.get(warehouseProductNameKey(item.productName)) : undefined
     const dailyQuantity = monthDays ? item.quantity / monthDays : null
     const dailyBoxes = !stockLoading && !stockError && unitsPerBox && dailyQuantity != null ? dailyQuantity / unitsPerBox : null
     return {
-      item, index, unitsPerBox, dailyQuantity, dailyBoxes,
+      item, index, unitsPerBox, dailyQuantity, dailyBoxes, styleNo,
       values: {
-        row: index + 1, productName: item.productName, quantity: item.quantity, dailyQuantity, dailyBoxes,
+        row: index + 1, styleNo, productName: item.productName, quantity: item.quantity, dailyQuantity, dailyBoxes,
         week1: dailyBoxes == null ? null : dailyBoxes * 7,
         week2: dailyBoxes == null ? null : dailyBoxes * 14,
         week4: dailyBoxes == null ? null : dailyBoxes * 28,
@@ -79,7 +84,7 @@ function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockE
       ? productNameOrder.compare(a, b)
       : Number(a) - Number(b)
     return compared * (sort.direction === 'asc' ? 1 : -1) || left.index - right.index
-  }), [items, boxQuantities, monthDays, stockLoading, stockError, sort])
+  }), [items, boxQuantities, monthDays, stockLoading, stockError, sort, styleNumbers, stylesLoading, stylesError])
 
   function changeSort(key: OutboundSortKey) {
     setSort(current => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }))
@@ -96,7 +101,7 @@ function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockE
       </div>
       {monthDays && <p className="text-xs text-muted-foreground">하루 출고량은 {month} 출고 수량 ÷ {monthDays}일입니다. 주별 예상 박스 수는 하루 박스 수에 7일·14일·28일을 곱하며, 소수점 둘째 자리까지 표시합니다.</p>}
       <div className="overflow-auto rounded-lg border border-border">
-        <table aria-label={title} className="w-full min-w-[1120px] table-fixed text-sm">
+        <table aria-label={title} className="w-full min-w-[1240px] table-fixed text-sm">
           <thead className="bg-primary text-primary-foreground">
             <tr>
               {OUTBOUND_COLUMNS.map(column => {
@@ -112,10 +117,13 @@ function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockE
             </tr>
           </thead>
           <tbody>
-            {sortedRows.slice(start, start + PAGE_SIZE).map(({ item, index, unitsPerBox, dailyBoxes }) => {
+            {sortedRows.slice(start, start + PAGE_SIZE).map(({ item, index, unitsPerBox, dailyBoxes, styleNo }) => {
               return (
                 <tr key={index} className="border-b border-border last:border-b-0 hover:bg-muted/40">
                   <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{index + 1}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {stylesError ? '조회 실패' : stylesLoading ? '조회 중…' : styleNo ?? <span className="text-muted-foreground">{styleNumbers.has(warehouseProductNameKey(item.productName)) ? '확인 필요' : '—'}</span>}
+                  </td>
                   <td className="break-words px-3 py-1.5">{item.productName}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{numberFormat.format(item.quantity)}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{monthDays ? dailyNumberFormat.format(item.quantity / monthDays) : '—'}</td>
@@ -187,6 +195,14 @@ function OutboundMonthForm({ brandId, viewerId }: { brandId: string; viewerId: s
   })
   const draftItems = preview && 'items' in preview ? preview.items : undefined
   const hasItems = Boolean(draftItems?.length || record?.items.length)
+  const styles = useQuery({
+    queryKey: ['styles', brandId, 'warehouse-organization-refs', viewerId],
+    queryFn: () => diagnosticOperation('app', 'warehouse_organization_styles', trace =>
+      trace.run('read_catalog', context => listAllStyleRefs(brandId, context))),
+    enabled: tabActive && hasItems,
+  })
+  const catalog = styles.data ?? emptyList<StyleRef>()
+  const styleNumbers = useMemo(() => warehouseOutboundStyleNumbers(catalog), [catalog])
   const inventory = useQuery({
     queryKey: ['warehouse-inventory-set', brandId],
     queryFn: () => diagnosticOperation('app', 'warehouse_organization_boxes', trace =>
@@ -204,7 +220,7 @@ function OutboundMonthForm({ brandId, viewerId }: { brandId: string; viewerId: s
   const boxQuantities = useMemo(() => warehouseOutboundBoxQuantities(stockRows), [stockRows])
   const stockLoading = inventory.isLoading || Boolean(setId && positions.isPending)
   const stockError = inventory.isError || Boolean(setId && positions.isError)
-  const boxProps = { boxQuantities, stockLoading, stockError }
+  const boxProps = { boxQuantities, stockLoading, stockError, styleNumbers, stylesLoading: styles.isPending, stylesError: styles.isError }
 
   return (
     <div className="space-y-4">
@@ -261,6 +277,8 @@ function OutboundMonthForm({ brandId, viewerId }: { brandId: string; viewerId: s
       {notice && <p role="status" className="text-sm text-success">{notice}</p>}
       {preview && 'error' in preview && <p role="alert" className="text-sm text-danger">{preview.error}</p>}
       {hasItems && <p className="text-xs text-muted-foreground">하루 출고 박스 수는 현재 박스창고·출고창고의 동일 상품 중 가장 큰 박스당 수량을 기준으로 환산합니다.</p>}
+      {hasItems && <p className="text-xs text-muted-foreground">M번호는 전체 상품에서 상품명이 일치하는 SKU를 조회합니다. 동일 이름의 SKU가 여러 개이거나 M번호가 비어 있으면 확인 필요로 표시합니다.</p>}
+      {styles.isError && <p role="alert" className="text-sm text-danger">M번호를 조회하지 못했습니다. <Button type="button" size="sm" variant="outline" onClick={() => { void styles.refetch() }}>M번호 다시 불러오기</Button></p>}
       {stockError && <p role="alert" className="text-sm text-danger">박스당 수량을 조회하지 못했습니다. <Button type="button" size="sm" variant="outline" onClick={() => { void inventory.refetch(); if (setId) void positions.refetch() }}>재고 다시 불러오기</Button></p>}
       {draftItems ? <OutboundRows key="preview" items={draftItems} title="저장할 출고 데이터" month={month} {...boxProps} />
         : record ? <OutboundRows key={`${month}:${record.revision}`} items={record.items} title="저장된 출고 데이터" month={month} {...boxProps} />
