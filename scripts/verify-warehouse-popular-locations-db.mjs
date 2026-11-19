@@ -106,7 +106,36 @@ try {
   assert.deepEqual(await read(), [{ location_codes: [], revision: 3 }])
   await assert.rejects(db.query('delete from public.warehouse_popular_locations where brand_id=$1', [brand]),
     error => error.code === '42501')
+
+  await db.exec('reset role')
+  const settingsBefore = await read()
+  const policiesBefore = (await db.query('select to_jsonb(p) as policy from pg_policies p order by policyname')).rows
+  await db.exec(await readFile(new URL('../supabase/migrations/20261119015113_warehouse_popular_product_list.sql', import.meta.url), 'utf8'))
+  assert.deepEqual(await read(), settingsBefore)
+  assert.deepEqual((await db.query('select to_jsonb(p) as policy from pg_policies p order by policyname')).rows, policiesBefore)
+  const readProducts = async () => (await db.query('select location_codes,product_entries,revision from public.warehouse_popular_locations where brand_id=$1',[brand])).rows
+  const saveProducts = (revision, products) => db.query('update public.warehouse_popular_locations set product_entries=$1,revision=$2+1 where brand_id=$3 and revision=$2 returning product_entries',[products,revision,brand])
+  await signIn(editor)
+  assert.deepEqual(await readProducts(), [{ location_codes: [], product_entries: [], revision: 3 }])
+  assert.deepEqual((await saveProducts(3,[' M1000 ', '', '후드 Black M', 'M1000'])).rows, [{ product_entries: ['M1000','후드 Black M'] }])
+  await signIn(teammate)
+  assert.deepEqual((await readProducts())[0].product_entries, ['M1000','후드 Black M'])
+  assert.deepEqual((await saveProducts(3,['stale'])).rows, [])
+  assert.deepEqual(await edit(4,['3-1-1_A1']), [{ location_codes: ['3-1-1_A1'], revision: 5 }])
+  assert.deepEqual((await readProducts())[0].product_entries, ['M1000','후드 Black M'], 'Old location-only clients preserve the product list')
+  await assert.rejects(saveProducts(5,null), error => error.code === '22023')
+  for (const id of [design, inactive, outsideCompany, noBrandRead]) {
+    await signIn(id)
+    assert.deepEqual(await readProducts(), [])
+    assert.deepEqual((await saveProducts(5,['blocked'])).rows, [])
+    await assert.rejects(db.query('insert into public.warehouse_popular_locations(brand_id,product_entries) values($1,$2)',[otherBrand,['blocked']]), error => error.code === '42501')
+  }
+  await db.exec('set role anon')
+  await assert.rejects(readProducts(), error => error.code === '42501')
+  await signIn(editor)
+  assert.deepEqual((await readProducts())[0], { location_codes: ['3-1-1_A1'], product_entries: ['M1000','후드 Black M'], revision: 5 })
   console.log('warehouse popular locations DB: shared same-brand list, normalization and order, stale edit, permissions and empty list verified')
+  console.log('warehouse popular products DB: same-brand sharing, normalized entries, stale saves, previous clients, original locations and permissions verified')
 } finally {
   await db.close()
 }
