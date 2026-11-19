@@ -29,6 +29,26 @@ export function warehouseOutboundBoxQuantities(positions: readonly Pick<Warehous
   return quantities
 }
 
+export function warehouseOutboundPickingBoxes(positions: readonly Pick<WarehouseStockPosition, 'styleName' | 'zone' | 'remainingBoxes' | 'locationCode'>[]) {
+  const products = new Map<string, Map<string, number | null>>()
+  for (const position of positions) {
+    if (position.zone !== 'picking') continue
+    const name = warehouseProductNameKey(position.styleName)
+    if (!name) continue
+    const locations = products.get(name) ?? new Map<string, number | null>()
+    const location = position.locationCode.trim()
+    const boxes = position.remainingBoxes
+    const current = locations.get(location)
+    locations.set(location, current === null || boxes == null || !Number.isFinite(boxes) || boxes < 0
+      ? null : (current ?? 0) + boxes)
+    products.set(name, locations)
+  }
+  const order = new Intl.Collator('ko-KR', { numeric: true })
+  return new Map([...products].map(([name, locations]) => [name, [...locations]
+    .map(([locationCode, boxes]) => ({ locationCode, boxes }))
+    .sort((a, b) => order.compare(a.locationCode, b.locationCode))]))
+}
+
 export function previousWarehouseOutboundMonth(now = new Date()) {
   const parts = new Intl.DateTimeFormat('ko-KR', {
     timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit',

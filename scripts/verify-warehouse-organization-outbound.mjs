@@ -6,6 +6,7 @@ import {
   previousWarehouseOutboundMonth,
   warehouseOutboundMonthDays,
   warehouseOutboundBoxQuantities,
+  warehouseOutboundPickingBoxes,
   warehouseOutboundStyleNumbers,
   warehouseOutboundDailyBoxes,
   warehousePopularOutboundProducts,
@@ -45,6 +46,26 @@ assert.equal(boxQuantities.get('가방'), 16)
 assert.equal(boxQuantities.get('다른 상품'), 20)
 assert.equal(boxQuantities.has('수량 없음'), false)
 assert.equal(boxQuantities.has('0 수량'), false)
+const pickingBoxes = warehouseOutboundPickingBoxes([
+  { styleName: ' 가방 ', zone: 'picking', locationCode: '3-2-4_C1', remainingBoxes: 2 },
+  { styleName: '가방', zone: 'picking', locationCode: '3-2-4_C1', remainingBoxes: 3 },
+  { styleName: '가방', zone: 'picking', locationCode: '3-2-5_C1', remainingBoxes: 1 },
+  { styleName: '가방', zone: 'box_storage', locationCode: '#-7-1', remainingBoxes: 100 },
+  { styleName: '가방', zone: 'temporary', locationCode: '임시', remainingBoxes: 50 },
+  { styleName: '빈 상품', zone: 'picking', locationCode: 'A', remainingBoxes: 0 },
+  { styleName: '미확인', zone: 'picking', locationCode: 'B', remainingBoxes: null },
+  { styleName: '미확인', zone: 'picking', locationCode: 'B', remainingBoxes: 4 },
+  { styleName: '뒤늦게 미확인', zone: 'picking', locationCode: 'C', remainingBoxes: 4 },
+  { styleName: '뒤늦게 미확인', zone: 'picking', locationCode: 'C', remainingBoxes: null },
+  { styleName: '박스창고만', zone: 'box_storage', locationCode: 'D', remainingBoxes: 10 },
+])
+assert.deepEqual(pickingBoxes.get('가방'), [
+  { locationCode: '3-2-4_C1', boxes: 5 }, { locationCode: '3-2-5_C1', boxes: 1 },
+], 'Only picking positions contribute and positions at the same location are combined')
+assert.deepEqual(pickingBoxes.get('빈 상품'), [{ locationCode: 'A', boxes: 0 }])
+assert.deepEqual(pickingBoxes.get('미확인'), [{ locationCode: 'B', boxes: null }])
+assert.deepEqual(pickingBoxes.get('뒤늦게 미확인'), [{ locationCode: 'C', boxes: null }])
+assert.equal(pickingBoxes.has('박스창고만'), false)
 assert.equal(warehouseOutboundDailyBoxes(2976, 31, 16), 6)
 assert.equal(warehouseOutboundDailyBoxes(2976, 31, undefined), null)
 assert.equal(warehouseOutboundDailyBoxes(2976, null, 16), null)
