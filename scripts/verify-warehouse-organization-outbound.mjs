@@ -5,6 +5,7 @@ import {
   parseWarehouseOrganizationOutbound,
   previousWarehouseOutboundMonth,
   warehouseOutboundMonthDays,
+  warehouseOutboundBoxQuantities,
 } from '../src/features/logistics/warehouse-organization-outbound.ts'
 
 assert.equal(previousWarehouseOutboundMonth(new Date('2026-12-31T15:00:00Z')), '2026-12')
@@ -16,6 +17,19 @@ assert.equal(warehouseOutboundMonthDays('2028-02'), 29)
 assert.equal(warehouseOutboundMonthDays('2100-02'), 28)
 assert.equal(warehouseOutboundMonthDays('2026-13'), null)
 assert.equal(warehouseOutboundMonthDays(''), null)
+const boxQuantities = warehouseOutboundBoxQuantities([
+  { styleName: '가방', zone: 'picking', unitsPerBox: 8 },
+  { styleName: '가방', zone: 'box_storage', unitsPerBox: 16 },
+  { styleName: '가방', zone: 'box_storage', unitsPerBox: 8 },
+  { styleName: '가방', zone: 'temporary', unitsPerBox: 100 },
+  { styleName: ' 다른 상품 ', zone: 'box_storage', unitsPerBox: 20 },
+  { styleName: '수량 없음', zone: 'box_storage', unitsPerBox: null },
+  { styleName: '0 수량', zone: 'box_storage', unitsPerBox: 0 },
+])
+assert.equal(boxQuantities.get('가방'), 16)
+assert.equal(boxQuantities.get('다른 상품'), 20)
+assert.equal(boxQuantities.has('수량 없음'), false)
+assert.equal(boxQuantities.has('0 수량'), false)
 assert.deepEqual(parseWarehouseOrganizationOutbound('상품명\t출고 수량\r\n"가방 A"\t2,977\r\n가방 B\t0\r\n'), {
   items: [{ productName: '가방 A', quantity: 2977 }, { productName: '가방 B', quantity: 0 }],
 })
