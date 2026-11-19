@@ -26,6 +26,7 @@ import {
   type PreparedWarehouseImportRow,
 } from '@/lib/warehouse/stock'
 import { getSupabase } from '@/lib/supabase/client'
+import type { PopularProductPosition } from '@/lib/warehouse/popular-products'
 import { diagnosticOperation, tracedQuery, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
 
@@ -577,12 +578,13 @@ export async function listWarehouseLocations(
 async function readPositionRows<T = PositionRow>(
   brandId: string,
   setId: string,
-  { zone, columns = POSITION_COLUMNS, context, locationCode, signal }: {
+  { zone, columns = POSITION_COLUMNS, context, locationCode, signal, lookup }: {
     zone?: WarehouseZone
     columns?: string
     context?: DiagnosticContext
     locationCode?: string
     signal?: AbortSignal
+    lookup?: { column: 'normalized_style_no' | 'source_style_no' | 'source_product_name'; values: string[] }
   } = {},
 ): Promise<T[]> {
   const supabase = getSupabase()
@@ -598,6 +600,7 @@ async function readPositionRows<T = PositionRow>(
       .range(from, from + PAGE_SIZE - 1)
     if (zone) query = query.eq('warehouse_locations.zone', zone)
     if (locationCode !== undefined) query = query.eq('warehouse_locations.code', locationCode)
+    if (lookup) query = query.in(lookup.column, lookup.values)
     if (signal) query = query.abortSignal(signal)
     const { data, error } = await tracedQuery(query, context)
     if (error) {
@@ -709,6 +712,43 @@ export function listWarehouseLocationProducts(
       if (!previous || (!previous.name && name)) products.set(key, { name, styleNo })
     }
     return [...products.values()]
+  })
+}
+
+export function listWarehousePopularProductPositions(brandId: string, setId: string, entries: readonly string[], signal?: AbortSignal) {
+  type ProductPositionRow = Pick<PositionRow, 'id' | 'source_product_name' | 'source_style_no' | 'normalized_style_no'
+    | 'received_on' | 'received_on_raw' | 'is_forced_priority' | 'is_final_location' | 'usage_priority'
+    | 'quantity_status' | 'units_per_box' | 'remaining_boxes' | 'opened_units' | 'source_row_number' | 'warehouse_locations'>
+  return diagnosticOperation('app', 'warehouse_popular_product_positions', async trace => {
+    const rows = new Map<string, ProductPositionRow>()
+    const wanted = [...new Set(entries.map(value => value.trim()).filter(Boolean))]
+    for (let start = 0; start < wanted.length; start += 100) {
+      const batch = wanted.slice(start, start + 100)
+      const lookups = [
+        { column: 'normalized_style_no' as const, values: [...new Set(batch.map(normalizeStyleNo))] },
+        { column: 'source_style_no' as const, values: [...new Set([...batch, ...batch.map(normalizeStyleNo)])] },
+        { column: 'source_product_name' as const, values: batch },
+      ]
+      const results = await trace.run('read_matching_positions', context => Promise.all(lookups.map(lookup =>
+        readPositionRows<ProductPositionRow>(brandId, setId, {
+          columns: 'id, source_product_name, source_style_no, normalized_style_no, received_on, received_on_raw, is_forced_priority, is_final_location, usage_priority, quantity_status, units_per_box, remaining_boxes, opened_units, source_row_number, warehouse_locations!inner(code, zone)',
+          lookup, signal, context,
+        }),
+      )))
+      for (const result of results) for (const row of result) rows.set(row.id, row)
+    }
+    return [...rows.values()].map((row): PopularProductPosition => {
+      const location = firstEmbed(row.warehouse_locations)
+      return {
+        name: row.source_product_name.trim(), styleNo: (row.normalized_style_no || row.source_style_no).trim(),
+        locationCode: location?.code ?? '', isFinalLocation: row.is_final_location, isForcedPriority: row.is_forced_priority,
+        usagePriority: USAGE_PRIORITIES.has(row.usage_priority as WarehouseUsagePriority)
+          ? row.usage_priority as WarehouseUsagePriority : row.is_forced_priority ? 'first' : 'fifo',
+        receivedOn: row.received_on, receivedOnRaw: row.received_on_raw, sourceRowNumber: row.source_row_number,
+        quantityStatus: row.quantity_status === 'unknown' ? 'unknown' : 'known',
+        unitsPerBox: row.units_per_box, remainingBoxes: row.remaining_boxes, openedUnits: row.opened_units,
+      }
+    })
   })
 }
 

@@ -1,19 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { combineListQueries } from '@/lib/query/list-queries'
-import { popularProductAvailability, popularProductEntries, type PopularLocationProduct } from '@/lib/warehouse/popular-products'
+import { popularProductAvailability, popularProductEntries, popularProductLocations, type PopularLocationProduct } from '@/lib/warehouse/popular-products'
 import { useBasicWorkAccess } from '@/lib/supabase/basic-work-access'
 import {
   readWarehousePopularLocations,
   saveWarehousePopularLocations,
   WarehousePopularLocationsChangedError,
 } from '@/lib/supabase/warehouse-popular-locations'
-import { getActiveWarehouseInventorySet, listWarehouseLocationProducts } from '@/lib/supabase/warehouse-stock'
+import { getActiveWarehouseInventorySet, listWarehouseLocationProducts, listWarehousePopularProductPositions } from '@/lib/supabase/warehouse-stock'
 
 const LOCATION_LOOKUP_DELAY_MS = 350
 const SHARED_LIST_REFRESH_MS = 30_000
@@ -46,6 +46,7 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<LocationDraft | null>(null)
   const [savedNotice, setSavedNotice] = useState(false)
+  const [editingProducts, setEditingProducts] = useState(false)
   const tabActive = useWorkspaceTabActivity()
   const cache = useQueryClient()
   const sharedKey = ['warehouse-popular-locations', brandId, viewerId] as const
@@ -66,6 +67,7 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
   const codes = useMemo(() => [...new Set(rows.map(({ location }) => location.trim()).filter(Boolean))], [rows])
   const productText = draft?.productText ?? saved?.products.join('\n') ?? ''
   const products = useMemo(() => popularProductEntries(productText), [productText])
+  const showProductInput = editingProducts || products.length === 0
   const productsDirty = Boolean(saved && (products.length !== saved.products.length || products.some((item, index) => item !== saved.products[index])))
   const dirty = Boolean(saved && draft && (
     productsDirty || codes.length !== saved.codes.length || codes.some((code, index) => code !== saved.codes[index])
@@ -79,6 +81,7 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
       cache.setQueryData(sharedKey, { ready: true, list })
       setDraft(null)
       setSavedNotice(true)
+      setEditingProducts(false)
     },
     onError: (error) => {
       if (error instanceof WarehousePopularLocationsChangedError) void shared.refetch()
@@ -92,7 +95,7 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
   const inventory = useQuery({
     queryKey: ['warehouse-inventory-set', brandId],
     queryFn: () => getActiveWarehouseInventorySet(brandId),
-    enabled: lookupEnabled && hasLocations,
+    enabled: lookupEnabled && (hasLocations || products.length > 0),
   })
   const setId = inventory.data?.id
   const codeKey = JSON.stringify(codes)
@@ -116,6 +119,16 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
     && locationProducts.data.every(items => items !== undefined))
   const availability = useMemo(() => popularProductAvailability(products, locationProducts.data.flatMap(items => items ?? [])), [products, locationProducts.data])
   const missing = availability.filter(item => !item.available)
+  const productPositions = useQuery({
+    queryKey: ['warehouse-stock-positions', brandId, setId, 'popular-products', products],
+    queryFn: ({ signal }) => listWarehousePopularProductPositions(brandId, setId!, products, signal),
+    enabled: lookupEnabled && Boolean(setId) && !showProductInput,
+  })
+  const productRows = useMemo(() => popularProductLocations(products, productPositions.data ?? []), [products, productPositions.data])
+  const productLookupMessage = productPositions.isError ? '조회 실패'
+    : inventory.isError ? '재고 조회 실패'
+    : inventory.data === null ? '현재 재고 없음'
+    : !setId || productPositions.isPending ? '조회 중…' : null
 
   function updateRows(update: (rows: PopularLocationRow[]) => PopularLocationRow[]) {
     if (save.isPending) return
@@ -157,6 +170,7 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
     setDraft(null)
     setSavedNotice(false)
     save.reset()
+    setEditingProducts(false)
   }
 
   return (
@@ -198,14 +212,14 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
             ) : savedNotice ? (
               <p role="status" className="text-xs text-success">목록을 저장했습니다.</p>
             ) : null}
-            {hasLocations && inventory.isError && !setId ? (
+            {(hasLocations || products.length > 0) && inventory.isError && !setId ? (
               <div role="alert" className="flex flex-wrap items-center gap-2 text-xs text-danger">
                 창고 재고를 불러오지 못했습니다.
                 <Button type="button" size="sm" variant="outline" disabled={inventory.isFetching}
                   onClick={() => void inventory.refetch()}>다시 조회</Button>
               </div>
             ) : null}
-            {hasLocations && inventory.data === null && (
+            {(hasLocations || products.length > 0) && inventory.data === null && (
               <p role="status" className="text-xs text-muted-foreground">조회할 창고 재고가 없습니다.</p>
             )}
             <div aria-label="인기상품 배치 요약" role="status" className="space-y-1 rounded-md bg-muted/50 px-2 py-1.5 text-xs">
@@ -289,13 +303,49 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
               </div>
             </div>
             <div className="min-w-0 self-start overflow-hidden rounded-md border border-border">
-              <h3 className="bg-primary px-2 py-1.5 text-xs font-medium text-primary-foreground">인기상품 리스트</h3>
-              <div className="space-y-1 p-1.5">
+              <div className="flex items-center justify-between gap-2 bg-primary px-2 py-1 text-xs text-primary-foreground">
+                <h3 className="font-medium">인기상품 리스트</h3>
+                {!showProductInput && <Button type="button" size="sm" variant="ghost" className="h-6 gap-1 px-1 text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"
+                  disabled={save.isPending} onClick={() => setEditingProducts(true)}><Pencil className="size-3" />목록 수정</Button>}
+                {showProductInput && Boolean(saved?.products.length) && <Button type="button" size="sm" variant="ghost" className="h-6 px-1 text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"
+                  disabled={save.isPending} onClick={() => {
+                    setDraft(current => current ? { ...current, productText: saved!.products.join('\n') } : null)
+                    setEditingProducts(false)
+                  }}>수정 취소</Button>}
+              </div>
+              {showProductInput ? <div className="space-y-1 p-1.5">
                 <p id={`popular-products-help-${brandId}`} className="text-xs text-muted-foreground">M번호 또는 정확한 상품명을 한 줄에 하나씩 입력하세요.</p>
                 <Textarea aria-label="인기상품 리스트" aria-describedby={`popular-products-help-${brandId}`} value={productText}
                   onChange={event => updateProducts(event.target.value)} disabled={save.isPending}
                   rows={5} className="h-32 resize-y px-2 py-1 text-xs leading-6" placeholder={'M0001\nM0002\n상품명'} />
-              </div>
+              </div> : <>
+                {productPositions.isError && <div role="alert" className="flex items-center gap-2 px-2 py-1 text-xs text-danger">
+                  상품 위치를 불러오지 못했습니다.
+                  <Button type="button" variant="outline" size="sm" className="h-6 px-1.5" disabled={productPositions.isFetching}
+                    onClick={() => void productPositions.refetch()}>상품 위치 다시 조회</Button>
+                </div>}
+                <div className="max-h-48 overflow-auto">
+                  <table aria-label="인기상품 현재 창고 위치" className="w-full table-fixed text-left text-xs">
+                    <thead className="sticky top-0 bg-muted text-muted-foreground">
+                      <tr><th scope="col" className="w-[22%] px-2 py-1.5 font-medium">M번호</th>
+                        <th scope="col" className="px-2 py-1.5 font-medium">상품명</th>
+                        <th scope="col" className="w-[30%] px-2 py-1.5 font-medium">첫 번째 위치</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {productRows.map(row => <tr key={JSON.stringify([row.entry, row.styleNo])}>
+                        <td className="break-words px-2 py-1.5 tabular-nums">{row.styleNo || '—'}</td>
+                        <td className="break-words px-2 py-1.5">{row.name || '—'}</td>
+                        <td className="break-words px-2 py-1.5">
+                          {productLookupMessage ?? <>
+                            {row.location || (row.matched ? '현재 재고 없음' : '일치 상품 없음')}
+                            {row.quantityUnknown && <span className="block text-warning">수량 미확인</span>}
+                          </>}
+                        </td>
+                      </tr>)}
+                    </tbody>
+                  </table>
+                </div>
+              </>}
             </div>
             </div>
             {saved && !saved.productsReady && <p className="text-xs text-muted-foreground">인기상품 공유 저장은 서버 적용 후 사용할 수 있습니다.</p>}
