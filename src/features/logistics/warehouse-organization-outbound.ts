@@ -17,6 +17,12 @@ export function isWarehouseOutboundMonth(value: string) {
   return /^[1-9]\d{3}-(?:0[1-9]|1[0-2])$/.test(value)
 }
 
+export function warehouseOutboundMonthDays(month: string): number | null {
+  if (!isWarehouseOutboundMonth(month)) return null
+  const [year, monthNumber] = month.split('-').map(Number)
+  return new Date(Date.UTC(year, monthNumber, 0)).getUTCDate()
+}
+
 export function parseWarehouseOrganizationOutbound(text: string):
   { items: WarehouseOrganizationOutboundItem[] } | { error: string } {
   const items: WarehouseOrganizationOutboundItem[] = []
