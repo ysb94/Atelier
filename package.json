@@ -112,6 +112,7 @@
     "verify:meetings-browser": "node scripts/verify-page-preview-browser.mjs --meetings-only",
     "verify:personal-requests": "node --experimental-strip-types src/features/settings/personal-requests.verify.ts",
     "verify:leave-balance": "node scripts/verify-leave-balance-db.mjs",
+    "verify:leave-notice-self-session": "node scripts/verify-leave-usage-notices-db.mjs --additional-notices --self-session && node scripts/verify-extra-leave-notices-browser.mjs",
     "verify:leave-anniversary": "node scripts/verify-leave-balance-db.mjs --anniversary",
     "verify:leave-load": "node scripts/verify-leave-balance-db.mjs --anniversary --additional --fefo --birthday --advance --load-guard",
     "verify:leave-balance-browser": "node scripts/verify-leave-balance-panel-browser.mjs",

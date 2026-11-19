@@ -93,5 +93,10 @@ try {
     const { verifyExtraLeaveNotices } = await import('./verify-extra-leave-notices-cases.mjs')
     await verifyExtraLeaveNotices({db,value,actor,company,other,id})
   }
+  if (process.argv.includes('--self-session')) {
+    assert.ok(process.argv.includes('--additional-notices'), '추가·생일 안내와 함께 검증')
+    const { verifyLeaveNoticeSelfSession } = await import('./verify-leave-notice-self-session-cases.mjs')
+    await verifyLeaveNoticeSelfSession({db,value,actor,company,other,id})
+  }
   console.log('leave-usage-notices-db: cycle/leap/expiry, latest due phase, exclusions, idempotence, original data preservation, read/view/confirm separation, first timestamps, own/company/manager/anonymous isolation, invalid and impersonated session rejection passed')
 } finally { await db.close() }
