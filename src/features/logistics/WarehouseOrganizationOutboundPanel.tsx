@@ -39,7 +39,7 @@ const OUTBOUND_COLUMNS = [
   { key: 'row', label: '행', width: 'w-16' },
   { key: 'styleNo', label: 'M번호', width: 'w-28' },
   { key: 'productName', label: '상품명', width: '' },
-  { key: 'pickingBoxes', label: '출고창고 박스 수', width: 'w-52' },
+  { key: 'pickingBoxes', label: '출고창고 박스 수', width: 'w-40' },
   { key: 'quantity', label: '출고 수량', width: 'w-28' },
   { key: 'dailyQuantity', label: '하루 출고량', width: 'w-32' },
   { key: 'dailyBoxes', label: '하루 출고 박스 수', width: 'w-40' },
@@ -73,7 +73,7 @@ function OutboundRows({ items, title, month, boxQuantities, pickingBoxes, stockL
     const dailyQuantity = monthDays ? item.quantity / monthDays : null
     const dailyBoxes = !stockLoading && !stockError ? warehouseOutboundDailyBoxes(item.quantity, monthDays, unitsPerBox) : null
     return {
-      item, index, unitsPerBox, dailyQuantity, dailyBoxes, styleNo, pickingLocations, pickingBoxCount,
+      item, index, unitsPerBox, dailyQuantity, dailyBoxes, styleNo, pickingBoxCount,
       values: {
         row: index + 1, styleNo, productName: item.productName, pickingBoxes: pickingBoxCount, quantity: item.quantity, dailyQuantity, dailyBoxes,
         week1: dailyBoxes == null ? null : dailyBoxes * 7,
@@ -107,7 +107,7 @@ function OutboundRows({ items, title, month, boxQuantities, pickingBoxes, stockL
       </div>
       {monthDays && <p className="text-xs text-muted-foreground">하루 출고량은 {month} 출고 수량 ÷ {monthDays}일입니다. 주별 예상 박스 수는 하루 박스 수에 7일·14일·28일을 곱하며, 소수점 둘째 자리까지 표시합니다.</p>}
       <div className="overflow-auto rounded-lg border border-border">
-        <table aria-label={title} className="w-full min-w-[1450px] table-fixed text-sm">
+        <table aria-label={title} className="w-full min-w-[1400px] table-fixed text-sm">
           <thead className="bg-primary text-primary-foreground">
             <tr>
               {OUTBOUND_COLUMNS.map(column => {
@@ -123,7 +123,7 @@ function OutboundRows({ items, title, month, boxQuantities, pickingBoxes, stockL
             </tr>
           </thead>
           <tbody>
-            {sortedRows.slice(start, start + PAGE_SIZE).map(({ item, index, unitsPerBox, dailyBoxes, styleNo, pickingLocations, pickingBoxCount }) => {
+            {sortedRows.slice(start, start + PAGE_SIZE).map(({ item, index, unitsPerBox, dailyBoxes, styleNo, pickingBoxCount }) => {
               return (
                 <tr key={index} className="border-b border-border last:border-b-0 hover:bg-muted/40">
                   <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{index + 1}</td>
@@ -132,10 +132,8 @@ function OutboundRows({ items, title, month, boxQuantities, pickingBoxes, stockL
                   </td>
                   <td className="break-words px-3 py-1.5">{item.productName}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">
-                    {stockError ? '조회 실패' : stockLoading ? '조회 중…' : pickingLocations.length
-                      ? <span className="break-words">
-                        {pickingBoxCount == null ? '수량 확인 필요' : `${numberFormat.format(pickingBoxCount)}박스`} ({pickingLocations.map(location => location.locationCode).join(', ')})
-                      </span> : <span className="text-muted-foreground">0박스 (자리 없음)</span>}
+                    {stockError ? '조회 실패' : stockLoading ? '조회 중…' : pickingBoxCount == null
+                      ? <span className="text-muted-foreground">수량 확인 필요</span> : `${numberFormat.format(pickingBoxCount)}박스`}
                   </td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{numberFormat.format(item.quantity)}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{monthDays ? dailyNumberFormat.format(item.quantity / monthDays) : '—'}</td>
