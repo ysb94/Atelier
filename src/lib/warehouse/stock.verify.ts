@@ -4,6 +4,7 @@
  */
 import { normalizeStyleNo } from '@/lib/import/transform'
 import { popularProductAvailability, popularProductEntries, popularProductLocations, type PopularProductPosition } from './popular-products'
+import { missingStyleWarehouseProducts, type MissingStyleWarehousePosition } from './missing-style-products'
 import { indexRoomListLocations, indexRoomListStyleNumbers, roomListLocationCodes } from '@/features/logistics/room-list-locations'
 import { roomListBulkPacking } from '@/features/logistics/room-list-paste'
 import type { StyleRef, WarehouseStockPosition } from '@/lib/types'
@@ -780,5 +781,29 @@ assert(locatedPopular.at(-1)?.name === '없는 상품' && !locatedPopular.at(-1)
 assert(JSON.stringify(popularPositions) === popularPositionSnapshot, '위치를 정렬해도 원본 재고를 변경하지 않는다')
 assert(popularProductLocations(['M1000'], [{ ...popularPositionBase, remainingBoxes: 0 }])[0].location === '', '수량 0인 자리를 현재 위치로 표시하지 않는다')
 assert(popularProductLocations(['M1000'], [{ ...popularPositionBase, quantityStatus: 'unknown' }])[0].quantityUnknown, '수량이 미확인이면 위치와 함께 상태를 알린다')
+
+const missingNumberBase: MissingStyleWarehousePosition = {
+  id: 'no-number', styleNo: '', sourceStyleNo: '', styleName: '번호 없는 상품',
+  locationCode: '3-1-1_A1', zone: 'box_storage', isFinalLocation: false,
+  quantityStatus: 'known', unitsPerBox: 10, remainingBoxes: 2, openedUnits: 3,
+  receivedOn: '2026-11-19', receivedOnRaw: '20261119',
+}
+const missingNumberRows: MissingStyleWarehousePosition[] = [
+  missingNumberBase,
+  { ...missingNumberBase, id: 'second-location', locationCode: '3-1-1_A2' },
+  { ...missingNumberBase, id: 'source-number', sourceStyleNo: 'M0010' },
+  { ...missingNumberBase, id: 'normalized-number', styleNo: 'M0011' },
+  { ...missingNumberBase, id: 'picking', zone: 'picking' },
+  { ...missingNumberBase, id: 'depleted', remainingBoxes: 0, openedUnits: 0 },
+  { ...missingNumberBase, id: 'opened-only', remainingBoxes: 0, openedUnits: 5 },
+  { ...missingNumberBase, id: 'unknown', quantityStatus: 'unknown', unitsPerBox: null },
+  { ...missingNumberBase, id: 'placeholder', locationCode: '(빈 자리)' },
+  { ...missingNumberBase, id: 'no-location', locationCode: '' },
+]
+const missingNumberSnapshot = JSON.stringify(missingNumberRows)
+const missingNumberProducts = missingStyleWarehouseProducts(missingNumberRows)
+assert(JSON.stringify(missingNumberProducts.map(row => row.id)) === JSON.stringify(['no-number', 'second-location', 'opened-only', 'unknown']), 'M번호 없는 박스창고의 남은 재고만 위치별로 보존하고 미확인 수량을 버리지 않는다')
+assert(warehousePositionQty(missingNumberProducts[0]) === 23, '총 수량은 잔여 박스 × 박스당 수량 + 개봉 낱개 수량이다')
+assert(JSON.stringify(missingNumberRows) === missingNumberSnapshot, 'M번호 없는 상품 조회는 원본 재고를 바꾸지 않는다')
 
 console.log('warehouse-stock verify: ok')
