@@ -153,7 +153,7 @@ export function WarehouseQrPanel({ brandName, brandId }: { brandName: string; br
       <div className="grid gap-4 lg:grid-cols-[19rem_minmax(0,1fr)]">
         <Card>
         <CardContent className="space-y-4 p-4">
-          <div><h3 className="text-sm font-semibold">렉 범위 선택</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">창고 → 줄 → 렉 순서입니다.<br />3-1-1 = 3번 창고 · 1번째 줄 · 1번째 렉</p></div>
+          <div><h3 className="text-sm font-semibold">렉 범위 선택</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">창고 → 줄 → 렉 순서입니다.<br />창고·줄은 #, % 같은 기호도 입력할 수 있습니다. 연속 생성할 렉 번호는 0 이상의 정수로 입력하세요.</p></div>
           <FilterTabs ariaLabel="박스창고 자리번호 입력 방법" value={mode} onChange={setMode} tabs={[{ value: 'range', label: '렉 범위' }, { value: 'list', label: '렉 직접 입력' }]} />
 
           {mode === 'range' ? (
@@ -162,7 +162,7 @@ export function WarehouseQrPanel({ brandName, brandId }: { brandName: string; br
                 <span className="text-xs text-muted-foreground">창고 번호</span>
                 <Input
                   aria-label="창고 번호"
-                  inputMode="numeric"
+                  inputMode="text"
                   value={warehouse}
                   onChange={(event) => setWarehouse(event.target.value)}
                 />
@@ -171,7 +171,7 @@ export function WarehouseQrPanel({ brandName, brandId }: { brandName: string; br
                 <span className="text-xs text-muted-foreground">줄 번호</span>
                 <Input
                   aria-label="줄 번호"
-                  inputMode="numeric"
+                  inputMode="text"
                   value={row}
                   onChange={(event) => setRow(event.target.value)}
                 />
