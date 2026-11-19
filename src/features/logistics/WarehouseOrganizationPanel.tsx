@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { ArrowDown, ArrowUp } from 'lucide-react'
 import { useWorkspaceTabActivity, WorkspaceTabActivityContext } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -48,6 +49,7 @@ function MissingStyleProducts({ brandId, viewerId }: { brandId: string; viewerId
   useRenderWatch('WarehouseMissingStyleProducts')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(0)
+  const [locationSort, setLocationSort] = useState<'asc' | 'desc'>('asc')
   const tabActive = useWorkspaceTabActivity()
   const inventory = useQuery({
     queryKey: ['warehouse-inventory-set', brandId],
@@ -65,8 +67,9 @@ function MissingStyleProducts({ brandId, viewerId }: { brandId: string; viewerId
   const filtered = useMemo(() => {
     const key = search.trim().normalize('NFKC').toLocaleLowerCase('ko-KR')
     return rows.filter(row => !key || `${row.styleName}\n${formatWarehouseLocation(row)}`.normalize('NFKC').toLocaleLowerCase('ko-KR').includes(key))
-      .sort((left, right) => LOCATION_ORDER.compare(left.locationCode, right.locationCode) || LOCATION_ORDER.compare(left.styleName, right.styleName))
-  }, [rows, search])
+      .sort((left, right) => LOCATION_ORDER.compare(left.locationCode, right.locationCode) * (locationSort === 'asc' ? 1 : -1)
+        || LOCATION_ORDER.compare(left.styleName, right.styleName))
+  }, [rows, search, locationSort])
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const currentPage = Math.min(page, pageCount - 1)
   const unknown = filtered.filter(row => !isWarehouseQuantityKnown(row)).length
@@ -75,6 +78,7 @@ function MissingStyleProducts({ brandId, viewerId }: { brandId: string; viewerId
   const error = inventory.isError || Boolean(setId && stock.isError)
   const ready = Boolean(setId && stock.data !== undefined)
   const quantity = (value: number | null) => value == null ? '—' : NUMBER_FORMAT.format(value)
+  const LocationSortIcon = locationSort === 'asc' ? ArrowUp : ArrowDown
 
   return <section aria-label="박스창고 M번호 없는 상품" className="space-y-2">
     <p className="text-xs text-muted-foreground">현재 박스창고에서 M번호가 비어 있는 재고입니다. 같은 상품이 여러 위치에 있으면 위치별로 표시합니다.</p>
@@ -98,7 +102,13 @@ function MissingStyleProducts({ brandId, viewerId }: { brandId: string; viewerId
         <table aria-label="박스창고 M번호 없는 상품 목록" className="w-full min-w-[860px] table-fixed text-xs">
           <thead className="sticky top-0 bg-primary text-primary-foreground">
             <tr><th scope="col" className="px-2 py-2 text-left font-medium">상품명</th>
-              <th scope="col" className="w-36 px-2 py-2 text-left font-medium">현재 위치</th>
+              <th scope="col" aria-sort={locationSort === 'asc' ? 'ascending' : 'descending'} className="w-36 p-0 text-left font-medium">
+                <button type="button" aria-label={`현재 위치 ${locationSort === 'asc' ? '내림차순' : '오름차순'} 정렬`}
+                  className="flex w-full items-center gap-1 px-2 py-2 text-inherit hover:bg-primary-foreground/10 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2"
+                  onClick={() => { setLocationSort(current => current === 'asc' ? 'desc' : 'asc'); setPage(0) }}>
+                  현재 위치<LocationSortIcon aria-hidden="true" className="size-3 shrink-0" />
+                </button>
+              </th>
               <th scope="col" className="w-24 px-2 py-2 text-right font-medium">잔여 박스 수</th>
               <th scope="col" className="w-24 px-2 py-2 text-right font-medium">박스당 수량</th>
               <th scope="col" className="w-28 px-2 py-2 text-right font-medium">개봉 낱개 수량</th>
