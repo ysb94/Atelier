@@ -13,6 +13,7 @@ const migrations = [
   '20261109052445_visual_work_category_comments',
   '20261109062457_visual_work_final_approval',
   '20261118114233_visual_supervisor_request_form_edit',
+  '20261119034524_visual_supervisor_manager_settings',
 ]
 let setup = original.slice(0, original.indexOf(' const managerPage='))
 setup = setup.replace("from './work-request-test-db.mjs'", "from '../../scripts/work-request-test-db.mjs'")
@@ -37,12 +38,14 @@ const checks = String.raw`
  }
  const initial = await command(ids.manager,'get_work_request_settings',{p_owner:'design'})
  const originalSupervisors = initial.supervisorIds
- await command(ids.manager,'save_visual_work_request_settings',{p_revision:initial.revision,p_categories:initial.categories,p_supervisors:[ids.manager,ids.design]})
+ await command(ids.manager,'save_visual_work_request_settings',{p_revision:initial.revision,p_categories:initial.categories,p_supervisors:[ids.design]})
  await page.goto(origin+'/design/work-request-management?actor=design')
  await page.getByRole('button',{name:'관리자 설정',exact:true}).click()
- assert.equal(await page.getByLabel('총괄 관리자 추가',{exact:true}).isEnabled(),false)
- assert.equal(await page.getByLabel('이미지 작업 중간 담당자',{exact:true}).isEnabled(),false)
- assert.equal(await page.getByLabel('기본 중간 관리자',{exact:true}).isEnabled(),false)
+ assert.equal(await page.getByLabel('총괄 관리자 추가',{exact:true}).isEnabled(),true)
+ assert.equal(await page.getByLabel('이미지 작업 중간 담당자',{exact:true}).isEnabled(),true)
+ assert.equal(await page.getByLabel('기본 중간 관리자',{exact:true}).isEnabled(),true)
+ await page.getByLabel('총괄 관리자 추가',{exact:true}).selectOption(ids.manager)
+ await page.getByLabel('이미지 작업 중간 담당자',{exact:true}).selectOption(ids.design)
  await page.getByRole('button',{name:'추가',exact:true}).click()
  await page.getByLabel('분류 이름',{exact:true}).fill('총괄 편집 확인')
  await page.getByRole('button',{name:'항목 추가',exact:true}).click()
@@ -53,11 +56,18 @@ const checks = String.raw`
  await page.getByRole('button',{name:/^총괄 편집 확인/}).click()
  assert.equal(await page.getByLabel('항목 이름',{exact:true}).inputValue(),'총괄이 만든 질문')
  const verified = await command(ids.manager,'get_work_request_settings',{p_owner:'design'})
- assert.deepEqual(verified.supervisorIds,[ids.manager,ids.design])
- console.log('PASS: 총괄 관리자 분류·요청 양식 편집과 저장·재조회, 관리자 지정 잠금')
+ assert.deepEqual(verified.supervisorIds,[ids.design,ids.manager])
+ assert.equal(verified.categories.find(category=>category.id==='image').assigneeId,ids.design)
+ assert.equal(verified.canEditManagers,true)
+ const removedRevision=await command(ids.manager,'save_visual_work_request_settings',{p_revision:verified.revision,p_categories:verified.categories,p_supervisors:[ids.manager]})
+ await page.reload()
+ await page.getByRole('button',{name:'관리자 설정',exact:true}).click()
+ assert.equal(await page.getByLabel('총괄 관리자 추가',{exact:true}).isEnabled(),false)
+ assert.equal(await page.getByLabel('기본 중간 관리자',{exact:true}).isEnabled(),false)
+ console.log('PASS: 총괄 관리자 분류·양식·총괄/중간 지정 저장·재조회, 총괄 해제 후 편집 차단')
 ${formOnly ? '' : ` await db.exec('reset role')
  await db.query("update public.work_request_settings set supervisor_ids=$1 where owner='design'",[originalSupervisors])
- await command(ids.manager,'save_work_request_settings',{p_owner:'design',p_revision:verified.revision,p_categories:initial.categories})`}
+ await command(ids.manager,'save_work_request_settings',{p_owner:'design',p_revision:removedRevision,p_categories:initial.categories})`}
 ${formOnly ? ` assert.deepEqual(errors,[])
 ` : String.raw`
  const attachmentImage=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/N1sAAAAASUVORK5CYII=','base64')
@@ -272,7 +282,7 @@ ${formOnly ? ` assert.deepEqual(errors,[])
  await managerPage.unroute('**/__work-test/rpc',intercept)
  console.log('PASS: 배정된 직원 조회·관리자 수동 배정')
  await page.goto(origin+'/design/work-request-management?actor=planner')
- await page.getByText('작업 분류와 요청 양식은 Visual 업무 관리 담당자와 총괄 관리자가 수정할 수 있습니다.',{exact:true}).waitFor()
+ await page.getByText('작업 분류·요청 양식·관리자 지정은 Visual 업무 관리 담당자와 총괄 관리자가 수정할 수 있습니다.',{exact:true}).waitFor()
  assert.equal(await page.getByRole('button',{name:'설정 저장',exact:true}).isEnabled(),false)
  await db.exec('reset role')
  const extraSupervisors=[{id:crypto.randomUUID(),name:'추가 총괄 A'},{id:crypto.randomUUID(),name:'추가 총괄 B'}]
@@ -360,7 +370,7 @@ await writeFile(clientFixture,fixture)
 const generated=path.resolve('node_modules/.tmp/work-request-settings-browser.mjs')
 const roleChecks = String.raw`
  await page.goto(origin+'/design/work-request-management?actor=design')
- await page.getByText('작업 분류와 요청 양식은 Visual 업무 관리 담당자와 총괄 관리자가 수정할 수 있습니다.',{exact:true}).waitFor()
+ await page.getByText('작업 분류·요청 양식·관리자 지정은 Visual 업무 관리 담당자와 총괄 관리자가 수정할 수 있습니다.',{exact:true}).waitFor()
  assert.equal(await page.getByRole('button',{name:'추가',exact:true}).isEnabled(),false,'팀장·일반 관리자라도 지정 없으면 변경 불가')
  await page.goto(origin+'/design/work-request-management?actor=ceo')
  await page.getByRole('button',{name:'추가',exact:true}).waitFor()
