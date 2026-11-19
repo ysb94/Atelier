@@ -6,6 +6,8 @@ const db = await PGlite.create()
 const id = (n) => '00000000-0000-4000-8000-' + String(n).padStart(12, '0')
 const brand = id(1), otherBrand = id(2), company = id(3), otherCompany = id(4), warehouse = id(11), otherWarehouse = id(12), active = id(21), archived = id(22), otherSet = id(23)
 const migration = await fs.readFile(new URL('../supabase/migrations/20261030092330_warehouse_slot_reclassify.sql', import.meta.url), 'utf8')
+const migrationsUrl = new URL('../supabase/migrations/', import.meta.url)
+const [optimizedMigration] = (await fs.readdir(migrationsUrl)).filter(name => name.endsWith('_optimize_warehouse_slot_save.sql'))
 try {
   await db.exec(`
     create schema auth; create schema app; create role anon; create role authenticated;
@@ -52,6 +54,7 @@ try {
     select set_config('request.jwt.claim.sub','${id(401)}',false),set_config('test.allowed_brand','${brand}',false);
   `)
   await db.exec(migration)
+  await db.exec(await fs.readFile(new URL(optimizedMigration, migrationsUrl), 'utf8'))
   const { rows: security } = await db.query("select prosecdef,has_function_privilege('anon',oid,'execute') as anon,has_function_privilege('authenticated',oid,'execute') as signed_in from pg_proc where oid='public.save_warehouse_registered_slots(uuid,uuid,text,text[])'::regprocedure")
   assert.deepEqual(security[0], { prosecdef: false, anon: false, signed_in: true })
   async function snapshot() {
@@ -99,5 +102,43 @@ try {
   const beforeFailure = await snapshot()
   await assert.rejects(save(['rollback-slot']), /forced rollback test/)
   assert.deepEqual(await snapshot(), beforeFailure, 'a failure during stock updates rolls back registration and newly inserted locations atomically')
+  await db.exec(`reset role;
+    drop trigger fail_slot_reclassify on warehouse_stock_positions;
+    create role service_role;
+    alter table brands add column slug text;
+    update brands set slug='masmarulez' where id='${brand}';
+    alter table warehouse_stock_positions add column quantity_status text default 'known';
+    insert into warehouse_locations values
+      ('${id(151)}','${company}','${warehouse}','3-6-6','box_storage'),
+      ('${id(152)}','${company}','${warehouse}','3-6-6_B1','picking');
+    insert into warehouse_stock_positions values
+      ('${id(251)}','${brand}','${active}','${warehouse}','${id(151)}','${id(311)}',60,1,0,25,'same-code-first','known'),
+      ('${id(252)}','${brand}','${active}','${warehouse}','${id(151)}','${id(311)}',60,15,0,26,'same-code-second','known'),
+      ('${id(253)}','${brand}','${active}','${warehouse}','${id(152)}','${id(312)}',50,1,0,27,'other-suffix','known');
+    insert into warehouse_registered_slots
+    select '${warehouse}', 'existing-slot-' || i,'picking' from generate_series(1,1730) i;`)
+  await db.exec(await fs.readFile(new URL('20261119020858_warehouse_slots_follow_atelier_stock.sql', migrationsUrl), 'utf8'))
+  await db.exec(`create function reject_unchanged_slot_write() returns trigger language plpgsql as $$
+    begin
+      if new.code like 'existing-slot-%' and exists (select 1 from public.warehouse_registered_slots r
+        where (r.warehouse_id,r.code,r.zone)=(new.warehouse_id,new.code,new.zone)) then
+        raise exception 'An unchanged slot was reinserted';
+      end if;
+      return new;
+    end $$;
+    create trigger reject_unchanged_slot_write before insert on warehouse_registered_slots
+    for each row execute function reject_unchanged_slot_write();
+    set role authenticated;`)
+  const picking = (await db.query("select code from warehouse_registered_slots where warehouse_id=$1 and zone='picking'", [warehouse])).rows.map(row => row.code)
+  assert.equal((await save([...picking, '3-6-6'])).reclassified_count, 2)
+  const reclassified = (await db.query("select l.code,l.zone,p.remaining_boxes from warehouse_stock_positions p join warehouse_locations l on l.id=p.location_id where p.id=any($1::uuid[]) order by p.id", [[id(251), id(252), id(253)]])).rows
+  assert.deepEqual(reclassified, [
+    { code: '3-6-6', zone: 'picking', remaining_boxes: 1 },
+    { code: '3-6-6', zone: 'picking', remaining_boxes: 15 },
+    { code: '3-6-6_B1', zone: 'picking', remaining_boxes: 1 },
+  ])
+  assert.equal((await save([...picking, '3-6-6'])).reclassified_count, 0)
+  assert.equal((await save(picking)).reclassified_count, 2, 'removal updates both rows and restores the catalog through the stock trigger')
+  assert.equal((await db.query("select zone from warehouse_registered_slots where warehouse_id=$1 and code='3-6-6'", [warehouse])).rows[0].zone, 'box_storage')
   console.log('warehouse slot DB verify: exact formats, immediate stock classification, immutable quantities/IDs, archived and other-brand isolation, idempotency, permission checks and atomic rollback: OK')
 } finally { await db.close() }

@@ -1229,6 +1229,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   - 기존 직접 테이블 저장 클라이언트와 호환되는 추가 RPC다. 마이그레이션:
     `20261030092330_warehouse_slot_reclassify.sql`. 적용 자체는 기존 데이터를 바꾸지 않으며
     사용자가 새 화면의 ‘자리 저장’을 눌렀을 때 재분류한다.
+  - 2026-11-19 자리 저장이 기존 출고 자리를 모두 다시 입력하면서 행마다 권한 검사에 시간을 써 인증 역할의 8초 제한으로 롤백되던 문제를 수정했다. 적용 번호는 `20261119031407_optimize_warehouse_slot_save.sql`이다. 등록이 달라진 자리만 쓰고, 현재 구역이 틀린 재고만 잠가 재분류한다. 기존 권한과 트랜잭션 보호를 적용한다. 공유 DB 인증 역할로 `3-6-6`을 추가해 0.21초에 M0058 재고 2행이 출고창고로 바뀌는지 확인했다. 재고 행 ID·수량·입고일과 다른 자리 및 해당 세트 재고는 저장 전후 대조했다.
     검증: `npm run verify:warehouse-slots-db`, `verify:warehouse-qr-browser`,
     `verify:warehouse-sheet-sync`. 실제 창고 행 대신 로컬 PostgreSQL/가상 화면으로 저장·
     수량 보존·두 형식의 exact 분류·실패 롤백·브랜드/보관 스냅샷 경계를 확인한다.
