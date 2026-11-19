@@ -207,6 +207,74 @@ try {
   assert.equal((await rpc('get_work_request_settings', ['design'])).canEditForm, false)
   await denied(editForm(revision, withoutInactiveAssignee))
   console.log('PASS: Visual supervisors edit forms with separate administrator permissions, stale revisions blocked, access removed after transfer or removal, and existing settings preserved')
+
+  {
+  await db.exec('reset role')
+  const beforeManagerExtension = await snapshot()
+  const storedSettings = (await db.query('select jsonb_agg(to_jsonb(s)) value from public.work_request_settings s')).rows[0].value
+  const storedWork = (await db.query('select jsonb_agg(to_jsonb(r) order by r.id) value from public.work_requests r')).rows[0].value
+  const functionAccess = () => db.query("select proname,proacl::text,prosecdef,proconfig,proowner from pg_proc where pronamespace='app'::regnamespace and proname in ('get_work_request_settings','save_work_request_settings','save_visual_work_request_settings') order by proname").then(result => result.rows)
+  const originalFunctionAccess = await functionAccess()
+  await migration('20261119034524_visual_supervisor_manager_settings')
+  assert.deepEqual(await functionAccess(), originalFunctionAccess)
+  assert.deepEqual(await snapshot(), beforeManagerExtension, 'Settings extension preserves profiles, permission grants and RLS')
+  assert.deepEqual((await db.query('select jsonb_agg(to_jsonb(s)) value from public.work_request_settings s')).rows[0].value, storedSettings)
+  await db.query("update public.profiles set status='active' where id=$1", [ordinary])
+  await actor(ids.manager)
+  let current = await rpc('get_work_request_settings', ['design'])
+  assert.equal(current.canManage, true)
+  assert.equal(current.canEditManagers, true)
+  revision = await rpc('save_visual_work_request_settings', [current.revision, current.categories, [ids.design]])
+  await actor(ids.design)
+  current = await rpc('get_work_request_settings', ['design'])
+  assert.equal(current.canManage, false, 'A supervisor does not gain general work management authority')
+  assert.equal(current.canEditManagers, true)
+  const managerCategories = current.categories.map(category => category.id === 'banner' ? { ...category, assigneeId: ordinary } : category)
+  const activeSupervisors = [ids.design, extraSupervisors[1]]
+  const previousRevision = revision
+  revision = await rpc('save_visual_work_request_settings', [revision, managerCategories, activeSupervisors])
+  current = await rpc('get_work_request_settings', ['design'])
+  assert.deepEqual(current.supervisorIds, activeSupervisors)
+  assert.equal(current.categories.find(category => category.id === 'banner').assigneeId, ordinary)
+  await denied(rpc('save_visual_work_request_settings', [previousRevision, managerCategories, [ids.design]]), '40001')
+  for (const invalid of [null, [], [ids.design, ids.design], [ids.planner], [ids.outsider], [extraSupervisors[0]]]) {
+    await denied(rpc('save_visual_work_request_settings', [revision, managerCategories, invalid]), '22023')
+  }
+  for (const assignee of [ids.planner, ids.outsider, extraSupervisors[0]]) {
+    await assert.rejects(editForm(revision, managerCategories.map(category => category.id === 'banner' ? { ...category, assigneeId: assignee } : category)))
+  }
+  assert.deepEqual(await rpc('get_work_request_settings', ['design']), current, 'Rejected or stale manager changes are atomic')
+  for (const id of [ordinary, ids.planner, ids.outsider]) {
+    await actor(id)
+    assert.equal((await rpc('get_work_request_settings', ['design'])).canEditManagers, false)
+    await denied(rpc('save_visual_work_request_settings', [revision, managerCategories, [id]]))
+  }
+  await db.exec('reset role')
+  await db.query("update public.profiles set status='pending' where id=$1", [ordinary])
+  await actor(ids.design)
+  await denied(rpc('save_visual_work_request_settings', [revision, managerCategories, [ordinary]]), '22023')
+  revision = await editForm(revision, managerCategories)
+  assert.equal((await rpc('get_work_request_settings', ['design'])).categories.find(category => category.id === 'banner').assigneeId, ordinary, 'Unchanged legacy assignees are preserved during form-only edits')
+  revision = await rpc('save_visual_work_request_settings', [revision, managerCategories, [extraSupervisors[1]]])
+  assert.equal((await rpc('get_work_request_settings', ['design'])).canEditManagers, false, 'A supervisor can remove themselves while another supervisor remains')
+  await denied(rpc('save_visual_work_request_settings', [revision, managerCategories, [ids.design]]))
+  await actor(extraSupervisors[1])
+  assert.equal((await rpc('get_work_request_settings', ['design'])).canEditManagers, true)
+  await db.exec('reset role')
+  await db.query('update public.profiles set department_id=$1 where id=$2', [departments.planning, extraSupervisors[1]])
+  await actor(extraSupervisors[1])
+  assert.equal((await rpc('get_work_request_settings', ['design'])).canEditManagers, false)
+  await denied(rpc('save_visual_work_request_settings', [revision, managerCategories, [extraSupervisors[1]]]))
+  await actor(ids.manager)
+  const clearedCategories = managerCategories.map(category => ({ ...category, assigneeId: '' }))
+  revision = await rpc('save_visual_work_request_settings', [revision, clearedCategories, [ids.manager]])
+  assert.equal((await rpc('get_work_request_settings', ['design'])).canManage, true, 'The existing management authority remains available')
+  await actor('', 'anon')
+  await denied(rpc('save_visual_work_request_settings', [revision, clearedCategories, [ids.manager]]))
+  await db.exec('reset role')
+  assert.deepEqual((await db.query('select jsonb_agg(to_jsonb(r) order by r.id) value from public.work_requests r')).rows[0].value, storedWork, 'Settings edits preserve all existing work and feedback')
+  console.log('PASS: supervisor manager assignments, scoped capability, atomic revisions, active/company/department checks, self-removal and revoked authority, anonymous denial and existing work preserved')
+  }
 } finally {
   await db.close()
 }
