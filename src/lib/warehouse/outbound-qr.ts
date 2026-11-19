@@ -13,10 +13,16 @@ export type OutboundQrInput = {
 }
 export type OutboundQrResult = { racks: string[]; error: string | null }
 
-function positiveInteger(value: string) {
+function rackInteger(value: string) {
   if (!/^\d+$/.test(value.trim())) return null
   const number = Number(value)
-  return Number.isSafeInteger(number) && number > 0 ? number : null
+  return Number.isSafeInteger(number) && number >= 0 ? number : null
+}
+
+/** Components are identifiers, including legacy symbols; '-' and '_' separate parts. */
+function rackPart(value: string) {
+  const part = value.trim()
+  return part && !/[\s_\-\p{Cc}]/u.test(part) ? part : null
 }
 
 export function buildOutboundRackCodes(input: OutboundQrInput): OutboundQrResult {
@@ -25,21 +31,21 @@ export function buildOutboundRackCodes(input: OutboundQrInput): OutboundQrResult
     if (!lines.length) return { racks: [], error: '렉 번호를 한 줄에 하나씩 입력해 주세요.' }
     const racks = new Set<string>()
     for (const [index, line] of lines.entries()) {
-      const parts = line.split('-')
-      const numbers = parts.map(positiveInteger)
-      if (parts.length !== 3 || numbers.some((value) => value === null)) {
-        return { racks: [], error: `${index + 1}번째 렉 번호를 확인해 주세요. 3-1-1처럼 창고-줄-렉 번호만 입력합니다.` }
+      const parts = line.split('-').map((part) => part.trim())
+      if (parts.length !== 3 || parts.some((part) => !rackPart(part))) {
+        return { racks: [], error: `${index + 1}번째 렉 번호를 확인해 주세요. #-7-1처럼 창고-줄-렉을 입력하고, _A1 같은 자리 표시는 제외해 주세요.` }
       }
-      racks.add(numbers.join('-'))
+      racks.add(parts.join('-'))
       if (racks.size > MAX_OUTBOUND_QR_RACKS) return { racks: [], error: `한 번에 렉 ${MAX_OUTBOUND_QR_RACKS}개까지 만들 수 있습니다. 범위를 나눠 주세요.` }
     }
     return { racks: [...racks], error: null }
   }
-  const warehouse = positiveInteger(input.warehouse)
-  const row = positiveInteger(input.row)
-  const start = positiveInteger(input.startRack)
-  const end = positiveInteger(input.endRack)
-  if (warehouse === null || row === null || start === null || end === null) return { racks: [], error: '창고·줄·렉 번호는 1 이상의 정수로 입력해 주세요.' }
+  const warehouse = rackPart(input.warehouse)
+  const row = rackPart(input.row)
+  const start = rackInteger(input.startRack)
+  const end = rackInteger(input.endRack)
+  if (warehouse === null || row === null) return { racks: [], error: '창고·줄을 입력해 주세요. 문자·특수기호를 사용할 수 있으며 공백과 구분자(-, _)는 제외해 주세요.' }
+  if (start === null || end === null) return { racks: [], error: '연속 생성할 시작·끝 렉 번호는 0 이상의 정수로 입력해 주세요. 문자·특수기호가 있는 렉은 직접 입력을 이용해 주세요.' }
   if (end < start) return { racks: [], error: '끝 렉 번호는 시작 렉 번호 이상이어야 합니다.' }
   if (end - start + 1 > MAX_OUTBOUND_QR_RACKS) return { racks: [], error: `한 번에 렉 ${MAX_OUTBOUND_QR_RACKS}개까지 만들 수 있습니다. 범위를 나눠 주세요.` }
   return { racks: Array.from({ length: end - start + 1 }, (_, index) => `${warehouse}-${row}-${start + index}`), error: null }

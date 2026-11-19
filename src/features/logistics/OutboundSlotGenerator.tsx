@@ -23,11 +23,11 @@ export function OutboundSlotGenerator({ onAdd, disabled }: { onAdd: (codes: read
   const selectedRack = result.racks.includes(focusedRack) ? focusedRack : result.racks[0] ?? ''
 
   return <div className="space-y-4 rounded-lg border border-border bg-muted/10 p-4">
-    <div><h3 className="text-sm font-semibold">렉별 고정 자리 생성</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">QR 생성과 같은 번호를 사용합니다.<br />3-1-1 = 3번 창고 · 1번째 줄 · 1번째 렉</p></div>
+    <div><h3 className="text-sm font-semibold">렉별 고정 자리 생성</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">QR 생성과 같은 번호를 사용합니다.<br />창고·줄은 #, % 같은 기호도 입력할 수 있습니다. 연속 렉 번호는 0 이상의 정수입니다.</p></div>
     <FilterTabs ariaLabel="출고창고 렉 입력 방법" value={mode} onChange={setMode} tabs={[{ value: 'range', label: '렉 범위' }, { value: 'list', label: '렉 직접 입력' }]} />
     {mode === 'range' ? <div className="grid grid-cols-2 gap-3">
-      <label className="space-y-1"><span className="text-xs text-muted-foreground">창고 번호</span><Input aria-label="창고 번호" inputMode="numeric" value={warehouse} onChange={(event) => setWarehouse(event.target.value)} /></label>
-      <label className="space-y-1"><span className="text-xs text-muted-foreground">줄 번호</span><Input aria-label="줄 번호" inputMode="numeric" value={row} onChange={(event) => setRow(event.target.value)} /></label>
+      <label className="space-y-1"><span className="text-xs text-muted-foreground">창고 번호</span><Input aria-label="창고 번호" inputMode="text" value={warehouse} onChange={(event) => setWarehouse(event.target.value)} /></label>
+      <label className="space-y-1"><span className="text-xs text-muted-foreground">줄 번호</span><Input aria-label="줄 번호" inputMode="text" value={row} onChange={(event) => setRow(event.target.value)} /></label>
       <label className="space-y-1"><span className="text-xs text-muted-foreground">시작 렉 번호</span><Input aria-label="시작 렉 번호" inputMode="numeric" value={startRack} onChange={(event) => setStartRack(event.target.value)} /></label>
       <label className="space-y-1"><span className="text-xs text-muted-foreground">끝 렉 번호</span><Input aria-label="끝 렉 번호" inputMode="numeric" value={endRack} onChange={(event) => setEndRack(event.target.value)} /></label>
     </div> : <label className="block space-y-1"><span className="text-xs text-muted-foreground">렉 번호 · 한 줄에 하나</span><Textarea aria-label="렉 번호 목록" rows={6} value={list} onChange={(event) => setList(event.target.value)} placeholder={'3-1-1\n3-1-2\n3-2-1'} /><span className="text-xs text-muted-foreground">렉 번호만 입력하면 A1~D4가 붙습니다. 같은 렉은 한 번만 추가합니다.</span></label>}
