@@ -3,7 +3,7 @@
  * 실행: npm run verify:warehouse-stock
  */
 import { normalizeStyleNo } from '@/lib/import/transform'
-import { popularProductAvailability, popularProductEntries } from './popular-products'
+import { popularProductAvailability, popularProductEntries, popularProductLocations, type PopularProductPosition } from './popular-products'
 import { indexRoomListLocations, indexRoomListStyleNumbers, roomListLocationCodes } from '@/features/logistics/room-list-locations'
 import { roomListBulkPacking } from '@/features/logistics/room-list-paste'
 import type { StyleRef, WarehouseStockPosition } from '@/lib/types'
@@ -758,5 +758,27 @@ const popularProducts = [{ name: '후드 Black M', styleNo: 'M1000' }, { name: '
 const popularAvailability = popularProductAvailability(['m1000', '후드 Black M', 'M1001', '후드', '후드 Black L'], popularProducts)
 assert(JSON.stringify(popularAvailability.map(item => item.available)) === JSON.stringify([true, true, false, false, false]), 'M번호와 전체 상품명만 비교하며 다른 색상·사이즈를 대신 배치로 집계하지 않는다')
 assert(popularProductAvailability(['M1000'], []).every(item => !item.available), '전용 자리 재고가 비어 있으면 미배치다')
+assert(JSON.stringify(popularProductEntries('M1000\t후드 Black M\r\nM1001\t후드 Blue L')) === JSON.stringify(['M1000','M1001']), '엑셀 M번호·상품명 두 열을 붙여넣으면 M번호로 조회한다')
+const popularPositionBase: PopularProductPosition = {
+  styleNo: 'M1000', name: '공용 상품명', locationCode: '3-1-1_A1', quantityStatus: 'known',
+  unitsPerBox: 10, remainingBoxes: 1, openedUnits: 0, receivedOn: '2026-01-01', receivedOnRaw: '20260101',
+  isForcedPriority: false, isFinalLocation: false, usagePriority: 'fifo', sourceRowNumber: 1,
+}
+const popularPositions = [
+  { ...popularPositionBase, locationCode: '(빈 자리)', usagePriority: 'first' as const },
+  { ...popularPositionBase, locationCode: '3-1-1_A2', remainingBoxes: 0 },
+  { ...popularPositionBase, locationCode: '3-1-1_A3', receivedOn: '2026-03-01' },
+  { ...popularPositionBase, locationCode: '3-1-1_A4', usagePriority: 'first' as const, isFinalLocation: true },
+  { ...popularPositionBase, locationCode: '3-1-1_A5', usagePriority: 'second' as const },
+  { ...popularPositionBase, styleNo: 'M1001', locationCode: '3-1-1_B1' },
+]
+const popularPositionSnapshot = JSON.stringify(popularPositions)
+const locatedPopular = popularProductLocations(['m1000','공용 상품명','없는 상품'], popularPositions)
+assert(locatedPopular[0].location === '3-1-1_A5', '재고가 있는 자리 중 기존 사용 우선순위의 첫 번째 위치를 사용한다')
+assert(locatedPopular.filter(row => row.entry === '공용 상품명').length === 2, '같은 상품명의 여러 SKU를 각각 표시한다')
+assert(locatedPopular.at(-1)?.name === '없는 상품' && !locatedPopular.at(-1)?.matched, '조회되지 않은 원본 입력도 목록에 남긴다')
+assert(JSON.stringify(popularPositions) === popularPositionSnapshot, '위치를 정렬해도 원본 재고를 변경하지 않는다')
+assert(popularProductLocations(['M1000'], [{ ...popularPositionBase, remainingBoxes: 0 }])[0].location === '', '수량 0인 자리를 현재 위치로 표시하지 않는다')
+assert(popularProductLocations(['M1000'], [{ ...popularPositionBase, quantityStatus: 'unknown' }])[0].quantityUnknown, '수량이 미확인이면 위치와 함께 상태를 알린다')
 
 console.log('warehouse-stock verify: ok')
