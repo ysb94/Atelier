@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createServer } from 'vite'
-import react from '@vitejs/plugin-react'
+import { build as buildStyles } from 'vite'
+import { build as buildScript } from 'esbuild'
 import tailwindcss from '@tailwindcss/vite'
 import { chromium } from 'playwright-core'
 
@@ -13,6 +13,8 @@ const mocks={
  '@/lib/supabase/auth':`const profile={id:'staff',status:'active'};export function useAuth(){return {profile,session:{user:{id:'staff'}}}}`,
  '@/lib/company/capabilities':`export function canEditOrgAssignment(){return location.hash!=='#denied'}`,
  '@/lib/company/page-preview-context':`export function usePagePreview(){return null}`,
+ '@/lib/company/workforce-management-context':`export function useHeadOfficeSelfService(){return true}`,
+ '@/features/operations-support/ops-directory':`export function useOpsDirectory(){return {members:window.__state.payload.employees.map(p=>({id:p.id})),departments:[],loading:false,error:null}}`,
  '@/lib/supabase/impersonation':`export function readImpersonationState(){return location.hash==='#impersonated'?{target:'staff'}:null}`,
  '@/features/home/attendance-entry-context':`export function useAttendanceEntry(){return {phase:'ready',checkoutOpen:false}}`,
  '@/lib/supabase/client':`export function getSupabase(){return {channel(){const c={on(event,filter,fn){window.__event=fn;return c},subscribe(fn){window.__reconnect=fn;fn('SUBSCRIBED');return c}};return c},removeChannel:async()=>{}}}`,
@@ -20,12 +22,17 @@ const mocks={
 }
 const aliases=Object.entries(mocks).map(([find,source],i)=>{const replacement=path.join(folder,`mock-${i}.ts`);fs.writeFileSync(replacement,source);return{find,replacement}})
 fs.writeFileSync(path.join(folder,'entry.tsx'),`import React from 'react';import{createRoot}from'react-dom/client';import{QueryClient,QueryClientProvider}from'@tanstack/react-query';import{LeaveUsageNoticePanel}from'@/features/operations-support/LeaveUsageNoticePanel';import{LeaveUsageNoticeReceiver}from'@/features/operations-support/LeaveUsageNoticeReceiver';import{useLeaveUsageNotices}from'@/features/operations-support/use-leave-usage-notices';import'@/index.css';const client=new QueryClient({defaultOptions:{queries:{retry:false,refetchOnWindowFocus:false}}});function Receiver(){const n=useLeaveUsageNotices();return <><p>알림 수 {n.records.length}</p><LeaveUsageNoticeReceiver notices={n}/></>};createRoot(document.getElementById('root')).render(<QueryClientProvider client={client}>{['#receiver','#impersonated'].includes(location.hash)?<Receiver/>:<LeaveUsageNoticePanel/>}</QueryClientProvider>);`)
-const server=await createServer({configFile:false,envDir:false,logLevel:'error',plugins:[{name:'notice-fixture',enforce:'pre',resolveId(source,importer){if(!importer||!source.startsWith('.'))return;const target=path.resolve(path.dirname(importer),source).replace(/\.tsx?$/,'');return aliases.find(a=>path.join(root,'src',a.find.slice(2))===target)?.replacement},configureServer(vite){vite.middlewares.use((req,res,next)=>{if(!req.headers.accept?.includes('text/html'))return next();vite.transformIndexHtml(req.url,'<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/.tmp/extra-leave-notices-browser/entry.tsx"></script></body></html>').then(html=>{res.setHeader('Content-Type','text/html');res.end(html)}).catch(next)})}},react(),tailwindcss()],resolve:{alias:[...aliases,{find:'@',replacement:path.join(root,'src')}]},server:{host:'127.0.0.1',port:5198,strictPort:true,hmr:false}})
+// Serve an isolated static bundle through Playwright routes. Do not share the
+// running app's Vite/React dependency cache or contact a real backend.
+const bundle=await buildScript({entryPoints:[path.join(folder,'entry.tsx')],bundle:true,write:false,format:'iife',define:{'import.meta.env':'{}'},platform:'browser',jsx:'automatic',loader:{'.css':'empty'},plugins:[{name:'notice-fixtures',setup(build){build.onResolve({filter:/.*/},args=>{const direct=aliases.find(a=>a.find===args.path);if(direct)return{path:direct.replacement};if(args.path.startsWith('.')){const target=path.resolve(args.resolveDir,args.path).replace(/\.tsx?$/,'');const relative=aliases.find(a=>path.join(root,'src',a.find.slice(2))===target);if(relative)return{path:relative.replacement}}if(args.path.startsWith('@/')){const base=path.join(root,'src',args.path.slice(2));const file=['.ts','.tsx','/index.ts','/index.tsx',''].map(ext=>base+ext).find(file=>fs.existsSync(file)&&fs.statSync(file).isFile());if(file)return{path:file}}})}}]})
+const styles=await buildStyles({configFile:false,envDir:false,logLevel:'error',plugins:[tailwindcss()],build:{write:false,rollupOptions:{input:path.join(root,'src/index.css')}}})
+const css=styles.output.filter(item=>item.type==='asset'&&item.fileName.endsWith('.css')).map(item=>item.source).join('\n')
+const html='<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"></head><body><div id="root"></div><script src="/entry.js"></script></body></html>'
 let browser
 try{
- await server.listen();browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});const page=await browser.newPage({viewport:{width:1200,height:900}}),errors=[]
- page.on('pageerror',e=>errors.push(e.message));await page.route('**/*',route=>route.request().url().startsWith('http://127.0.0.1:5198/')?route.continue():route.abort())
- await page.goto('http://127.0.0.1:5198/');await page.getByText('가 직원',{exact:true}).waitFor()
+ browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});const page=await browser.newPage({viewport:{width:1200,height:900}}),errors=[]
+ page.setDefaultTimeout(10_000);page.on('pageerror',e=>{errors.push(e.message);console.error('[notice-fixture]',e.message)});await page.route('**/*',route=>{const url=new URL(route.request().url());if(url.origin!=='http://127.0.0.1:5198')return route.abort();return route.fulfill({status:200,contentType:url.pathname==='/entry.js'?'application/javascript':url.pathname==='/styles.css'?'text/css':'text/html',body:url.pathname==='/entry.js'?bundle.outputFiles[0].text:url.pathname==='/styles.css'?css:html})})
+ await page.goto('http://127.0.0.1:5198/');await page.getByText('가 직원',{exact:true}).first().waitFor()
  const table=page.getByRole('table',{name:'연차별 알림 현황'});await table.waitFor();const birthday=table.getByRole('row').filter({hasText:'가 직원'}).filter({has:page.getByText('생일 반차',{exact:true}).first()})
  assert.equal(await birthday.getByRole('cell',{name:'0.25일',exact:true}).count(),2)
  await birthday.getByText('알림 일정·확인 이력 보기').click();await birthday.getByText('1주일 전 · 2026-11-05',{exact:true}).waitFor();assert.equal(await birthday.getByText('3개월 전',{exact:false}).count(),0)
@@ -41,4 +48,4 @@ try{
  await page.evaluate(()=>{const n=structuredClone(window.__state.payload.notices[0]);n.id='reconnect';window.__state.payload.notices.push(n);window.__reconnect('SUBSCRIBED')});await page.getByText('알림 수 3',{exact:true}).waitFor()
  await page.goto('http://127.0.0.1:5198/#impersonated');await page.reload();await page.getByText('알림 수 1',{exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'연차 안내문 보기'}).count(),0)
  assert.deepEqual(errors,[]);console.log('extra-leave-notices-browser: 직원별 접기/종류/검색/모바일·예약구분·관리열람무기록·본인확인/실패재시도·실시간/재연결·전환세션제한 통과')
-}finally{await browser?.close();await server.close()}
+}finally{await browser?.close()}
