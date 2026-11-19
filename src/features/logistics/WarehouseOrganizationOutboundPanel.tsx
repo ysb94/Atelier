@@ -73,7 +73,7 @@ function OutboundRows({ items, title, month, boxQuantities, pickingBoxes, stockL
     const dailyQuantity = monthDays ? item.quantity / monthDays : null
     const dailyBoxes = !stockLoading && !stockError ? warehouseOutboundDailyBoxes(item.quantity, monthDays, unitsPerBox) : null
     return {
-      item, index, unitsPerBox, dailyQuantity, dailyBoxes, styleNo, pickingLocations,
+      item, index, unitsPerBox, dailyQuantity, dailyBoxes, styleNo, pickingLocations, pickingBoxCount,
       values: {
         row: index + 1, styleNo, productName: item.productName, pickingBoxes: pickingBoxCount, quantity: item.quantity, dailyQuantity, dailyBoxes,
         week1: dailyBoxes == null ? null : dailyBoxes * 7,
@@ -123,7 +123,7 @@ function OutboundRows({ items, title, month, boxQuantities, pickingBoxes, stockL
             </tr>
           </thead>
           <tbody>
-            {sortedRows.slice(start, start + PAGE_SIZE).map(({ item, index, unitsPerBox, dailyBoxes, styleNo, pickingLocations }) => {
+            {sortedRows.slice(start, start + PAGE_SIZE).map(({ item, index, unitsPerBox, dailyBoxes, styleNo, pickingLocations, pickingBoxCount }) => {
               return (
                 <tr key={index} className="border-b border-border last:border-b-0 hover:bg-muted/40">
                   <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{index + 1}</td>
@@ -133,9 +133,9 @@ function OutboundRows({ items, title, month, boxQuantities, pickingBoxes, stockL
                   <td className="break-words px-3 py-1.5">{item.productName}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">
                     {stockError ? '조회 실패' : stockLoading ? '조회 중…' : pickingLocations.length
-                      ? pickingLocations.map(location => <span key={location.locationCode} className="block break-words">
-                        {location.boxes == null ? '수량 확인 필요' : `${numberFormat.format(location.boxes)}박스`} ({location.locationCode || '자리 미확인'})
-                      </span>) : <span className="text-muted-foreground">0박스 (자리 없음)</span>}
+                      ? <span className="break-words">
+                        {pickingBoxCount == null ? '수량 확인 필요' : `${numberFormat.format(pickingBoxCount)}박스`} ({pickingLocations.map(location => location.locationCode).join(', ')})
+                      </span> : <span className="text-muted-foreground">0박스 (자리 없음)</span>}
                   </td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{numberFormat.format(item.quantity)}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{monthDays ? dailyNumberFormat.format(item.quantity / monthDays) : '—'}</td>
@@ -224,7 +224,7 @@ function OutboundMonthForm({ brandId, viewerId, month, onMonthChange }: Outbound
   })
   const setId = inventory.data?.id
   const positions = useQuery({
-    queryKey: ['warehouse-stock-positions', brandId, setId, 'outbound-boxes', viewerId],
+    queryKey: ['warehouse-stock-positions', brandId, setId, 'outbound-boxes-fifo', viewerId],
     queryFn: ({ signal }) => listWarehouseOutboundBoxQuantities(brandId, setId!, signal),
     enabled: tabActive && hasItems && Boolean(setId),
   })
@@ -289,7 +289,7 @@ function OutboundMonthForm({ brandId, viewerId, month, onMonthChange }: Outbound
       )}
       {notice && <p role="status" className="text-sm text-success">{notice}</p>}
       {preview && 'error' in preview && <p role="alert" className="text-sm text-danger">{preview.error}</p>}
-      {hasItems && <p className="text-xs text-muted-foreground">출고창고는 자리별 남은 박스 수를 표시하며, 해당 열의 정렬은 전체 자리의 박스 수 합계 기준입니다. 하루 출고 박스 수는 현재 박스창고·출고창고의 동일 상품 중 가장 큰 박스당 수량을 기준으로 환산합니다.</p>}
+      {hasItems && <p className="text-xs text-muted-foreground">출고창고 박스 수는 선입선출 위치1부터 출고창고가 연속되는 구간만 합산하며, 박스창고가 나오면 멈춥니다. 헤더 정렬도 이 합계 기준입니다. 하루 출고 박스 수는 현재 박스창고·출고창고의 동일 상품 중 가장 큰 박스당 수량을 기준으로 환산합니다.</p>}
       {hasItems && <p className="text-xs text-muted-foreground">M번호는 전체 상품에서 상품명이 일치하는 SKU를 조회합니다. 동일 이름의 SKU가 여러 개이거나 M번호가 비어 있으면 확인 필요로 표시합니다.</p>}
       {styles.isError && <p role="alert" className="text-sm text-danger">M번호를 조회하지 못했습니다. <Button type="button" size="sm" variant="outline" onClick={() => { void styles.refetch() }}>M번호 다시 불러오기</Button></p>}
       {stockError && <p role="alert" className="text-sm text-danger">박스당 수량을 조회하지 못했습니다. <Button type="button" size="sm" variant="outline" onClick={() => { void inventory.refetch(); if (setId) void positions.refetch() }}>재고 다시 불러오기</Button></p>}

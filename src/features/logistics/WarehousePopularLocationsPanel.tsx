@@ -108,7 +108,7 @@ function SharedPopularLocations({ brandId, viewerId, month, onMonthChange }: Pop
   })
   const setId = inventory.data?.id
   const boxes = useQuery({
-    queryKey: ['warehouse-stock-positions', brandId, setId, 'outbound-boxes', viewerId],
+    queryKey: ['warehouse-stock-positions', brandId, setId, 'outbound-boxes-fifo', viewerId],
     queryFn: ({ signal }) => listWarehouseOutboundBoxQuantities(brandId, setId!, signal),
     enabled: lookupEnabled && hasOutbound && Boolean(setId),
   })
