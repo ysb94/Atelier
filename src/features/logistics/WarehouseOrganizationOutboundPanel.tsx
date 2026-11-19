@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
@@ -27,10 +28,20 @@ const PAGE_SIZE = 25
 const numberFormat = new Intl.NumberFormat('ko-KR')
 const dailyNumberFormat = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 })
 const BOX_ESTIMATE_PERIODS = [
-  { days: 7, label: '1주일 예상 박스 수' },
-  { days: 14, label: '2주일 예상 박스 수' },
-  { days: 28, label: '4주 예상 박스 수' },
+  { days: 7, label: '1주일 예상 박스 수', key: 'week1' },
+  { days: 14, label: '2주일 예상 박스 수', key: 'week2' },
+  { days: 28, label: '4주 예상 박스 수', key: 'week4' },
 ] as const
+const OUTBOUND_COLUMNS = [
+  { key: 'row', label: '행', width: 'w-16' },
+  { key: 'productName', label: '상품명', width: '' },
+  { key: 'quantity', label: '출고 수량', width: 'w-28' },
+  { key: 'dailyQuantity', label: '하루 출고량', width: 'w-32' },
+  { key: 'dailyBoxes', label: '하루 출고 박스 수', width: 'w-40' },
+  ...BOX_ESTIMATE_PERIODS.map(period => ({ ...period, width: 'w-40' })),
+] as const
+type OutboundSortKey = typeof OUTBOUND_COLUMNS[number]['key']
+const productNameOrder = new Intl.Collator('ko-KR', { numeric: true })
 const savedAtFormat = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short',
 })
@@ -40,11 +51,40 @@ function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockE
   boxQuantities: ReadonlyMap<string, number>; stockLoading: boolean; stockError: boolean
 }) {
   const [page, setPage] = useState(0)
+  const [sort, setSort] = useState<{ key: OutboundSortKey; direction: 'asc' | 'desc' }>({ key: 'row', direction: 'asc' })
   const pages = Math.ceil(items.length / PAGE_SIZE)
   const currentPage = Math.min(page, pages - 1)
   const start = currentPage * PAGE_SIZE
   const total = items.reduce((sum, item) => sum + item.quantity, 0)
   const monthDays = warehouseOutboundMonthDays(month)
+  const sortedRows = useMemo(() => items.map((item, index) => {
+    const unitsPerBox = boxQuantities.get(warehouseProductNameKey(item.productName))
+    const dailyQuantity = monthDays ? item.quantity / monthDays : null
+    const dailyBoxes = !stockLoading && !stockError && unitsPerBox && dailyQuantity != null ? dailyQuantity / unitsPerBox : null
+    return {
+      item, index, unitsPerBox, dailyQuantity, dailyBoxes,
+      values: {
+        row: index + 1, productName: item.productName, quantity: item.quantity, dailyQuantity, dailyBoxes,
+        week1: dailyBoxes == null ? null : dailyBoxes * 7,
+        week2: dailyBoxes == null ? null : dailyBoxes * 14,
+        week4: dailyBoxes == null ? null : dailyBoxes * 28,
+      },
+    }
+  }).sort((left, right) => {
+    const a = left.values[sort.key]
+    const b = right.values[sort.key]
+    if (a == null) return b == null ? left.index - right.index : 1
+    if (b == null) return -1
+    const compared = typeof a === 'string' && typeof b === 'string'
+      ? productNameOrder.compare(a, b)
+      : Number(a) - Number(b)
+    return compared * (sort.direction === 'asc' ? 1 : -1) || left.index - right.index
+  }), [items, boxQuantities, monthDays, stockLoading, stockError, sort])
+
+  function changeSort(key: OutboundSortKey) {
+    setSort(current => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }))
+    setPage(0)
+  }
 
   return (
     <section className="space-y-2">
@@ -59,21 +99,23 @@ function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockE
         <table aria-label={title} className="w-full min-w-[1120px] table-fixed text-sm">
           <thead className="bg-primary text-primary-foreground">
             <tr>
-              <th scope="col" className="w-16 px-3 py-2 text-right">행</th>
-              <th scope="col" className="px-3 py-2 text-left">상품명</th>
-              <th scope="col" className="w-28 px-3 py-2 text-right">출고 수량</th>
-              <th scope="col" className="w-32 px-3 py-2 text-right">하루 출고량</th>
-              <th scope="col" className="w-40 px-3 py-2 text-right">하루 출고 박스 수</th>
-              {BOX_ESTIMATE_PERIODS.map(period => <th key={period.days} scope="col" className="w-40 px-3 py-2 text-right">{period.label}</th>)}
+              {OUTBOUND_COLUMNS.map(column => {
+                const selected = sort.key === column.key
+                const Icon = selected ? sort.direction === 'asc' ? ArrowUp : ArrowDown : ArrowUpDown
+                const nextDirection = selected && sort.direction === 'asc' ? '내림차순' : '오름차순'
+                return <th key={column.key} scope="col" aria-sort={selected ? sort.direction === 'asc' ? 'ascending' : 'descending' : 'none'} className={`${column.width} p-0`}>
+                  <button type="button" onClick={() => changeSort(column.key)} aria-label={`${column.label} ${nextDirection} 정렬`} className={`flex w-full items-center gap-1 px-3 py-2 text-inherit hover:bg-primary-foreground/10 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 ${column.key === 'productName' ? 'justify-start' : 'justify-end'}`}>
+                    {column.label}<Icon className="size-3 shrink-0" aria-hidden="true" />
+                  </button>
+                </th>
+              })}
             </tr>
           </thead>
           <tbody>
-            {items.slice(start, start + PAGE_SIZE).map((item, index) => {
-              const unitsPerBox = boxQuantities.get(warehouseProductNameKey(item.productName))
-              const dailyBoxes = unitsPerBox && monthDays ? item.quantity / monthDays / unitsPerBox : null
+            {sortedRows.slice(start, start + PAGE_SIZE).map(({ item, index, unitsPerBox, dailyBoxes }) => {
               return (
-                <tr key={start + index} className="border-b border-border last:border-b-0 hover:bg-muted/40">
-                  <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{start + index + 1}</td>
+                <tr key={index} className="border-b border-border last:border-b-0 hover:bg-muted/40">
+                  <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{index + 1}</td>
                   <td className="break-words px-3 py-1.5">{item.productName}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{numberFormat.format(item.quantity)}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{monthDays ? dailyNumberFormat.format(item.quantity / monthDays) : '—'}</td>
