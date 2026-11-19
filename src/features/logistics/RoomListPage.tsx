@@ -9,7 +9,6 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { compareWarehouseLocationCodeNatural } from '@/lib/invoice/product-list-warehouse'
-import { parseWarehouseLocation } from '@/lib/warehouse/stock'
 import { roomListProductName } from './room-list-locations'
 import {
   emptyRoomListRow, mergeRoomListRows, parseRoomListPaste, roomListBulkPacking, sumRoomListQuantities, type RoomListRow,
@@ -92,13 +91,8 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
       const packing = latest?.styleId && styleNo && latest.styleNo.trim() === styleNo
         ? roomListBulkPacking(item.row[1], latest.unitsPerBox)
         : undefined
-      const bulkLocation = packing ? latest?.locationCode.trim() : undefined
-      const location = bulkLocation ?? item.matches?.[0] ?? ''
+      const [location = '', nextLocation] = item.matches ?? []
       const { key, name } = packing ? BULK_ROOM : roomForLocation(location, groupsByPrefix)
-      const bulkCode = bulkLocation && parseWarehouseLocation(bulkLocation).locationCode
-      const nextLocation = bulkCode
-        ? item.matches?.find(code => parseWarehouseLocation(code).locationCode !== bulkCode)
-        : item.matches?.[1]
       const current = grouped.get(key)
       const line = {
         id: item.sourceIndex,
