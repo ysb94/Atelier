@@ -1,9 +1,10 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react'
+import { useId, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight, Folder, Plus } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -12,6 +13,7 @@ import { startWorkflow, useRenderWatch } from '@/lib/diagnostics'
 import { diagnosticError } from '@/lib/diagnostics/workflow-trace'
 import {
   createWarehouseRoomListFolder,
+  deleteWarehouseRoomListFolder,
   listWarehouseRoomListFolders,
   readWarehouseRoomListFolderItemsById,
   readWarehouseRoomListFolderForEdit,
@@ -64,6 +66,9 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [expandedDates, setExpandedDates] = useState<Record<string, boolean>>({})
   const [draft, setDraft] = useState<Draft | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<WarehouseRoomListFolder | null>(null)
+  const deleteTitleId = useId()
+  const deleteDescriptionId = useId()
   const [validationError, setValidationError] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
   const draftRequestId = useRef<string | null>(null)
@@ -150,6 +155,25 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
       setNotice('폴더 수정 내용을 저장했습니다.')
     },
   })
+  const remove = useMutation({
+    mutationFn: async (folder: WarehouseRoomListFolder) => {
+      const trace = startWorkflow('app', 'room_list_folder_delete')
+      await trace.run('delete_folder', context => deleteWarehouseRoomListFolder(folder, context))
+      await trace.run('refresh_queries', () => cache.invalidateQueries({ queryKey: ['warehouse-room-list-folders', userId] }),
+        { writeOutcome: 'committed' })
+      trace.done({ writeOutcome: 'committed' })
+    },
+    onSuccess: (_, folder) => {
+      selectFolders([folder], false)
+      setDeleteTarget(null)
+      setNotice('폴더를 삭제했습니다.')
+    },
+    onError: error => {
+      if (error instanceof WarehouseRoomListFolderChangedError) {
+        void cache.invalidateQueries({ queryKey: ['warehouse-room-list-folders', userId] })
+      }
+    },
+  })
   const open = useMutation({
     mutationFn: async (chosen: WarehouseRoomListFolder[]) => {
       const items = await readWarehouseRoomListItems(chosen, brandIds)
@@ -168,6 +192,7 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
   const chosen = folders.data?.filter(folder => selected.has(folder.id)) ?? []
   const saving = register.isPending || saveEdit.isPending
   const editing = Boolean(draft?.edit)
+  const folderActionsDisabled = Boolean(draft || deleteTarget) || open.isPending || loadEdit.isPending
   const saveError = saveEdit.error instanceof WarehouseRoomListFolderChangedError
     ? '폴더가 변경되었거나 수정 권한이 없습니다. 내용을 확인한 뒤 폴더를 다시 열어 주세요.'
     : saveEdit.isError ? '수정 내용을 저장하지 못했습니다. 다시 시도해 주세요.' : null
@@ -176,6 +201,13 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
       ? '서버에 폴더 수정 설정을 적용하면 사용할 수 있습니다.'
       : '수정할 폴더를 불러오지 못했습니다. 다시 시도해 주세요.'
     : null
+  const deleteConflict = remove.error instanceof WarehouseRoomListFolderChangedError
+  const deleteError = deleteConflict ? '폴더가 변경되었거나 삭제 권한이 없습니다. 목록에서 다시 확인해 주세요.'
+    : remove.isError
+      ? diagnosticError(remove.error).category === 'permission'
+        ? '폴더 삭제 권한이 없거나 서버의 삭제 설정이 아직 적용되지 않았습니다.'
+        : '폴더를 삭제하지 못했습니다. 목록을 확인한 뒤 다시 시도해 주세요.'
+      : null
 
   function selectFolders(targets: WarehouseRoomListFolder[], checked: boolean) {
     setSelected(current => {
@@ -284,7 +316,7 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
             </form>
           </Card>
         ) : (
-          <Button type="button" disabled={!brandIds.length || loadEdit.isPending || open.isPending}
+          <Button type="button" disabled={!brandIds.length || folderActionsDisabled}
             onClick={() => {
               register.reset()
               loadEdit.reset()
@@ -309,7 +341,7 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
       {folders.data?.length ? (
         <>
           <div className="mb-3 flex justify-end">
-            <Button type="button" disabled={!chosen.length || open.isPending || loadEdit.isPending || editing} onClick={() => open.mutate(chosen)}>
+            <Button type="button" disabled={!chosen.length || open.isPending || loadEdit.isPending || editing || Boolean(deleteTarget)} onClick={() => open.mutate(chosen)}>
               {open.isPending ? '여는 중…' : `선택한 폴더 열기${chosen.length ? ` (${chosen.length})` : ''}`}
             </Button>
           </div>
@@ -374,13 +406,22 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
                             </div>
                           </label>
                           {folder.created_by === userId && (
-                            <Button type="button" variant="ghost" size="sm" className="mr-2 mt-2"
-                              aria-label={`${folder.title} 수정`} disabled={Boolean(draft) || open.isPending || loadEdit.isPending}
-                              onClick={() => {
-                                setNotice('')
-                                register.reset()
-                                loadEdit.mutate(folder)
-                              }}>수정</Button>
+                            <div className="mr-2 mt-2 flex shrink-0">
+                              <Button type="button" variant="ghost" size="sm" className="px-2"
+                                aria-label={`${folder.title} 수정`} disabled={folderActionsDisabled}
+                                onClick={() => {
+                                  setNotice('')
+                                  register.reset()
+                                  loadEdit.mutate(folder)
+                                }}>수정</Button>
+                              <Button type="button" variant="ghost" size="sm" className="px-2 text-danger"
+                                aria-label={`${folder.title} 삭제`} disabled={folderActionsDisabled}
+                                onClick={() => {
+                                  setNotice('')
+                                  remove.reset()
+                                  setDeleteTarget(folder)
+                                }}>삭제</Button>
+                            </div>
                           )}
                         </Card>
                       ))}
@@ -392,6 +433,29 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
           </div>
         </>
       ) : folders.isSuccess ? <p className="text-center text-sm text-muted-foreground">등록된 폴더가 없습니다.</p> : null}
+      {deleteTarget && (
+        <WorkspaceTabOverlay>
+          <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+            <div role="alertdialog" aria-modal="true" aria-labelledby={deleteTitleId} aria-describedby={deleteDescriptionId}
+              className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-lg"
+              onKeyDown={event => {
+                if (event.key === 'Escape' && !remove.isPending) setDeleteTarget(null)
+              }}>
+              <h2 id={deleteTitleId} className="text-base font-semibold">폴더 삭제</h2>
+              <p id={deleteDescriptionId} className="mt-2 break-words text-sm text-muted-foreground">
+                <strong className="text-foreground">{deleteTarget.title}</strong> 폴더와 저장된 상품 목록을 삭제할까요?
+              </p>
+              {deleteError && <p role="alert" className="mt-3 text-sm text-danger">{deleteError}</p>}
+              <div className="mt-5 flex justify-end gap-2">
+                <Button type="button" variant="outline" autoFocus disabled={remove.isPending}
+                  onClick={() => setDeleteTarget(null)}>취소</Button>
+                <Button type="button" variant="danger" disabled={remove.isPending || deleteConflict}
+                  onClick={() => remove.mutate(deleteTarget)}>{remove.isPending ? '삭제 중…' : '삭제'}</Button>
+              </div>
+            </div>
+          </div>
+        </WorkspaceTabOverlay>
+      )}
     </>
   )
 }

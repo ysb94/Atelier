@@ -168,6 +168,7 @@ export function WarehouseQrAuditReviewPanel({ brandId, includeUnplaced }: { bran
     setSelected('')
     await Promise.all([
       cache.invalidateQueries({ queryKey: ['warehouse-qr-audit-review', brandId] }),
+      cache.invalidateQueries({ queryKey: ['warehouse-activity', brandId] }),
       cache.invalidateQueries({ queryKey: ['warehouse-stock-positions', brandId] }),
       cache.invalidateQueries({ queryKey: ['warehouse-stock-condition-links', brandId] }),
     ])

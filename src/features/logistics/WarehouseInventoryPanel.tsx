@@ -273,6 +273,9 @@ export function WarehouseInventoryPanel({
         queryKey: ['warehouse-stock-movements', brandId],
       }),
       queryClient.invalidateQueries({
+        queryKey: ['warehouse-activity', brandId],
+      }),
+      queryClient.invalidateQueries({
         queryKey: ['warehouse-sheet-conflicts', brandId],
       }),
     ])
