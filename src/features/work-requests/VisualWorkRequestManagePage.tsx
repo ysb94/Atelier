@@ -37,8 +37,9 @@ function VisualWorkRequestManageForm() {
   const selected = categories.find(item => item.id === selectedId) ?? categories[0]
   const canManage = settings.data?.canManage ?? Boolean(access.access?.manageOwners.includes('design'))
   const canEditForm = settings.data?.canEditForm ?? canManage
+  const canManageAssignments = settings.data?.canEditManagers ?? canManage
   const editable = canEditForm && !saving && !settings.isFetching && !settings.isError
-  const canEditManagers = canManage && editable && !directory.isPending && !directory.isError
+  const canEditManagers = canManageAssignments && editable && !directory.isPending && !directory.isError
   function change(next: VisualCategory[], nextSupervisors = supervisors) {
     setDraft({ revision: draft?.revision ?? settings.data?.revision ?? 0, categories: next, supervisors: nextSupervisors })
     setMessage('')
@@ -55,12 +56,12 @@ function VisualWorkRequestManageForm() {
     trace.step('validate_input')
     const error = validateVisualSettings(draft.categories)
     if (error) { trace.block('invalid_categories'); setMessage(error); return }
-    if (canManage && settings.data.supervisorIds?.length && draft.supervisors.length === 0) {
+    if (canManageAssignments && settings.data.supervisorIds?.length && draft.supervisors.length === 0) {
       trace.block('no_supervisor'); setMessage('총괄 관리자를 한 명 이상 지정해 주세요.'); return
     }
     setSaving(true)
     try {
-      await trace.run('save', context => saveWorkRequestSettings(draft.categories, draft.revision, canManage && finalApprovalAvailable ? draft.supervisors : undefined, context))
+      await trace.run('save', context => saveWorkRequestSettings(draft.categories, draft.revision, canManageAssignments && finalApprovalAvailable ? draft.supervisors : undefined, context))
       await trace.run('refresh_queries', () => client.invalidateQueries({ queryKey: ['work-request-settings', profile?.id] }), { writeOutcome: 'committed' })
       trace.done({ writeOutcome: 'committed' })
       setDraft(null)
@@ -80,9 +81,9 @@ function VisualWorkRequestManageForm() {
       {settings.isPending ? <p role="status">설정을 불러오는 중…</p> : null}
       {settings.error || directory.error ? <p role="alert" className="mb-4 text-sm text-danger">{settings.error?.message ?? directory.error?.message}<Button variant="outline" size="sm" onClick={() => { void settings.refetch(); void directory.refetch() }}>다시 조회</Button></p> : null}
       {settings.data && !settings.data.available ? <p role="status" className="mb-4 text-sm text-warning">서버 설정 연결이 아직 적용되지 않았습니다. 입력 구성을 확인할 수 있으며 서버 적용 후 저장할 수 있습니다.</p> : null}
-      {!canManage && !settings.isPending ? <p className="mb-4 text-sm text-muted-foreground">{canEditForm
-        ? '작업 분류와 요청 양식을 수정할 수 있습니다. 관리자 지정은 Visual 업무 관리 담당자가 변경합니다.'
-        : '작업 분류와 요청 양식은 Visual 업무 관리 담당자와 총괄 관리자가 수정할 수 있습니다.'}</p> : null}
+      {!canManageAssignments && !settings.isPending ? <p className="mb-4 text-sm text-muted-foreground">{canEditForm
+        ? '작업 분류와 요청 양식을 수정할 수 있습니다. 관리자 지정은 Visual 업무 관리 담당자와 총괄 관리자가 변경합니다.'
+        : '작업 분류·요청 양식·관리자 지정은 Visual 업무 관리 담당자와 총괄 관리자가 수정할 수 있습니다.'}</p> : null}
       {message ? <p role="status" className="mb-4 text-sm">{message}</p> : null}
       {draft && settings.data && draft.revision !== settings.data.revision ? <p role="alert" className="mb-4 text-sm text-warning">다른 관리자가 설정을 변경했습니다. 작성 중인 값은 유지됩니다. 다시 불러온 뒤 변경 내용을 확인하세요.</p> : null}
       <Card className="mb-5"><CardContent className="space-y-3 p-5">
