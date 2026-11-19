@@ -14,10 +14,11 @@ export type WarehouseRoomListFolder = {
   created_by: string
   created_by_name: string
   created_at: string
+  revision: number
 }
 
 const TABLE = 'warehouse_room_list_folders'
-const FOLDER_COLUMNS = 'id, brand_id, title, item_count, created_by, created_by_name, created_at'
+const FOLDER_COLUMNS = 'id, brand_id, title, item_count, created_by, created_by_name, created_at, revision'
 
 export function listWarehouseRoomListFolders(brandIds: string[]) {
   return diagnosticOperation('app', 'room_list_folders', trace =>
@@ -75,6 +76,15 @@ export async function updateWarehouseRoomListFolder(input: WarehouseRoomListFold
     .eq('id', id).eq('brand_id', brand_id).eq('revision', revision).select('id').maybeSingle()
   const saved = await diagnosticQuery<{ id: string } | null>('db', 'room_list_folder_update', query, context)
   if (!saved) throw new WarehouseRoomListFolderChangedError()
+}
+
+export async function deleteWarehouseRoomListFolder(folder: WarehouseRoomListFolder, context: DiagnosticContext) {
+  const query = getSupabase().from(TABLE).delete()
+    .eq('id', folder.id).eq('brand_id', folder.brand_id)
+    .eq('created_by', folder.created_by).eq('revision', folder.revision)
+    .select('id').maybeSingle()
+  const deleted = await diagnosticQuery<{ id: string } | null>('db', 'room_list_folder_delete', query, context)
+  if (!deleted) throw new WarehouseRoomListFolderChangedError()
 }
 
 async function readItemsByFolder(folderIds: string[], brandIds: string[], context: DiagnosticContext) {
