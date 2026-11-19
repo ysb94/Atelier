@@ -23,6 +23,7 @@ import {
   warehouseOutboundMonthDays,
   warehouseOutboundDailyBoxes,
   warehouseOutboundBoxQuantities,
+  warehouseOutboundPickingBoxes,
   warehouseOutboundStyleNumbers,
 } from './warehouse-organization-outbound'
 
@@ -38,6 +39,7 @@ const OUTBOUND_COLUMNS = [
   { key: 'row', label: '행', width: 'w-16' },
   { key: 'styleNo', label: 'M번호', width: 'w-28' },
   { key: 'productName', label: '상품명', width: '' },
+  { key: 'pickingBoxes', label: '출고창고 박스 수', width: 'w-52' },
   { key: 'quantity', label: '출고 수량', width: 'w-28' },
   { key: 'dailyQuantity', label: '하루 출고량', width: 'w-32' },
   { key: 'dailyBoxes', label: '하루 출고 박스 수', width: 'w-40' },
@@ -49,9 +51,10 @@ const savedAtFormat = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short',
 })
 
-function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockError, styleNumbers, stylesLoading, stylesError }: {
+function OutboundRows({ items, title, month, boxQuantities, pickingBoxes, stockLoading, stockError, styleNumbers, stylesLoading, stylesError }: {
   items: WarehouseOrganizationOutboundItem[]; title: string; month: string
   boxQuantities: ReadonlyMap<string, number>; stockLoading: boolean; stockError: boolean
+  pickingBoxes: ReadonlyMap<string, { locationCode: string; boxes: number | null }[]>
   styleNumbers: ReadonlyMap<string, string | null>; stylesLoading: boolean; stylesError: boolean
 }) {
   const [page, setPage] = useState(0)
@@ -64,12 +67,15 @@ function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockE
   const sortedRows = useMemo(() => items.map((item, index) => {
     const unitsPerBox = boxQuantities.get(warehouseProductNameKey(item.productName))
     const styleNo = !stylesLoading && !stylesError ? styleNumbers.get(warehouseProductNameKey(item.productName)) : undefined
+    const pickingLocations = pickingBoxes.get(warehouseProductNameKey(item.productName)) ?? []
+    const pickingBoxCount = stockLoading || stockError || pickingLocations.some(location => location.boxes == null)
+      ? null : pickingLocations.reduce((sum, location) => sum + (location.boxes ?? 0), 0)
     const dailyQuantity = monthDays ? item.quantity / monthDays : null
     const dailyBoxes = !stockLoading && !stockError ? warehouseOutboundDailyBoxes(item.quantity, monthDays, unitsPerBox) : null
     return {
-      item, index, unitsPerBox, dailyQuantity, dailyBoxes, styleNo,
+      item, index, unitsPerBox, dailyQuantity, dailyBoxes, styleNo, pickingLocations,
       values: {
-        row: index + 1, styleNo, productName: item.productName, quantity: item.quantity, dailyQuantity, dailyBoxes,
+        row: index + 1, styleNo, productName: item.productName, pickingBoxes: pickingBoxCount, quantity: item.quantity, dailyQuantity, dailyBoxes,
         week1: dailyBoxes == null ? null : dailyBoxes * 7,
         week2: dailyBoxes == null ? null : dailyBoxes * 14,
         week4: dailyBoxes == null ? null : dailyBoxes * 28,
@@ -84,7 +90,7 @@ function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockE
       ? productNameOrder.compare(a, b)
       : Number(a) - Number(b)
     return compared * (sort.direction === 'asc' ? 1 : -1) || left.index - right.index
-  }), [items, boxQuantities, monthDays, stockLoading, stockError, sort, styleNumbers, stylesLoading, stylesError])
+  }), [items, boxQuantities, pickingBoxes, monthDays, stockLoading, stockError, sort, styleNumbers, stylesLoading, stylesError])
 
   function changeSort(key: OutboundSortKey) {
     setSort(current => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }))
@@ -101,7 +107,7 @@ function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockE
       </div>
       {monthDays && <p className="text-xs text-muted-foreground">하루 출고량은 {month} 출고 수량 ÷ {monthDays}일입니다. 주별 예상 박스 수는 하루 박스 수에 7일·14일·28일을 곱하며, 소수점 둘째 자리까지 표시합니다.</p>}
       <div className="overflow-auto rounded-lg border border-border">
-        <table aria-label={title} className="w-full min-w-[1240px] table-fixed text-sm">
+        <table aria-label={title} className="w-full min-w-[1450px] table-fixed text-sm">
           <thead className="bg-primary text-primary-foreground">
             <tr>
               {OUTBOUND_COLUMNS.map(column => {
@@ -117,7 +123,7 @@ function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockE
             </tr>
           </thead>
           <tbody>
-            {sortedRows.slice(start, start + PAGE_SIZE).map(({ item, index, unitsPerBox, dailyBoxes, styleNo }) => {
+            {sortedRows.slice(start, start + PAGE_SIZE).map(({ item, index, unitsPerBox, dailyBoxes, styleNo, pickingLocations }) => {
               return (
                 <tr key={index} className="border-b border-border last:border-b-0 hover:bg-muted/40">
                   <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{index + 1}</td>
@@ -125,6 +131,12 @@ function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockE
                     {stylesError ? '조회 실패' : stylesLoading ? '조회 중…' : styleNo ?? <span className="text-muted-foreground">{styleNumbers.has(warehouseProductNameKey(item.productName)) ? '확인 필요' : '—'}</span>}
                   </td>
                   <td className="break-words px-3 py-1.5">{item.productName}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {stockError ? '조회 실패' : stockLoading ? '조회 중…' : pickingLocations.length
+                      ? pickingLocations.map(location => <span key={location.locationCode} className="block break-words">
+                        {location.boxes == null ? '수량 확인 필요' : `${numberFormat.format(location.boxes)}박스`} ({location.locationCode || '자리 미확인'})
+                      </span>) : <span className="text-muted-foreground">0박스 (자리 없음)</span>}
+                  </td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{numberFormat.format(item.quantity)}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{monthDays ? dailyNumberFormat.format(item.quantity / monthDays) : '—'}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">
@@ -218,9 +230,10 @@ function OutboundMonthForm({ brandId, viewerId, month, onMonthChange }: Outbound
   })
   const stockRows = positions.data
   const boxQuantities = useMemo(() => warehouseOutboundBoxQuantities(stockRows ?? []), [stockRows])
+  const pickingBoxes = useMemo(() => warehouseOutboundPickingBoxes(stockRows ?? []), [stockRows])
   const stockLoading = inventory.isLoading || Boolean(setId && positions.isPending)
   const stockError = inventory.isError || Boolean(setId && positions.isError)
-  const boxProps = { boxQuantities, stockLoading, stockError, styleNumbers, stylesLoading: styles.isPending, stylesError: styles.isError }
+  const boxProps = { boxQuantities, pickingBoxes, stockLoading, stockError, styleNumbers, stylesLoading: styles.isPending, stylesError: styles.isError }
 
   return (
     <div className="space-y-4">
@@ -276,7 +289,7 @@ function OutboundMonthForm({ brandId, viewerId, month, onMonthChange }: Outbound
       )}
       {notice && <p role="status" className="text-sm text-success">{notice}</p>}
       {preview && 'error' in preview && <p role="alert" className="text-sm text-danger">{preview.error}</p>}
-      {hasItems && <p className="text-xs text-muted-foreground">하루 출고 박스 수는 현재 박스창고·출고창고의 동일 상품 중 가장 큰 박스당 수량을 기준으로 환산합니다.</p>}
+      {hasItems && <p className="text-xs text-muted-foreground">출고창고는 자리별 남은 박스 수를 표시하며, 해당 열의 정렬은 전체 자리의 박스 수 합계 기준입니다. 하루 출고 박스 수는 현재 박스창고·출고창고의 동일 상품 중 가장 큰 박스당 수량을 기준으로 환산합니다.</p>}
       {hasItems && <p className="text-xs text-muted-foreground">M번호는 전체 상품에서 상품명이 일치하는 SKU를 조회합니다. 동일 이름의 SKU가 여러 개이거나 M번호가 비어 있으면 확인 필요로 표시합니다.</p>}
       {styles.isError && <p role="alert" className="text-sm text-danger">M번호를 조회하지 못했습니다. <Button type="button" size="sm" variant="outline" onClick={() => { void styles.refetch() }}>M번호 다시 불러오기</Button></p>}
       {stockError && <p role="alert" className="text-sm text-danger">박스당 수량을 조회하지 못했습니다. <Button type="button" size="sm" variant="outline" onClick={() => { void inventory.refetch(); if (setId) void positions.refetch() }}>재고 다시 불러오기</Button></p>}
