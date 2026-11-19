@@ -14,20 +14,23 @@ import {
   isWarehouseOutboundMonth,
   parseWarehouseOrganizationOutbound,
   previousWarehouseOutboundMonth,
+  warehouseOutboundMonthDays,
 } from './warehouse-organization-outbound'
 
 const PAGE_SIZE = 25
 const numberFormat = new Intl.NumberFormat('ko-KR')
+const dailyNumberFormat = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 })
 const savedAtFormat = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short',
 })
 
-function OutboundRows({ items, title }: { items: WarehouseOrganizationOutboundItem[]; title: string }) {
+function OutboundRows({ items, title, month }: { items: WarehouseOrganizationOutboundItem[]; title: string; month: string }) {
   const [page, setPage] = useState(0)
   const pages = Math.ceil(items.length / PAGE_SIZE)
   const currentPage = Math.min(page, pages - 1)
   const start = currentPage * PAGE_SIZE
   const total = items.reduce((sum, item) => sum + item.quantity, 0)
+  const monthDays = warehouseOutboundMonthDays(month)
 
   return (
     <section className="space-y-2">
@@ -37,6 +40,7 @@ function OutboundRows({ items, title }: { items: WarehouseOrganizationOutboundIt
           {numberFormat.format(items.length)}행 · 총 {numberFormat.format(total)}개
         </p>
       </div>
+      {monthDays && <p className="text-xs text-muted-foreground">하루 출고량은 {month} 출고 수량 ÷ {monthDays}일이며, 소수점 둘째 자리까지 표시합니다.</p>}
       <div className="overflow-auto rounded-lg border border-border">
         <table aria-label={title} className="w-full table-fixed text-sm">
           <thead className="bg-primary text-primary-foreground">
@@ -44,6 +48,7 @@ function OutboundRows({ items, title }: { items: WarehouseOrganizationOutboundIt
               <th scope="col" className="w-16 px-3 py-2 text-right">행</th>
               <th scope="col" className="px-3 py-2 text-left">상품명</th>
               <th scope="col" className="w-28 px-3 py-2 text-right">출고 수량</th>
+              <th scope="col" className="w-32 px-3 py-2 text-right">하루 출고량</th>
             </tr>
           </thead>
           <tbody>
@@ -52,6 +57,7 @@ function OutboundRows({ items, title }: { items: WarehouseOrganizationOutboundIt
                 <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{start + index + 1}</td>
                 <td className="break-words px-3 py-1.5">{item.productName}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{numberFormat.format(item.quantity)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">{monthDays ? dailyNumberFormat.format(item.quantity / monthDays) : '—'}</td>
               </tr>
             ))}
           </tbody>
@@ -163,8 +169,8 @@ function OutboundMonthForm({ brandId, viewerId }: { brandId: string; viewerId: s
       )}
       {notice && <p role="status" className="text-sm text-success">{notice}</p>}
       {preview && 'error' in preview && <p role="alert" className="text-sm text-danger">{preview.error}</p>}
-      {draftItems ? <OutboundRows key="preview" items={draftItems} title="저장할 출고 데이터" />
-        : record ? <OutboundRows key={`${month}:${record.revision}`} items={record.items} title="저장된 출고 데이터" />
+      {draftItems ? <OutboundRows key="preview" items={draftItems} title="저장할 출고 데이터" month={month} />
+        : record ? <OutboundRows key={`${month}:${record.revision}`} items={record.items} title="저장된 출고 데이터" month={month} />
           : record === null ? <p className="text-sm text-muted-foreground">이 달에 저장한 출고 데이터가 없습니다.</p> : null}
     </div>
   )

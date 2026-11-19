@@ -4,10 +4,18 @@ import { PGlite } from '@electric-sql/pglite'
 import {
   parseWarehouseOrganizationOutbound,
   previousWarehouseOutboundMonth,
+  warehouseOutboundMonthDays,
 } from '../src/features/logistics/warehouse-organization-outbound.ts'
 
 assert.equal(previousWarehouseOutboundMonth(new Date('2026-12-31T15:00:00Z')), '2026-12')
 assert.equal(previousWarehouseOutboundMonth(new Date('2026-11-17T01:00:00Z')), '2026-10')
+assert.equal(warehouseOutboundMonthDays('2026-10'), 31)
+assert.equal(warehouseOutboundMonthDays('2026-11'), 30)
+assert.equal(warehouseOutboundMonthDays('2026-02'), 28)
+assert.equal(warehouseOutboundMonthDays('2028-02'), 29)
+assert.equal(warehouseOutboundMonthDays('2100-02'), 28)
+assert.equal(warehouseOutboundMonthDays('2026-13'), null)
+assert.equal(warehouseOutboundMonthDays(''), null)
 assert.deepEqual(parseWarehouseOrganizationOutbound('상품명\t출고 수량\r\n"가방 A"\t2,977\r\n가방 B\t0\r\n'), {
   items: [{ productName: '가방 A', quantity: 2977 }, { productName: '가방 B', quantity: 0 }],
 })
