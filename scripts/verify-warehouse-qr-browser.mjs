@@ -200,6 +200,35 @@ try {
   await page.getByLabel('렉 번호 목록').fill('3-1-1_A1')
   await page.getByRole('alert').waitFor()
   assert.ok(await page.getByRole('button', { name: '아이라벨용 엑셀 내려받기', exact: true }).isDisabled())
+  await page.getByRole('button', { name: '렉 범위', exact: true }).click()
+  await page.getByLabel('창고 번호', { exact: true }).fill('#')
+  await page.getByLabel('줄 번호', { exact: true }).fill('7')
+  await page.getByLabel('끝 렉 번호', { exact: true }).fill('2')
+  assert.equal(await page.getByLabel('창고 번호', { exact: true }).getAttribute('inputmode'), 'text')
+  const symbolRange = await downloaded(page.getByRole('button', { name: '아이라벨용 엑셀 내려받기', exact: true }), 'symbol-range.xlsx')
+  assert.deepEqual(XLSX.utils.sheet_to_json(symbolRange.Sheets.QR, { header: 1 })[1], ['#-7-1_A1', '#-7-1', 'A1'])
+  await page.getByRole('button', { name: '렉 직접 입력', exact: true }).click()
+  const specialCodes = ['#-7-1', '%-6-9', '03-01-001']
+  await page.getByLabel('렉 번호 목록').fill(specialCodes.join('\n'))
+  const specialWorkbook = await downloaded(page.getByRole('button', { name: '아이라벨용 엑셀 내려받기', exact: true }), 'symbol-slots.xlsx')
+  const specialRows = XLSX.utils.sheet_to_json(specialWorkbook.Sheets.QR, { header: 1 }).slice(1)
+  assert.equal(specialRows.length, 48)
+  assert.deepEqual(specialRows[16], ['%-6-9_A1', '%-6-9', 'A1'])
+  assert.deepEqual(specialRows.at(-1), ['03-01-001_D4', '03-01-001', 'D4'])
+  await page.getByRole('button', { name: '고정 자리 4칸 라벨 미리보기', exact: true }).click()
+  await slotDialog.waitFor()
+  const specialDecoded = await page.locator('.outbound-rack-print-root img.outbound-slot-qr').evaluateAll(async images => {
+    const codes = []
+    for (const img of images) {
+      await img.decode()
+      const canvas = document.createElement('canvas'); canvas.width = 300; canvas.height = 300
+      const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, 300, 300)
+      codes.push(window.jsQR(ctx.getImageData(0, 0, 300, 300).data, 300, 300)?.data)
+    }
+    return codes
+  })
+  assert.deepEqual(specialDecoded, specialRows.map(([qr]) => qr), 'symbols and leading zeroes survive actual QR generation')
+  await page.getByRole('button', { name: '렉 라벨 미리보기 닫기' }).click()
   await page.getByLabel('렉 번호 목록').fill('3-12-107\n3333-12345-67890')
   await page.getByRole('button', { name: /렉 번호 · 4칸 라벨 인쇄/ }).click()
   await page.getByRole('button', { name: '4칸 라벨 미리보기', exact: true }).click()
@@ -220,6 +249,11 @@ try {
   await page.getByLabel('끝 렉 번호', { exact: true }).fill('6')
   const boxRange = await downloaded(page.getByRole('button', { name: '엑셀 내려받기', exact: true }), 'box-range.xlsx')
   assert.deepEqual(XLSX.utils.sheet_to_json(boxRange.Sheets.QR, { header: 1 }), [['자리', 'QR'], ['3-4-4', '3-4-4'], ['3-4-5', '3-4-5'], ['3-4-6', '3-4-6']])
+  await page.getByLabel('창고 번호', { exact: true }).fill('%')
+  await page.getByLabel('줄 번호', { exact: true }).fill('6')
+  const specialBoxRange = await downloaded(page.getByRole('button', { name: '엑셀 내려받기', exact: true }), 'symbol-box.xlsx')
+  assert.deepEqual(XLSX.utils.sheet_to_json(specialBoxRange.Sheets.QR, { header: 1 }), [['자리', 'QR'], ['%-6-4', '%-6-4'], ['%-6-5', '%-6-5'], ['%-6-6', '%-6-6']])
+  assert.equal(await page.getByLabel('줄 번호', { exact: true }).getAttribute('inputmode'), 'text')
   await page.getByLabel('끝 렉 번호', { exact: true }).fill('3')
   await page.getByRole('alert').waitFor()
   assert.ok(await page.getByRole('button', { name: '4칸 라벨 미리보기', exact: true }).isDisabled())
@@ -282,6 +316,22 @@ try {
   })), 'custom box code formats fit in the same four-label layout')
   await page.screenshot({ path: path.join(output, 'box-label-preview.png'), fullPage: true })
   await page.getByRole('button', { name: '박스창고 라벨 미리보기 닫기' }).click()
+  await boxList.fill('#-7-1\n%-6-9')
+  await page.getByRole('button', { name: '4칸 라벨 미리보기', exact: true }).click()
+  await boxDialog.waitFor()
+  assert.deepEqual(await boxDialog.locator('.outbound-rack-label').allTextContents(), ['#-7-1', '%-6-9', '', ''])
+  const symbolBoxQrs = await boxDialog.locator('img.warehouse-box-qr').evaluateAll(async images => {
+    const codes = []
+    for (const img of images) {
+      await img.decode()
+      const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 512
+      const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, 512, 512)
+      codes.push(window.jsQR(ctx.getImageData(0, 0, 512, 512).data, 512, 512)?.data)
+    }
+    return codes
+  })
+  assert.deepEqual(symbolBoxQrs, ['#-7-1', '#-7-1', '%-6-9', '%-6-9'])
+  await page.getByRole('button', { name: '박스창고 라벨 미리보기 닫기' }).click()
   await boxList.fill(Array.from({ length: 201 }, (_, i) => `2-1-${i + 1}`).join('\n'))
   await page.getByRole('alert').waitFor()
   assert.ok(await page.getByRole('button', { name: '4칸 라벨 미리보기', exact: true }).isDisabled())
@@ -290,6 +340,13 @@ try {
   await page.setViewportSize({ width: 390, height: 844 })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
   await page.screenshot({ path: path.join(output, 'box-label-mobile.png'), fullPage: true })
+  await page.getByRole('button', { name: '렉 범위', exact: true }).click()
+  await page.getByLabel('창고 번호', { exact: true }).fill('#')
+  await page.getByLabel('줄 번호', { exact: true }).fill('7')
+  await page.getByLabel('끝 렉 번호', { exact: true }).fill('2')
+  await page.getByRole('cell', { name: '#-7-1', exact: true }).waitFor()
+  assert.equal(await page.getByLabel('줄 번호', { exact: true }).getAttribute('inputmode'), 'text')
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
   await page.getByRole('button', { name: /^박스 개별 라벨링/ }).click()
   const rollInput = page.getByLabel('개별 라벨 박스 번호', { exact: true })
   const rollPrint = page.getByRole('button', { name: '롤 라벨 인쇄', exact: true })
