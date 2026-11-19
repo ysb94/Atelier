@@ -6,6 +6,7 @@ import { SingleBrandOrList } from '@/components/layout/SingleBrandOrList'
 import { CompanyWarehouseList } from '@/features/workspace/company-operation-lists'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
+import { FilterTabs } from '@/components/ui/filter-tabs'
 import {
   Card,
   CardContent,
@@ -24,6 +25,7 @@ import { WarehouseQrPanel } from './WarehouseQrPanel'
 import { WarehouseQrAuditReviewPanel } from './WarehouseQrAuditReviewPanel'
 import { WarehouseSlotSettingsPanel } from './WarehouseSlotSettingsPanel'
 import { WarehouseBoxHistoryPanel } from './TemporaryWarehousePanel'
+import { WarehouseActivityPanel } from './WarehouseActivityPanel'
 
 type WarehouseView = 'box' | 'outbound' | 'boxes' | 'fixed' | 'qr' | 'organize'
 type WarehousePanel = 'stock' | 'slots' | 'qr-audit'
@@ -54,8 +56,8 @@ const WAREHOUSE_VIEWS: {
   {
     value: 'boxes',
     label: '개별 박스·이력',
-    description: 'QR별 박스와 작업 이력 조회',
-    detail: '박스번호, 상품 또는 자리로 찾고 입고·이동 이력을 확인합니다.',
+    description: 'QR별 박스와 창고 전체 이력',
+    detail: '박스 QR별 이력과 창고에서 처리한 작업을 확인합니다.',
     icon: Package,
   },
   {
@@ -88,6 +90,21 @@ function isWarehouseView(value: string | null): value is WarehouseView {
 
 function isWarehousePanel(value: string | null): value is WarehousePanel {
   return value === 'stock' || value === 'slots' || value === 'qr-audit'
+}
+
+function WarehouseHistoryView({ brandId }: { brandId: string }) {
+  const [view, setView] = useState<'qr' | 'all'>('qr')
+  return <div className="space-y-4">
+    <FilterTabs
+      ariaLabel="창고 이력 보기"
+      tabs={[{ value: 'qr', label: 'QR별 이력' }, { value: 'all', label: '창고 전체 이력' }]}
+      value={view}
+      onChange={setView}
+    />
+    {view === 'qr'
+      ? <WarehouseBoxHistoryPanel brandId={brandId} includeActive />
+      : <WarehouseActivityPanel brandId={brandId} />}
+  </div>
 }
 
 export function WarehousePage() {
@@ -224,7 +241,7 @@ export function WarehousePage() {
           ) : activeView === 'qr' ? (
             <WarehouseQrPanel brandName={brand.name} brandId={brand.id} />
           ) : activeView === 'boxes' ? (
-            <WarehouseBoxHistoryPanel key={brand.id} brandId={brand.id} includeActive />
+            <WarehouseHistoryView key={brand.id} brandId={brand.id} />
           ) : activeView === 'fixed' ? (
             <WarehouseFixedLocationsPanel key={brand.id} brandId={brand.id} />
           ) : activePanel === 'qr-audit' ? (

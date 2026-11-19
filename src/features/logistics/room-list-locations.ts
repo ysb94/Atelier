@@ -19,12 +19,26 @@ function prefixOrder(code: string) {
   return rank < 0 ? LOCATION_PREFIXES.length : rank
 }
 
-function receiptOrder(position: WarehouseStockPosition) {
+type RoomListPositionOrder = Pick<WarehouseStockPosition, 'receivedOn' | 'receivedOnRaw' | 'zone' | 'locationCode' | 'sourceRowNumber'>
+
+function receiptOrder(position: RoomListPositionOrder) {
   const raw = position.receivedOnRaw.trim()
   if (raw === FORCED_PRIORITY_DATE) return '0000-00-00'
   if (raw === SECOND_PRIORITY_DATE) return '0000-00-01'
   if (raw === LAST_PRIORITY_DATE) return '9999-12-31'
   return position.receivedOn ?? '9999-12-30'
+}
+
+export function compareRoomListPositions(left: RoomListPositionOrder, right: RoomListPositionOrder) {
+  const leftReceipt = receiptOrder(left)
+  const rightReceipt = receiptOrder(right)
+  const sameReceiptDate = leftReceipt === left.receivedOn && rightReceipt === right.receivedOn &&
+    leftReceipt === rightReceipt
+  return leftReceipt.localeCompare(rightReceipt) ||
+    (sameReceiptDate ? Number(right.zone === 'picking') - Number(left.zone === 'picking') : 0) ||
+    prefixOrder(left.locationCode) - prefixOrder(right.locationCode) ||
+    locationOrder.compare(left.locationCode, right.locationCode) ||
+    left.sourceRowNumber - right.sourceRowNumber
 }
 
 export function indexRoomListLocations(positions: readonly WarehouseStockPosition[]) {
@@ -51,17 +65,7 @@ export function indexRoomListLocations(positions: readonly WarehouseStockPositio
       return order > 0 ? position : current
     })
     if (group.every(position => position.brandId === latest.brandId)) latestPositions.set(name, latest)
-    group.sort((left, right) => {
-      const leftReceipt = receiptOrder(left)
-      const rightReceipt = receiptOrder(right)
-      const sameReceiptDate = leftReceipt === left.receivedOn && rightReceipt === right.receivedOn &&
-        leftReceipt === rightReceipt
-      return leftReceipt.localeCompare(rightReceipt) ||
-        (sameReceiptDate ? Number(right.zone === 'picking') - Number(left.zone === 'picking') : 0) ||
-        prefixOrder(left.locationCode) - prefixOrder(right.locationCode) ||
-        locationOrder.compare(left.locationCode, right.locationCode) ||
-        left.sourceRowNumber - right.sourceRowNumber
-    })
+    group.sort(compareRoomListPositions)
     const seen = new Set<string>()
     groups.set(name, group.filter(position => {
       const key = JSON.stringify([

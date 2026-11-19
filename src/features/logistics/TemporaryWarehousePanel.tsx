@@ -41,6 +41,7 @@ import {
   warehouseBoxOutboundConfirmText,
 } from '@/lib/warehouse/warehouse-box-lifecycle'
 import { cn, emptyList, formatNumber } from '@/lib/utils'
+import { WarehouseActivityPanel } from './WarehouseActivityPanel'
 
 type TemporaryWarehouseTab = 'input' | 'box_slots' | 'picking_slots' | 'history'
 type TemporaryWarehousePriority = Extract<
@@ -252,6 +253,9 @@ export function TemporaryWarehousePanel({ brandId }: { brandId: string }) {
     void queryClient.invalidateQueries({ queryKey: ['warehouse-boxes', brandId] })
     void queryClient.invalidateQueries({
       queryKey: ['warehouse-box-movements', brandId],
+    })
+    void queryClient.invalidateQueries({
+      queryKey: ['warehouse-activity', brandId],
     })
     void queryClient.invalidateQueries({
       queryKey: ['warehouse-registered-slots', warehouseId],
@@ -788,6 +792,7 @@ export function WarehouseBoxHistoryPanel({
   brandId: string
   includeActive?: boolean
 }) {
+  const queryClient = useQueryClient()
   const [style, setStyle] = useState<StyleRef | null>(null)
   const [search, setSearch] = useState('')
   const [openBoxId, setOpenBoxId] = useState<string | null>(null)
@@ -798,12 +803,6 @@ export function WarehouseBoxHistoryPanel({
     queryKey: ['warehouse-boxes', brandId, { includeClosed: true }],
     queryFn: () => getWarehouseBoxes(brandId, { includeClosed: true }),
   })
-  const movementsQuery = useQuery({
-    queryKey: ['warehouse-box-movements', brandId, openBoxId],
-    queryFn: () => getWarehouseBoxMovements(brandId, openBoxId!),
-    enabled: openBoxId !== null,
-  })
-
   useEffect(() => {
     if (!boxesQuery.error) return
     console.warn('[임시창고] 종료 박스를 불러오지 못함', {
@@ -811,14 +810,6 @@ export function WarehouseBoxHistoryPanel({
       error: boxesQuery.error,
     })
   }, [boxesQuery.error, brandId])
-
-  useEffect(() => {
-    if (!movementsQuery.error) return
-    console.warn('[임시창고] 박스 이력을 불러오지 못함', {
-      brandId,
-      error: movementsQuery.error,
-    })
-  }, [brandId, movementsQuery.error])
 
   const boxes = useMemo(
     () =>
@@ -910,7 +901,10 @@ export function WarehouseBoxHistoryPanel({
           disabled={boxesQuery.isFetching}
           onClick={() => {
             void boxesQuery.refetch()
-            if (openBoxId) void movementsQuery.refetch()
+            if (openBoxId) {
+              void queryClient.invalidateQueries({ queryKey: ['warehouse-box-movements', brandId, openBoxId] })
+              void queryClient.invalidateQueries({ queryKey: ['warehouse-activity', brandId] })
+            }
           }}
         >
           새로고침
@@ -940,12 +934,8 @@ export function WarehouseBoxHistoryPanel({
               return (
                 <TemporaryWarehouseHistoryRow
                   key={box.id}
+                  brandId={brandId}
                   box={box}
-                  movements={open ? movementsQuery.data ?? emptyList() : emptyList()}
-                  historyLoading={open && movementsQuery.isLoading}
-                  historyError={open && movementsQuery.error
-                    ? mutationErrorMessage(movementsQuery.error, '박스 이력을 불러오지 못했습니다.')
-                    : null}
                   open={open}
                   onToggle={() =>
                     setOpenBoxId((current) =>
@@ -1009,18 +999,14 @@ export function WarehouseBoxHistoryPanel({
 }
 
 function TemporaryWarehouseHistoryRow({
+  brandId,
   box,
-  movements,
   open,
-  historyLoading,
-  historyError,
   onToggle,
 }: {
+  brandId: string
   box: WarehouseBox
-  movements: WarehouseBoxMovement[]
   open: boolean
-  historyLoading: boolean
-  historyError: string | null
   onToggle: () => void
 }) {
   return (
@@ -1073,75 +1059,61 @@ function TemporaryWarehouseHistoryRow({
       {open ? (
         <tr className="border-t border-border bg-muted/20">
           <td colSpan={9} className="px-3 py-3">
-            {historyError ? (
-              <p className="text-xs text-destructive">{historyError}</p>
-            ) : historyLoading ? (
-              <p className="text-xs text-muted-foreground">박스 이력을 불러오는 중…</p>
-            ) : movements.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                이 박스의 상세 이력이 없습니다.
-              </p>
-            ) : (
-              <ol className="space-y-2">
-                {movements.map((movement) => {
-                  const reason = movementReasonText(movement)
-                  const showLocation =
-                    movement.action !== 'archive' || locationChanged(movement)
-                  const showQty =
-                    (movement.fromQty != null || movement.toQty != null) &&
-                    (movement.action !== 'archive' || qtyChanged(movement))
-                  return (
-                  <li
-                    key={movement.id}
-                    className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs"
-                  >
-                    <span className="tabular-nums text-muted-foreground">
-                      {formatDateTime(movement.createdAt)}
-                    </span>
-                    <Badge
-                      variant={
-                        movement.action === 'archive' ||
-                        movement.action === 'box_outbound' ||
-                        movement.action === 'deplete'
-                          ? 'outline'
-                          : 'muted'
-                      }
-                    >
-                      {boxActionLabel(movement.action)}
-                    </Badge>
-                    {showLocation ? (
-                      <span>
-                        {locationText(
-                          movement.fromZone,
-                          movement.fromLocationCode,
-                        )}
-                        {' → '}
-                        {locationText(movement.toZone, movement.toLocationCode)}
-                      </span>
-                    ) : null}
-                    {showQty ? (
-                      <span className="tabular-nums text-muted-foreground">
-                        {movement.fromQty == null
-                          ? '—'
-                          : formatNumber(movement.fromQty)}
-                        {' → '}
-                        {movement.toQty == null
-                          ? '—'
-                          : formatNumber(movement.toQty)}
-                      </span>
-                    ) : null}
-                    {reason ? (
-                      <span className="text-muted-foreground">{reason}</span>
-                    ) : null}
-                  </li>
-                  )
-                })}
-              </ol>
-            )}
+            <WarehouseActivityPanel
+              brandId={brandId}
+              qr={box.displayCode}
+              legacy={<LegacyWarehouseBoxHistory brandId={brandId} boxId={box.id} />}
+            />
           </td>
         </tr>
       ) : null}
     </>
+  )
+}
+
+function LegacyWarehouseBoxHistory({ brandId, boxId }: { brandId: string; boxId: string }) {
+  const movementsQuery = useQuery({
+    queryKey: ['warehouse-box-movements', brandId, boxId],
+    queryFn: () => getWarehouseBoxMovements(brandId, boxId),
+  })
+  const movements = movementsQuery.data ?? emptyList()
+  if (movementsQuery.error) {
+    return <p className="text-xs text-destructive">{mutationErrorMessage(movementsQuery.error, '박스 이력을 불러오지 못했습니다.')}</p>
+  }
+  if (movementsQuery.isLoading) return <p className="text-xs text-muted-foreground">박스 이력을 불러오는 중…</p>
+  if (!movements.length) return <p className="text-xs text-muted-foreground">이 박스의 상세 이력이 없습니다.</p>
+
+  return (
+    <ol className="space-y-2">
+      {movements.map((movement) => {
+        const reason = movementReasonText(movement)
+        const showLocation = movement.action !== 'archive' || locationChanged(movement)
+        const showQty = (movement.fromQty != null || movement.toQty != null) &&
+          (movement.action !== 'archive' || qtyChanged(movement))
+        const closed = movement.action === 'archive' || movement.action === 'box_outbound' || movement.action === 'deplete'
+        return (
+          <li key={movement.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
+            <span className="tabular-nums text-muted-foreground">{formatDateTime(movement.createdAt)}</span>
+            <Badge variant={closed ? 'outline' : 'muted'}>{boxActionLabel(movement.action)}</Badge>
+            {showLocation && (
+              <span>
+                {locationText(movement.fromZone, movement.fromLocationCode)}
+                {' → '}
+                {locationText(movement.toZone, movement.toLocationCode)}
+              </span>
+            )}
+            {showQty && (
+              <span className="tabular-nums text-muted-foreground">
+                {movement.fromQty == null ? '—' : formatNumber(movement.fromQty)}
+                {' → '}
+                {movement.toQty == null ? '—' : formatNumber(movement.toQty)}
+              </span>
+            )}
+            {reason && <span className="text-muted-foreground">{reason}</span>}
+          </li>
+        )
+      })}
+    </ol>
   )
 }
 
