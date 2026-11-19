@@ -1,22 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, Plus, Trash2 } from 'lucide-react'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
-import { Input, Textarea } from '@/components/ui/input'
+import { Input } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { combineListQueries } from '@/lib/query/list-queries'
-import { popularProductAvailability, popularProductEntries, popularProductLocations, type PopularLocationProduct } from '@/lib/warehouse/popular-products'
+import { popularProductAvailability, popularProductLocations, type PopularLocationProduct } from '@/lib/warehouse/popular-products'
+import { warehouseProductNameKey } from '@/lib/warehouse/fixed-location-styles'
 import { useBasicWorkAccess } from '@/lib/supabase/basic-work-access'
 import {
   readWarehousePopularLocations,
   saveWarehousePopularLocations,
   WarehousePopularLocationsChangedError,
 } from '@/lib/supabase/warehouse-popular-locations'
-import { getActiveWarehouseInventorySet, listWarehouseLocationProducts, listWarehousePopularProductPositions } from '@/lib/supabase/warehouse-stock'
+import { getActiveWarehouseInventorySet, listWarehouseLocationProducts, listWarehouseOutboundBoxQuantities, listWarehousePopularProductPositions } from '@/lib/supabase/warehouse-stock'
+import { readWarehouseOrganizationOutbound } from '@/lib/supabase/warehouse-organization-outbound'
+import { listAllStyleRefs } from '@/lib/supabase/styles'
+import { isWarehouseOutboundMonth, warehouseOutboundBoxQuantities, warehouseOutboundStyleNumbers, warehousePopularOutboundProducts } from './warehouse-organization-outbound'
 
 const LOCATION_LOOKUP_DELAY_MS = 350
 const SHARED_LIST_REFRESH_MS = 30_000
+const DAILY_BOX_FORMAT = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 })
 const UPDATED_AT_FORMAT = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', dateStyle: 'short', timeStyle: 'short',
 })
@@ -29,24 +34,24 @@ type PopularLocationRow = {
 type LocationDraft = {
   revision: number
   rows: PopularLocationRow[]
-  productText: string
 }
 
 const EMPTY_ROWS: PopularLocationRow[] = [{ id: 'empty', location: '' }]
 
-export function WarehousePopularLocationsPanel({ brandId }: { brandId: string }) {
+type PopularMonthProps = { brandId: string; month: string; onMonthChange: (month: string) => void }
+
+export function WarehousePopularLocationsPanel({ brandId, month, onMonthChange }: PopularMonthProps) {
   const { access } = useBasicWorkAccess()
   if (!access?.brandDomains?.[brandId]?.includes('logistics')) return null
-  return <SharedPopularLocations key={`${brandId}:${access.profileId}`} brandId={brandId} viewerId={access.profileId} />
+  return <SharedPopularLocations key={`${brandId}:${access.profileId}`} brandId={brandId} viewerId={access.profileId} month={month} onMonthChange={onMonthChange} />
 }
 
-function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewerId: string }) {
+function SharedPopularLocations({ brandId, viewerId, month, onMonthChange }: PopularMonthProps & { viewerId: string }) {
   useRenderWatch('WarehousePopularLocationsPanel')
   const nextId = useRef(1)
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<LocationDraft | null>(null)
   const [savedNotice, setSavedNotice] = useState(false)
-  const [editingProducts, setEditingProducts] = useState(false)
   const tabActive = useWorkspaceTabActivity()
   const cache = useQueryClient()
   const sharedKey = ['warehouse-popular-locations', brandId, viewerId] as const
@@ -65,23 +70,18 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
   )
   const rows = draft?.rows ?? savedRows
   const codes = useMemo(() => [...new Set(rows.map(({ location }) => location.trim()).filter(Boolean))], [rows])
-  const productText = draft?.productText ?? saved?.products.join('\n') ?? ''
-  const products = useMemo(() => popularProductEntries(productText), [productText])
-  const showProductInput = editingProducts || products.length === 0
-  const productsDirty = Boolean(saved && (products.length !== saved.products.length || products.some((item, index) => item !== saved.products[index])))
   const dirty = Boolean(saved && draft && (
-    productsDirty || codes.length !== saved.codes.length || codes.some((code, index) => code !== saved.codes[index])
+    codes.length !== saved.codes.length || codes.some((code, index) => code !== saved.codes[index])
   ))
 
   const save = useMutation({
-    mutationFn: ({ codes, revision, products }: { codes: string[]; revision: number; products?: string[] }) =>
-      saveWarehousePopularLocations(brandId, codes, revision, products),
+    mutationFn: ({ codes, revision }: { codes: string[]; revision: number }) =>
+      saveWarehousePopularLocations(brandId, codes, revision),
     onSuccess: async (list) => {
       await cache.cancelQueries({ queryKey: sharedKey, exact: true })
       cache.setQueryData(sharedKey, { ready: true, list })
       setDraft(null)
       setSavedNotice(true)
-      setEditingProducts(false)
     },
     onError: (error) => {
       if (error instanceof WarehousePopularLocationsChangedError) void shared.refetch()
@@ -92,12 +92,48 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
 
   const lookupEnabled = open && tabActive
   const hasLocations = codes.length > 0
+  const validMonth = isWarehouseOutboundMonth(month)
+  const outbound = useQuery({
+    queryKey: ['warehouse-organization-outbound', brandId, viewerId, month],
+    queryFn: ({ signal }) => readWarehouseOrganizationOutbound(brandId, month, signal),
+    enabled: lookupEnabled && validMonth,
+    retry: false,
+  })
+  const outboundRecord = outbound.data?.ready ? outbound.data.record : undefined
+  const hasOutbound = Boolean(outboundRecord?.items.length)
   const inventory = useQuery({
     queryKey: ['warehouse-inventory-set', brandId],
     queryFn: () => getActiveWarehouseInventorySet(brandId),
-    enabled: lookupEnabled && (hasLocations || products.length > 0),
+    enabled: lookupEnabled && (hasLocations || hasOutbound),
   })
   const setId = inventory.data?.id
+  const boxes = useQuery({
+    queryKey: ['warehouse-stock-positions', brandId, setId, 'outbound-boxes', viewerId],
+    queryFn: ({ signal }) => listWarehouseOutboundBoxQuantities(brandId, setId!, signal),
+    enabled: lookupEnabled && hasOutbound && Boolean(setId),
+  })
+  const styles = useQuery({
+    queryKey: ['styles', brandId, 'warehouse-organization-refs', viewerId],
+    queryFn: () => listAllStyleRefs(brandId),
+    enabled: lookupEnabled && hasOutbound,
+  })
+  const boxQuantities = useMemo(() => warehouseOutboundBoxQuantities(boxes.data ?? []), [boxes.data])
+  const ranked = useMemo(() => warehousePopularOutboundProducts(outboundRecord?.items ?? [], month, boxQuantities), [outboundRecord, month, boxQuantities])
+  const styleNumbers = useMemo(() => warehouseOutboundStyleNumbers(styles.data ?? []), [styles.data])
+  const products = useMemo(() => ranked.map(item => styleNumbers.get(warehouseProductNameKey(item.productName))).filter((value): value is string => Boolean(value)), [ranked, styleNumbers])
+  const unresolvedProducts = ranked.length - products.length
+  const rankingMessage = !validMonth ? '출고 기준 월을 선택해 주세요.'
+    : outbound.isError ? '출고 데이터를 불러오지 못했습니다.'
+    : outbound.data?.ready === false ? '출고 데이터 서버 연결 대기'
+    : outbound.isPending ? '출고 데이터 조회 중…'
+    : !hasOutbound ? '이 달에 저장한 출고 데이터가 없습니다.'
+    : inventory.isError || boxes.isError ? '박스당 수량을 불러오지 못했습니다.'
+    : inventory.data === null ? '조회할 창고 재고가 없습니다.'
+    : !setId || boxes.isPending ? '하루 출고 박스 수 계산 중…'
+    : styles.isError ? 'M번호를 불러오지 못했습니다.'
+    : styles.isPending ? 'M번호 조회 중…'
+    : ranked.length === 0 ? '박스당 수량이 있는 상품이 없습니다.' : null
+  const rankingReady = rankingMessage === null
   const codeKey = JSON.stringify(codes)
   const [settledCodeKey, setSettledCodeKey] = useState('[]')
   useEffect(() => {
@@ -114,17 +150,26 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
     })),
     combine: combineListQueries<PopularLocationProduct>,
   })
-  const stockReady = !hasLocations || (Boolean(setId) && settledCodeKey === codeKey
+  const stockReady = rankingReady && (!hasLocations || (Boolean(setId) && settledCodeKey === codeKey
     && !inventory.isError && locationProducts.errorIndexes.length === 0
-    && locationProducts.data.every(items => items !== undefined))
+    && locationProducts.data.every(items => items !== undefined)))
   const availability = useMemo(() => popularProductAvailability(products, locationProducts.data.flatMap(items => items ?? [])), [products, locationProducts.data])
   const missing = availability.filter(item => !item.available)
   const productPositions = useQuery({
     queryKey: ['warehouse-stock-positions', brandId, setId, 'popular-products', products],
     queryFn: ({ signal }) => listWarehousePopularProductPositions(brandId, setId!, products, signal),
-    enabled: lookupEnabled && Boolean(setId) && !showProductInput,
+    enabled: lookupEnabled && Boolean(setId) && rankingReady && products.length > 0,
   })
-  const productRows = useMemo(() => popularProductLocations(products, productPositions.data ?? []), [products, productPositions.data])
+  const productRows = useMemo(() => {
+    const locations = new Map(popularProductLocations(products, productPositions.data ?? []).map(row => [row.entry, row]))
+    return ranked.map(item => {
+      const styleNo = styleNumbers.get(warehouseProductNameKey(item.productName))
+      const entry = styleNo || item.productName
+      const location = locations.get(entry)
+      return { ...item, entry, styleNo, location: styleNo ? location?.location : undefined,
+        quantityUnknown: Boolean(styleNo && location?.quantityUnknown), matched: Boolean(location?.matched) }
+    })
+  }, [products, productPositions.data, ranked, styleNumbers])
   const productLookupMessage = productPositions.isError ? '조회 실패'
     : inventory.isError ? '재고 조회 실패'
     : inventory.data === null ? '현재 재고 없음'
@@ -134,16 +179,8 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
     if (save.isPending) return
     setDraft(current => ({
       rows: update(current?.rows ?? savedRows),
-      productText: current?.productText ?? productText,
       revision: current?.revision ?? saved?.revision ?? 0,
     }))
-    setSavedNotice(false)
-    if (save.isError && !conflict) save.reset()
-  }
-
-  function updateProducts(productText: string) {
-    if (save.isPending) return
-    setDraft(current => ({ rows: current?.rows ?? savedRows, productText, revision: current?.revision ?? saved?.revision ?? 0 }))
     setSavedNotice(false)
     if (save.isError && !conflict) save.reset()
   }
@@ -170,7 +207,6 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
     setDraft(null)
     setSavedNotice(false)
     save.reset()
-    setEditingProducts(false)
   }
 
   return (
@@ -225,8 +261,10 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
             <div aria-label="인기상품 배치 요약" role="status" className="space-y-1 rounded-md bg-muted/50 px-2 py-1.5 text-xs">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 tabular-nums">
                 <span>전용 자리 <strong>{codes.length}</strong>개</span>
-                <span>인기상품 <strong>{products.length}</strong>개</span>
-                {products.length > 0 && (stockReady ? <>
+                <span>인기상품 <strong>{rankingReady ? ranked.length : '—'}</strong>개</span>
+                {!rankingReady && <span className="text-muted-foreground">{rankingMessage}</span>}
+                {rankingReady && unresolvedProducts > 0 && <span className="text-warning">SKU 확인 필요 {unresolvedProducts}개</span>}
+                {rankingReady && products.length > 0 && (stockReady ? <>
                   <span className="text-success">배치 {products.length - missing.length}개</span>
                   <span className={missing.length ? 'font-semibold text-danger' : 'text-muted-foreground'}>미배치 {missing.length}개</span>
                 </> : <span className="text-muted-foreground">{inventory.isError || locationProducts.errorIndexes.length ? '재고 조회 실패 · 미배치 확인 보류' : inventory.data === null ? '조회할 재고 없음' : '재고 확인 중…'}</span>)}
@@ -305,20 +343,18 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
             <div className="min-w-0 self-start overflow-hidden rounded-md border border-border">
               <div className="flex items-center justify-between gap-2 bg-primary px-2 py-1 text-xs text-primary-foreground">
                 <h3 className="font-medium">인기상품 리스트</h3>
-                {!showProductInput && <Button type="button" size="sm" variant="ghost" className="h-6 gap-1 px-1 text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"
-                  disabled={save.isPending} onClick={() => setEditingProducts(true)}><Pencil className="size-3" />목록 수정</Button>}
-                {showProductInput && Boolean(saved?.products.length) && <Button type="button" size="sm" variant="ghost" className="h-6 px-1 text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"
-                  disabled={save.isPending} onClick={() => {
-                    setDraft(current => current ? { ...current, productText: saved!.products.join('\n') } : null)
-                    setEditingProducts(false)
-                  }}>수정 취소</Button>}
+                <span className="tabular-nums">하루 출고 박스 수 상위 20개</span>
               </div>
-              {showProductInput ? <div className="space-y-1 p-1.5">
-                <p id={`popular-products-help-${brandId}`} className="text-xs text-muted-foreground">M번호 또는 정확한 상품명을 한 줄에 하나씩 입력하세요.</p>
-                <Textarea aria-label="인기상품 리스트" aria-describedby={`popular-products-help-${brandId}`} value={productText}
-                  onChange={event => updateProducts(event.target.value)} disabled={save.isPending}
-                  rows={5} className="h-32 resize-y px-2 py-1 text-xs leading-6" placeholder={'M0001\nM0002\n상품명'} />
-              </div> : <>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-2 py-1 text-xs">
+                <label className="flex items-center gap-1">출고 기준 월
+                  <Input type="month" aria-label="인기상품 출고 기준 월" value={month} onChange={event => onMonthChange(event.target.value)} className="h-6 w-32 px-1 text-xs" />
+                </label>
+                <span className="text-muted-foreground">창고 정리 저장 자료 · 내림차순</span>
+              </div>
+              {rankingMessage && <p role="status" className="px-2 py-2 text-xs text-muted-foreground">{rankingMessage}</p>}
+              {(outbound.isError || inventory.isError || boxes.isError || styles.isError) && <Button type="button" size="sm" variant="outline" className="m-1 h-6 px-1.5"
+                onClick={() => { void outbound.refetch(); if (hasOutbound) { void inventory.refetch(); void styles.refetch(); if (setId) void boxes.refetch() } }}>출고 기준 다시 조회</Button>}
+              {rankingReady && <>
                 {productPositions.isError && <div role="alert" className="flex items-center gap-2 px-2 py-1 text-xs text-danger">
                   상품 위치를 불러오지 못했습니다.
                   <Button type="button" variant="outline" size="sm" className="h-6 px-1.5" disabled={productPositions.isFetching}
@@ -327,16 +363,18 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
                 <div className="max-h-48 overflow-auto">
                   <table aria-label="인기상품 현재 창고 위치" className="w-full table-fixed text-left text-xs">
                     <thead className="sticky top-0 bg-muted text-muted-foreground">
-                      <tr><th scope="col" className="w-[22%] px-2 py-1.5 font-medium">M번호</th>
+                      <tr><th scope="col" className="w-[18%] px-2 py-1.5 font-medium">M번호</th>
                         <th scope="col" className="px-2 py-1.5 font-medium">상품명</th>
-                        <th scope="col" className="w-[30%] px-2 py-1.5 font-medium">첫 번째 위치</th></tr>
+                        <th scope="col" className="w-[20%] px-1 py-1.5 text-right font-medium">박스/일</th>
+                        <th scope="col" className="w-[25%] px-2 py-1.5 font-medium">첫 번째 위치</th></tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {productRows.map(row => <tr key={JSON.stringify([row.entry, row.styleNo])}>
-                        <td className="break-words px-2 py-1.5 tabular-nums">{row.styleNo || '—'}</td>
-                        <td className="break-words px-2 py-1.5">{row.name || '—'}</td>
+                      {productRows.map(row => <tr key={row.index}>
+                        <td className="break-words px-2 py-1.5 tabular-nums">{row.styleNo || '확인 필요'}</td>
+                        <td className="break-words px-2 py-1.5">{row.productName}</td>
+                        <td className="px-1 py-1.5 text-right tabular-nums">{DAILY_BOX_FORMAT.format(row.dailyBoxes)}</td>
                         <td className="break-words px-2 py-1.5">
-                          {productLookupMessage ?? <>
+                          {!row.styleNo ? 'SKU 확인 필요' : productLookupMessage ?? <>
                             {row.location || (row.matched ? '현재 재고 없음' : '일치 상품 없음')}
                             {row.quantityUnknown && <span className="block text-warning">수량 미확인</span>}
                           </>}
@@ -348,7 +386,6 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
               </>}
             </div>
             </div>
-            {saved && !saved.productsReady && <p className="text-xs text-muted-foreground">인기상품 공유 저장은 서버 적용 후 사용할 수 있습니다.</p>}
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs text-muted-foreground">{dirty ? '저장하지 않은 변경' : '같은 브랜드의 물류팀이 공유하는 목록'}</span>
               <div className="flex flex-wrap items-center gap-2">
@@ -357,8 +394,8 @@ function SharedPopularLocations({ brandId, viewerId }: { brandId: string; viewer
                     마지막 저장 <time dateTime={saved.updatedAt}>{UPDATED_AT_FORMAT.format(new Date(saved.updatedAt))}</time>
                   </span>
                 )}
-                <Button type="button" size="sm" className="h-7 px-2" disabled={!dirty || conflict || save.isPending || (productsDirty && !saved?.productsReady)}
-                  onClick={() => { if (draft) save.mutate({ codes, revision: draft.revision, products: saved?.productsReady ? products : undefined }) }}>
+                <Button type="button" size="sm" className="h-7 px-2" disabled={!dirty || conflict || save.isPending}
+                  onClick={() => { if (draft) save.mutate({ codes, revision: draft.revision }) }}>
                   {save.isPending ? '저장 중…' : '목록 저장'}
                 </Button>
               </div>
