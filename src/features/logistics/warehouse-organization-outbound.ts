@@ -48,6 +48,21 @@ export function warehouseOutboundMonthDays(month: string): number | null {
   return new Date(Date.UTC(year, monthNumber, 0)).getUTCDate()
 }
 
+export function warehouseOutboundDailyBoxes(quantity: number, monthDays: number | null, unitsPerBox: number | undefined) {
+  return monthDays && unitsPerBox && Number.isFinite(unitsPerBox) && unitsPerBox > 0
+    ? quantity / monthDays / unitsPerBox : null
+}
+
+export function warehousePopularOutboundProducts(
+  items: readonly WarehouseOrganizationOutboundItem[], month: string, boxQuantities: ReadonlyMap<string, number>,
+) {
+  const days = warehouseOutboundMonthDays(month)
+  return items.map((item, index) => ({ ...item, index,
+    dailyBoxes: warehouseOutboundDailyBoxes(item.quantity, days, boxQuantities.get(warehouseProductNameKey(item.productName))),
+  })).filter((item): item is typeof item & { dailyBoxes: number } => item.dailyBoxes != null)
+    .sort((left, right) => right.dailyBoxes - left.dailyBoxes || left.index - right.index).slice(0, 20)
+}
+
 export function parseWarehouseOrganizationOutbound(text: string):
   { items: WarehouseOrganizationOutboundItem[] } | { error: string } {
   const items: WarehouseOrganizationOutboundItem[] = []

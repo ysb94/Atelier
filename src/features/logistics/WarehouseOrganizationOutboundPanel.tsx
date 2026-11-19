@@ -7,11 +7,11 @@ import { Input, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useBasicWorkAccess } from '@/lib/supabase/basic-work-access'
 import { diagnosticOperation } from '@/lib/diagnostics/workflow-trace'
-import { getActiveWarehouseInventorySet, listWarehouseStockPositions } from '@/lib/supabase/warehouse-stock'
+import { getActiveWarehouseInventorySet, listWarehouseOutboundBoxQuantities } from '@/lib/supabase/warehouse-stock'
 import { listAllStyleRefs } from '@/lib/supabase/styles'
 import { warehouseProductNameKey } from '@/lib/warehouse/fixed-location-styles'
 import { emptyList } from '@/lib/utils'
-import type { StyleRef, WarehouseStockPosition } from '@/lib/types'
+import type { StyleRef } from '@/lib/types'
 import {
   readWarehouseOrganizationOutbound,
   saveWarehouseOrganizationOutbound,
@@ -20,8 +20,8 @@ import {
 import {
   isWarehouseOutboundMonth,
   parseWarehouseOrganizationOutbound,
-  previousWarehouseOutboundMonth,
   warehouseOutboundMonthDays,
+  warehouseOutboundDailyBoxes,
   warehouseOutboundBoxQuantities,
   warehouseOutboundStyleNumbers,
 } from './warehouse-organization-outbound'
@@ -65,7 +65,7 @@ function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockE
     const unitsPerBox = boxQuantities.get(warehouseProductNameKey(item.productName))
     const styleNo = !stylesLoading && !stylesError ? styleNumbers.get(warehouseProductNameKey(item.productName)) : undefined
     const dailyQuantity = monthDays ? item.quantity / monthDays : null
-    const dailyBoxes = !stockLoading && !stockError && unitsPerBox && dailyQuantity != null ? dailyQuantity / unitsPerBox : null
+    const dailyBoxes = !stockLoading && !stockError ? warehouseOutboundDailyBoxes(item.quantity, monthDays, unitsPerBox) : null
     return {
       item, index, unitsPerBox, dailyQuantity, dailyBoxes, styleNo,
       values: {
@@ -156,19 +156,20 @@ function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockE
   )
 }
 
-export function WarehouseOrganizationOutboundPanel({ brandId }: { brandId: string }) {
+type OutboundMonthProps = { brandId: string; month: string; onMonthChange: (month: string) => void }
+
+export function WarehouseOrganizationOutboundPanel({ brandId, month, onMonthChange }: OutboundMonthProps) {
   const { access, isPending, isError } = useBasicWorkAccess()
   if (isPending) return <p className="text-sm text-muted-foreground">창고 정리 권한 확인 중…</p>
   if (isError) return <p role="alert" className="text-sm text-danger">창고 정리 권한을 확인하지 못했습니다.</p>
   if (!access?.brandDomains?.[brandId]?.includes('logistics')) {
     return <p className="text-sm text-muted-foreground">이 브랜드의 물류 업무 권한이 필요합니다.</p>
   }
-  return <OutboundMonthForm key={`${brandId}:${access.profileId}`} brandId={brandId} viewerId={access.profileId} />
+  return <OutboundMonthForm key={`${brandId}:${access.profileId}:${month}`} brandId={brandId} viewerId={access.profileId} month={month} onMonthChange={onMonthChange} />
 }
 
-function OutboundMonthForm({ brandId, viewerId }: { brandId: string; viewerId: string }) {
+function OutboundMonthForm({ brandId, viewerId, month, onMonthChange }: OutboundMonthProps & { viewerId: string }) {
   useRenderWatch('WarehouseOrganizationOutboundPanel')
-  const [month, setMonth] = useState(previousWarehouseOutboundMonth)
   const [input, setInput] = useState('')
   const [preview, setPreview] = useState<ReturnType<typeof parseWarehouseOrganizationOutbound>>()
   const [notice, setNotice] = useState('')
@@ -211,13 +212,12 @@ function OutboundMonthForm({ brandId, viewerId }: { brandId: string; viewerId: s
   })
   const setId = inventory.data?.id
   const positions = useQuery({
-    queryKey: ['warehouse-stock-positions', brandId, setId],
-    queryFn: () => diagnosticOperation('app', 'warehouse_organization_boxes', trace =>
-      trace.run('read_stock_positions', context => listWarehouseStockPositions(brandId, setId!, undefined, context))),
+    queryKey: ['warehouse-stock-positions', brandId, setId, 'outbound-boxes', viewerId],
+    queryFn: ({ signal }) => listWarehouseOutboundBoxQuantities(brandId, setId!, signal),
     enabled: tabActive && hasItems && Boolean(setId),
   })
-  const stockRows = positions.data ?? emptyList<WarehouseStockPosition>()
-  const boxQuantities = useMemo(() => warehouseOutboundBoxQuantities(stockRows), [stockRows])
+  const stockRows = positions.data
+  const boxQuantities = useMemo(() => warehouseOutboundBoxQuantities(stockRows ?? []), [stockRows])
   const stockLoading = inventory.isLoading || Boolean(setId && positions.isPending)
   const stockError = inventory.isError || Boolean(setId && positions.isError)
   const boxProps = { boxQuantities, stockLoading, stockError, styleNumbers, stylesLoading: styles.isPending, stylesError: styles.isError }
@@ -229,7 +229,7 @@ function OutboundMonthForm({ brandId, viewerId }: { brandId: string; viewerId: s
           출고 기준 월
           <Input type="month" value={month} disabled={save.isPending}
             onChange={event => {
-              setMonth(event.target.value)
+              onMonthChange(event.target.value)
               setNotice('')
               save.reset()
             }} />
