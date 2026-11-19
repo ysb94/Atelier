@@ -1152,6 +1152,79 @@ try {
   assert.equal(readSlot(productClearPicking).groups.length, 0)
   console.log('PASS: a single picking slot confirmation replaces multiple groups, stale confirmation preserves changed stock, photo QR retry is idempotent and old AA rows are exported')
   console.log('PASS: product absence rejects changed stock, accepts unchanged stock after sheet row bookkeeping')
+
+  const atelierSlot = '6-2-15'
+  const conflictSlot = '%-6-4'
+  query(asService + sheet([...refreshed(), row('atelier-unregistered-slot', '', atelierSlot),
+    row('atelier-conflicting-slot', '', conflictSlot)], 'clock_timestamp()'))
+  query(`delete from public.warehouse_registered_slots where warehouse_id='${warehouse}' and code='${atelierSlot}';
+    insert into public.warehouse_registered_slots(warehouse_id,code,zone) values('${warehouse}','${conflictSlot}','picking')
+    on conflict(warehouse_id,code) do update set zone=excluded.zone;`)
+  const slotStockBefore = query(`select jsonb_agg(to_jsonb(p) order by id) from public.warehouse_stock_positions p;`)
+  query(atelierSql('20261119020858_warehouse_slots_follow_atelier_stock'))
+  assert.equal(query(`select jsonb_agg(to_jsonb(p) order by id) from public.warehouse_stock_positions p;`), slotStockBefore)
+  const registryZone = code => query(`select zone from public.warehouse_registered_slots
+    where warehouse_id='${warehouse}' and code=${quote(code)};`)
+  assert.equal(registryZone(atelierSlot), 'box_storage')
+  assert.equal(registryZone(conflictSlot), 'box_storage')
+  assert.equal(readSlot(atelierSlot).zone, 'box_storage')
+  assert.equal(readSlot(conflictSlot).zone, 'box_storage')
+  const slotPermissionSql = finderSql('20261112080457_finder_feature_permissions')
+  const slotListStart = slotPermissionSql.indexOf('CREATE OR REPLACE FUNCTION public.list_masma_finder_registered_slots(')
+  const slotListEnd = slotPermissionSql.indexOf('CREATE OR REPLACE FUNCTION', slotListStart + 1)
+  assert.ok(slotListStart >= 0 && slotListEnd > slotListStart)
+  query(slotPermissionSql.slice(slotListStart, slotListEnd))
+  const slotSetterEnd = slotPermissionSql.indexOf('CREATE OR REPLACE FUNCTION', slotListEnd + 1)
+  query(finderSql('20260917120000_finder_registered_slots').split('create or replace function')[0])
+  query(slotPermissionSql.slice(slotListEnd, slotSetterEnd))
+  const listFinderSlots = () => JSON.parse(query(asReader + `select jsonb_agg(x) from
+    public.list_masma_finder_registered_slots('${brand}','${warehouse}') x;`))
+  assert.ok(listFinderSlots().some(r => r.code === atelierSlot && r.zone === 'box_storage'))
+  assert.ok(listFinderSlots().some(r => r.code === conflictSlot && r.zone === 'box_storage'))
+  query(asReader + `select public.set_masma_finder_registered_slot(
+    '${brand}','${warehouse}','${atelierSlot}','picking');`, '23514')
+  assert.equal(registryZone(atelierSlot), 'box_storage')
+
+  // A newly imported Atelier stock slot is immediately usable by Finder.
+  const newAtelierSlot = '#-2-6'
+  query(asService + sheet([...refreshed(), row('new-atelier-slot', '', newAtelierSlot)], 'clock_timestamp()'))
+  assert.equal(registryZone(newAtelierSlot), 'box_storage')
+  assert.equal(readSlot(newAtelierSlot).zone, 'box_storage')
+  const qrAtelier = 'ATELIER-SLOT-NEW-QR'
+  const receiveAtelier = { ...intake, place: newAtelierSlot, qr: qrAtelier,
+    backgroundJobId: 'c0000000-0000-4000-8000-000000000530:0' }
+  assert.equal(JSON.parse(query(asService + backgroundMove('prepare', receiveAtelier))).status, 'saved')
+  assert.equal(lookup(qrAtelier, newAtelierSlot).box.place, newAtelierSlot)
+  const auditAtelier = JSON.parse(query(asReader + `select public.finder_warehouse_qr_audit('${brand}','place',
+    ${json({ id:'c0000000-0000-4000-8000-000000000531',place:newAtelierSlot })});`))
+  assert.equal(auditAtelier.place, newAtelierSlot)
+  assert.ok(auditAtelier.rows.some(r => r.box_qr === qrAtelier))
+
+  // Empty named slots stay available, and archived rows cannot reclassify them.
+  query(asReader + `select public.set_masma_finder_registered_slot(
+    '${brand}','${warehouse}','EMPTY-ATELIER','box_storage');`)
+  assert.equal(registryZone('EMPTY-ATELIER'), 'box_storage')
+  query('set role anon;' + `select app.reconcile_warehouse_stock_slots('${warehouse}');`, '42501')
+  query(asReader + `select app.reconcile_warehouse_stock_slots('${warehouse}');`, '42501')
+  query(`begin;
+    insert into public.warehouse_locations(company_id,warehouse_id,code,zone)
+    values('${company}','${warehouse}','${newAtelierSlot}','picking');
+    update public.warehouse_stock_positions set location_id=(
+      select id from public.warehouse_locations where warehouse_id='${warehouse}' and code='${newAtelierSlot}' and zone='picking'
+    ) where set_id='${activeId()}' and external_row_id='new-atelier-slot';
+    rollback;`, '23514')
+  query(`select public.touch_warehouse_registered_slot('${warehouse}','0-0-0','box_storage');`)
+  assert.equal(registryZone('0-0-0'), '')
+  query(`update public.warehouse_stock_positions set remaining_boxes=0,remaining_boxes_raw='0'
+    where set_id='${activeId()}' and external_row_id='atelier-unregistered-slot';`)
+  assert.equal(registryZone(atelierSlot), 'box_storage')
+  assert.equal(readSlot(atelierSlot).groups.length, 0)
+  const beforeRepeatedSync = query(`select jsonb_agg(to_jsonb(r) order by code)
+    from public.warehouse_registered_slots r where warehouse_id='${warehouse}';`)
+  assert.equal(query(`select app.reconcile_warehouse_stock_slots('${warehouse}');`), '0')
+  assert.equal(query(`select jsonb_agg(to_jsonb(r) order by code)
+    from public.warehouse_registered_slots r where warehouse_id='${warehouse}';`), beforeRepeatedSync)
+  console.log('PASS: Atelier slots backfill Finder, resolve conflicting zones, survive sheet import, permit intake and QR audit, preserve empty slots and reject independent occupied-slot relabeling')
 } finally {
   if (started) command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore' })
   assert.equal(path.dirname(fixture), tempRoot)
