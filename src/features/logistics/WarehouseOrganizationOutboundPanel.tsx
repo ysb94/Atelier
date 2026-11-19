@@ -1,10 +1,15 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useBasicWorkAccess } from '@/lib/supabase/basic-work-access'
+import { diagnosticOperation } from '@/lib/diagnostics/workflow-trace'
+import { getActiveWarehouseInventorySet, listWarehouseStockPositions } from '@/lib/supabase/warehouse-stock'
+import { warehouseProductNameKey } from '@/lib/warehouse/fixed-location-styles'
+import { emptyList } from '@/lib/utils'
+import type { WarehouseStockPosition } from '@/lib/types'
 import {
   readWarehouseOrganizationOutbound,
   saveWarehouseOrganizationOutbound,
@@ -15,6 +20,7 @@ import {
   parseWarehouseOrganizationOutbound,
   previousWarehouseOutboundMonth,
   warehouseOutboundMonthDays,
+  warehouseOutboundBoxQuantities,
 } from './warehouse-organization-outbound'
 
 const PAGE_SIZE = 25
@@ -24,7 +30,10 @@ const savedAtFormat = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short',
 })
 
-function OutboundRows({ items, title, month }: { items: WarehouseOrganizationOutboundItem[]; title: string; month: string }) {
+function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockError }: {
+  items: WarehouseOrganizationOutboundItem[]; title: string; month: string
+  boxQuantities: ReadonlyMap<string, number>; stockLoading: boolean; stockError: boolean
+}) {
   const [page, setPage] = useState(0)
   const pages = Math.ceil(items.length / PAGE_SIZE)
   const currentPage = Math.min(page, pages - 1)
@@ -42,24 +51,33 @@ function OutboundRows({ items, title, month }: { items: WarehouseOrganizationOut
       </div>
       {monthDays && <p className="text-xs text-muted-foreground">하루 출고량은 {month} 출고 수량 ÷ {monthDays}일이며, 소수점 둘째 자리까지 표시합니다.</p>}
       <div className="overflow-auto rounded-lg border border-border">
-        <table aria-label={title} className="w-full table-fixed text-sm">
+        <table aria-label={title} className="w-full min-w-[640px] table-fixed text-sm">
           <thead className="bg-primary text-primary-foreground">
             <tr>
               <th scope="col" className="w-16 px-3 py-2 text-right">행</th>
               <th scope="col" className="px-3 py-2 text-left">상품명</th>
               <th scope="col" className="w-28 px-3 py-2 text-right">출고 수량</th>
               <th scope="col" className="w-32 px-3 py-2 text-right">하루 출고량</th>
+              <th scope="col" className="w-40 px-3 py-2 text-right">하루 출고 박스 수</th>
             </tr>
           </thead>
           <tbody>
-            {items.slice(start, start + PAGE_SIZE).map((item, index) => (
-              <tr key={start + index} className="border-b border-border last:border-b-0 hover:bg-muted/40">
-                <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{start + index + 1}</td>
-                <td className="break-words px-3 py-1.5">{item.productName}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums">{numberFormat.format(item.quantity)}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums">{monthDays ? dailyNumberFormat.format(item.quantity / monthDays) : '—'}</td>
-              </tr>
-            ))}
+            {items.slice(start, start + PAGE_SIZE).map((item, index) => {
+              const unitsPerBox = boxQuantities.get(warehouseProductNameKey(item.productName))
+              return (
+                <tr key={start + index} className="border-b border-border last:border-b-0 hover:bg-muted/40">
+                  <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{start + index + 1}</td>
+                  <td className="break-words px-3 py-1.5">{item.productName}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{numberFormat.format(item.quantity)}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{monthDays ? dailyNumberFormat.format(item.quantity / monthDays) : '—'}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {stockError ? '조회 실패' : stockLoading ? '조회 중…' : unitsPerBox && monthDays
+                      ? <>{dailyNumberFormat.format(item.quantity / monthDays / unitsPerBox)}박스<small className="block text-xs text-muted-foreground">박스당 {numberFormat.format(unitsPerBox)}개</small></>
+                      : <span className="text-muted-foreground">박스당 수량 없음</span>}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -114,6 +132,25 @@ function OutboundMonthForm({ brandId, viewerId }: { brandId: string; viewerId: s
     },
   })
   const draftItems = preview && 'items' in preview ? preview.items : undefined
+  const hasItems = Boolean(draftItems?.length || record?.items.length)
+  const inventory = useQuery({
+    queryKey: ['warehouse-inventory-set', brandId],
+    queryFn: () => diagnosticOperation('app', 'warehouse_organization_boxes', trace =>
+      trace.run('active_inventory', context => getActiveWarehouseInventorySet(brandId, context))),
+    enabled: tabActive && hasItems,
+  })
+  const setId = inventory.data?.id
+  const positions = useQuery({
+    queryKey: ['warehouse-stock-positions', brandId, setId],
+    queryFn: () => diagnosticOperation('app', 'warehouse_organization_boxes', trace =>
+      trace.run('read_stock_positions', context => listWarehouseStockPositions(brandId, setId!, undefined, context))),
+    enabled: tabActive && hasItems && Boolean(setId),
+  })
+  const stockRows = positions.data ?? emptyList<WarehouseStockPosition>()
+  const boxQuantities = useMemo(() => warehouseOutboundBoxQuantities(stockRows), [stockRows])
+  const stockLoading = inventory.isLoading || Boolean(setId && positions.isPending)
+  const stockError = inventory.isError || Boolean(setId && positions.isError)
+  const boxProps = { boxQuantities, stockLoading, stockError }
 
   return (
     <div className="space-y-4">
@@ -169,8 +206,10 @@ function OutboundMonthForm({ brandId, viewerId }: { brandId: string; viewerId: s
       )}
       {notice && <p role="status" className="text-sm text-success">{notice}</p>}
       {preview && 'error' in preview && <p role="alert" className="text-sm text-danger">{preview.error}</p>}
-      {draftItems ? <OutboundRows key="preview" items={draftItems} title="저장할 출고 데이터" month={month} />
-        : record ? <OutboundRows key={`${month}:${record.revision}`} items={record.items} title="저장된 출고 데이터" month={month} />
+      {hasItems && <p className="text-xs text-muted-foreground">하루 출고 박스 수는 현재 박스창고·출고창고의 동일 상품 중 가장 큰 박스당 수량을 기준으로 환산합니다.</p>}
+      {stockError && <p role="alert" className="text-sm text-danger">박스당 수량을 조회하지 못했습니다. <Button type="button" size="sm" variant="outline" onClick={() => { void inventory.refetch(); if (setId) void positions.refetch() }}>재고 다시 불러오기</Button></p>}
+      {draftItems ? <OutboundRows key="preview" items={draftItems} title="저장할 출고 데이터" month={month} {...boxProps} />
+        : record ? <OutboundRows key={`${month}:${record.revision}`} items={record.items} title="저장된 출고 데이터" month={month} {...boxProps} />
           : record === null ? <p className="text-sm text-muted-foreground">이 달에 저장한 출고 데이터가 없습니다.</p> : null}
     </div>
   )
