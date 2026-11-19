@@ -9,7 +9,7 @@ const folder = id(5), otherFolder = id(6), crossBrandFolder = id(7)
 const migrations = [
   '20261111054232_warehouse_room_list_folders.sql',
   '20261111082704_warehouse_room_list_folder_edit.sql',
-  '20261119082823_warehouse_room_list_folder_delete.sql',
+  '20261119083748_warehouse_room_list_folder_delete.sql',
 ]
 const setActor = actor => db.query("select set_config('request.jwt.claim.sub',$1,false)", [actor])
 const remove = (target, targetBrand, creator, revision) => db.query(
