@@ -3,6 +3,7 @@
  * 실행: npm run verify:warehouse-stock
  */
 import { normalizeStyleNo } from '@/lib/import/transform'
+import { popularProductAvailability, popularProductEntries } from './popular-products'
 import { indexRoomListLocations, indexRoomListStyleNumbers, roomListLocationCodes } from '@/features/logistics/room-list-locations'
 import { roomListBulkPacking } from '@/features/logistics/room-list-paste'
 import type { StyleRef, WarehouseStockPosition } from '@/lib/types'
@@ -750,5 +751,12 @@ assert(
   preparedSheet.filter((row) => row.zone === 'box_storage').length === 2027,
   '등록되지 않은 자리는 박스창고다',
 )
+
+const popularEntries = popularProductEntries(' M1000\r\n\r\n후드 Black M\nM1000\n M1001 ')
+assert(JSON.stringify(popularEntries) === JSON.stringify(['M1000', '후드 Black M', 'M1001']), '인기상품 입력은 빈 줄과 중복만 정리한다')
+const popularProducts = [{ name: '후드 Black M', styleNo: 'M1000' }, { name: '후드 Blue L', styleNo: 'M1002' }]
+const popularAvailability = popularProductAvailability(['m1000', '후드 Black M', 'M1001', '후드', '후드 Black L'], popularProducts)
+assert(JSON.stringify(popularAvailability.map(item => item.available)) === JSON.stringify([true, true, false, false, false]), 'M번호와 전체 상품명만 비교하며 다른 색상·사이즈를 대신 배치로 집계하지 않는다')
+assert(popularProductAvailability(['M1000'], []).every(item => !item.available), '전용 자리 재고가 비어 있으면 미배치다')
 
 console.log('warehouse-stock verify: ok')
