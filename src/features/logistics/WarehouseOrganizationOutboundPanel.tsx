@@ -26,6 +26,11 @@ import {
 const PAGE_SIZE = 25
 const numberFormat = new Intl.NumberFormat('ko-KR')
 const dailyNumberFormat = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 })
+const BOX_ESTIMATE_PERIODS = [
+  { days: 7, label: '1주일 예상 박스 수' },
+  { days: 14, label: '2주일 예상 박스 수' },
+  { days: 28, label: '4주 예상 박스 수' },
+] as const
 const savedAtFormat = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short',
 })
@@ -49,9 +54,9 @@ function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockE
           {numberFormat.format(items.length)}행 · 총 {numberFormat.format(total)}개
         </p>
       </div>
-      {monthDays && <p className="text-xs text-muted-foreground">하루 출고량은 {month} 출고 수량 ÷ {monthDays}일이며, 소수점 둘째 자리까지 표시합니다.</p>}
+      {monthDays && <p className="text-xs text-muted-foreground">하루 출고량은 {month} 출고 수량 ÷ {monthDays}일입니다. 주별 예상 박스 수는 하루 박스 수에 7일·14일·28일을 곱하며, 소수점 둘째 자리까지 표시합니다.</p>}
       <div className="overflow-auto rounded-lg border border-border">
-        <table aria-label={title} className="w-full min-w-[640px] table-fixed text-sm">
+        <table aria-label={title} className="w-full min-w-[1120px] table-fixed text-sm">
           <thead className="bg-primary text-primary-foreground">
             <tr>
               <th scope="col" className="w-16 px-3 py-2 text-right">행</th>
@@ -59,11 +64,13 @@ function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockE
               <th scope="col" className="w-28 px-3 py-2 text-right">출고 수량</th>
               <th scope="col" className="w-32 px-3 py-2 text-right">하루 출고량</th>
               <th scope="col" className="w-40 px-3 py-2 text-right">하루 출고 박스 수</th>
+              {BOX_ESTIMATE_PERIODS.map(period => <th key={period.days} scope="col" className="w-40 px-3 py-2 text-right">{period.label}</th>)}
             </tr>
           </thead>
           <tbody>
             {items.slice(start, start + PAGE_SIZE).map((item, index) => {
               const unitsPerBox = boxQuantities.get(warehouseProductNameKey(item.productName))
+              const dailyBoxes = unitsPerBox && monthDays ? item.quantity / monthDays / unitsPerBox : null
               return (
                 <tr key={start + index} className="border-b border-border last:border-b-0 hover:bg-muted/40">
                   <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{start + index + 1}</td>
@@ -71,10 +78,15 @@ function OutboundRows({ items, title, month, boxQuantities, stockLoading, stockE
                   <td className="px-3 py-1.5 text-right tabular-nums">{numberFormat.format(item.quantity)}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{monthDays ? dailyNumberFormat.format(item.quantity / monthDays) : '—'}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">
-                    {stockError ? '조회 실패' : stockLoading ? '조회 중…' : unitsPerBox && monthDays
-                      ? <>{dailyNumberFormat.format(item.quantity / monthDays / unitsPerBox)}박스<small className="block text-xs text-muted-foreground">박스당 {numberFormat.format(unitsPerBox)}개</small></>
+                    {stockError ? '조회 실패' : stockLoading ? '조회 중…' : dailyBoxes != null && unitsPerBox
+                      ? <>{dailyNumberFormat.format(dailyBoxes)}박스<small className="block text-xs text-muted-foreground">박스당 {numberFormat.format(unitsPerBox)}개</small></>
                       : <span className="text-muted-foreground">박스당 수량 없음</span>}
                   </td>
+                  {BOX_ESTIMATE_PERIODS.map(period => <td key={period.days} className="px-3 py-1.5 text-right tabular-nums">
+                    {stockError ? '조회 실패' : stockLoading ? '조회 중…' : dailyBoxes != null
+                      ? `${dailyNumberFormat.format(dailyBoxes * period.days)}박스`
+                      : <span className="text-muted-foreground">박스당 수량 없음</span>}
+                  </td>)}
                 </tr>
               )
             })}
