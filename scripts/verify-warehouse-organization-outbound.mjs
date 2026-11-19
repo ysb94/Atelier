@@ -6,6 +6,7 @@ import {
   previousWarehouseOutboundMonth,
   warehouseOutboundMonthDays,
   warehouseOutboundBoxQuantities,
+  warehouseOutboundStyleNumbers,
 } from '../src/features/logistics/warehouse-organization-outbound.ts'
 
 assert.equal(previousWarehouseOutboundMonth(new Date('2026-12-31T15:00:00Z')), '2026-12')
@@ -17,6 +18,18 @@ assert.equal(warehouseOutboundMonthDays('2028-02'), 29)
 assert.equal(warehouseOutboundMonthDays('2100-02'), 28)
 assert.equal(warehouseOutboundMonthDays('2026-13'), null)
 assert.equal(warehouseOutboundMonthDays(''), null)
+const styleNumbers = warehouseOutboundStyleNumbers([
+  { styleId: 'a', styleNo: ' M0010 ', name: ' 가방 블랙 ' },
+  { styleId: 'b', styleNo: 'M0011', name: '가방 베이지' },
+  { styleId: 'c', styleNo: 'M0012', name: '중복 상품' },
+  { styleId: 'd', styleNo: 'M0013', name: '중복 상품' },
+  { styleId: 'e', styleNo: '', name: '번호 없음' },
+])
+assert.equal(styleNumbers.get('가방 블랙'), 'M0010')
+assert.equal(styleNumbers.get('가방 베이지'), 'M0011')
+assert.equal(styleNumbers.get('중복 상품'), null)
+assert.equal(styleNumbers.get('번호 없음'), null)
+assert.equal(styleNumbers.has('없는 상품'), false)
 const boxQuantities = warehouseOutboundBoxQuantities([
   { styleName: '가방', zone: 'picking', unitsPerBox: 8 },
   { styleName: '가방', zone: 'box_storage', unitsPerBox: 16 },
