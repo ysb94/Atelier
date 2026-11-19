@@ -2,7 +2,7 @@
  * 하차용·창고정리용 인쇄가 A4 한 장을 글자 잘림 없이 채우는지 검증.
  * 실행: npx tsx --tsconfig tsconfig.app.json src/lib/cargo/line-list-print.verify.ts
  */
-import { CARGO_LINE_LIST_COLUMNS } from '../../features/logistics/cargo-line-list-columns'
+import { CARGO_LINE_LIST_COLUMNS, CARGO_WAREHOUSE_LINE_LIST_COLUMNS } from '../../features/logistics/cargo-line-list-columns'
 import type { CargoLineListCells } from './line-list'
 import {
   buildCargoLineListPrintLayout,
@@ -106,6 +106,15 @@ assertPercents(portrait25)
 assertTextFits(portrait25, rows25)
 
 const rows32 = makeRows(32)
+const warehouseRows = rows32.map((row, index) => index === 0 ? { ...row, name: `${row.name} [인기상품]` } : row)
+for (const orientation of ['portrait', 'landscape'] as const) {
+  const layout = buildCargoLineListPrintLayout(warehouseRows, orientation, CARGO_WAREHOUSE_LINE_LIST_COLUMNS)
+  const nameColumn = layout.columns.find(column => column.key === 'name')
+  assert(nameColumn, '창고정리용 품명 열이 없다')
+  const fullNameWidth = measureCargoPrintTextMm(warehouseRows[0].name, layout.fontPt)
+  assert(fullNameWidth <= (nameColumn.widthMm - layout.padXMm) * layout.nameLines + 0.05,
+    `${orientation} 인쇄의 품명 끝 인기상품 표시가 잘린다`)
+}
 const portrait32 = buildCargoLineListPrintLayout(rows32, 'portrait', CARGO_LINE_LIST_COLUMNS)
 const landscape32 = buildCargoLineListPrintLayout(rows32, 'landscape', CARGO_LINE_LIST_COLUMNS)
 assertOnePageFilled(portrait32, 32)
