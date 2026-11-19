@@ -7,6 +7,8 @@ import {
   warehouseOutboundMonthDays,
   warehouseOutboundBoxQuantities,
   warehouseOutboundStyleNumbers,
+  warehouseOutboundDailyBoxes,
+  warehousePopularOutboundProducts,
 } from '../src/features/logistics/warehouse-organization-outbound.ts'
 
 assert.equal(previousWarehouseOutboundMonth(new Date('2026-12-31T15:00:00Z')), '2026-12')
@@ -43,6 +45,27 @@ assert.equal(boxQuantities.get('가방'), 16)
 assert.equal(boxQuantities.get('다른 상품'), 20)
 assert.equal(boxQuantities.has('수량 없음'), false)
 assert.equal(boxQuantities.has('0 수량'), false)
+assert.equal(warehouseOutboundDailyBoxes(2976, 31, 16), 6)
+assert.equal(warehouseOutboundDailyBoxes(2976, 31, undefined), null)
+assert.equal(warehouseOutboundDailyBoxes(2976, null, 16), null)
+assert.equal(warehouseOutboundDailyBoxes(2976, 31, 0), null)
+const popularItems = Array.from({ length: 25 }, (_, index) => ({ productName: `상품 ${index}`, quantity: index * 310 }))
+const popularBoxes = new Map(popularItems.map(item => [item.productName, 10]))
+const ranked = warehousePopularOutboundProducts(popularItems, '2026-10', popularBoxes)
+assert.equal(ranked.length, 20)
+assert.equal(ranked[0].productName, '상품 24')
+assert.equal(ranked.at(-1).productName, '상품 5')
+assert.equal(ranked[0].dailyBoxes, 24)
+assert.equal(popularItems[0].productName, '상품 0', 'Ranking must not reorder the saved data')
+assert.deepEqual(warehousePopularOutboundProducts(popularItems, '', popularBoxes), [])
+assert.deepEqual(warehousePopularOutboundProducts(popularItems, '2026-10', new Map()), [])
+const popularSamples = [
+  { productName: '수량 많음', quantity: 3100 }, { productName: '박스 많음', quantity: 620 },
+  { productName: '동점', quantity: 620 }, { productName: '박스 수량 없음', quantity: 99999 },
+]
+const popularSampleBoxes = new Map([['수량 많음', 100], ['박스 많음', 10], ['동점', 10]])
+assert.deepEqual(warehousePopularOutboundProducts(popularSamples, '2026-10', popularSampleBoxes).map(item => item.productName), ['박스 많음', '동점', '수량 많음'])
+assert.equal(warehousePopularOutboundProducts([{ productName: '윤년', quantity: 290 }], '2028-02', new Map([['윤년', 10]]))[0].dailyBoxes, 1)
 assert.deepEqual(parseWarehouseOrganizationOutbound('상품명\t출고 수량\r\n"가방 A"\t2,977\r\n가방 B\t0\r\n'), {
   items: [{ productName: '가방 A', quantity: 2977 }, { productName: '가방 B', quantity: 0 }],
 })

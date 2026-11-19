@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { ListChecks, MapPin, Package, QrCode, Truck } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { useBrand } from '@/components/layout/brand-context'
@@ -18,6 +19,7 @@ import { WarehouseInventoryPanel } from './WarehouseInventoryPanel'
 import { WarehouseFixedLocationsPanel } from './WarehouseFixedLocationsPanel'
 import { WarehouseOrganizationOutboundPanel } from './WarehouseOrganizationOutboundPanel'
 import { WarehousePopularLocationsPanel } from './WarehousePopularLocationsPanel'
+import { previousWarehouseOutboundMonth } from './warehouse-organization-outbound'
 import { WarehouseQrPanel } from './WarehouseQrPanel'
 import { WarehouseQrAuditReviewPanel } from './WarehouseQrAuditReviewPanel'
 import { WarehouseSlotSettingsPanel } from './WarehouseSlotSettingsPanel'
@@ -91,6 +93,7 @@ function isWarehousePanel(value: string | null): value is WarehousePanel {
 export function WarehousePage() {
   useRenderWatch('WarehousePage')
   const { brand } = useBrand()
+  const [outboundMonth, setOutboundMonth] = useState(previousWarehouseOutboundMonth)
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedView = searchParams.get('view')
   const activeView: WarehouseView = isWarehouseView(requestedView)
@@ -135,7 +138,7 @@ export function WarehousePage() {
         description={`${brand.name} 박스 단위 보관과 피킹용 낱개 보관을 나눠 보는 작업 공간입니다.`}
       />
 
-      <WarehousePopularLocationsPanel key={brand.id} brandId={brand.id} />
+      <WarehousePopularLocationsPanel key={brand.id} brandId={brand.id} month={outboundMonth} onMonthChange={setOutboundMonth} />
 
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {WAREHOUSE_VIEWS.map((item) => {
@@ -217,7 +220,7 @@ export function WarehousePage() {
         </CardHeader>
         <CardContent>
           {activeView === 'organize' ? (
-            <WarehouseOrganizationOutboundPanel brandId={brand.id} />
+            <WarehouseOrganizationOutboundPanel brandId={brand.id} month={outboundMonth} onMonthChange={setOutboundMonth} />
           ) : activeView === 'qr' ? (
             <WarehouseQrPanel brandName={brand.name} brandId={brand.id} />
           ) : activeView === 'boxes' ? (
