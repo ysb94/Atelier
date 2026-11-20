@@ -142,8 +142,16 @@ try{
  const coordinates=lines=>lines.evaluateAll(nodes=>nodes.map(node=>{
    const {y,height}=node.getBoundingClientRect();return [y,height]
  }))
+ const informationColorRows=row.locator(':scope > td').nth(4).locator('.draft-color-line')
+ const orderRows=mdCell.locator('.draft-md-order .draft-color-line')
+ async function assertOrderAlignment() {
+   const expected=await coordinates(colorRows)
+   assert.deepEqual(await coordinates(informationColorRows),expected,'COLOR and INFORMATION use the same color rows')
+   assert.deepEqual(await coordinates(orderRows),expected,'MD quantities align with their color rows')
+ }
  assert.deepEqual(await priceRows.allTextContents(),['15','0'],'회신 단가는 현재 컬러 ID에 맞춰 표시한다')
  assert.deepEqual(await coordinates(priceRows),await coordinates(colorRows),'회신 단가와 컬러 행을 같은 높이에 배치한다')
+ await assertOrderAlignment()
  assert.ok((await reRequest.boundingBox()).y>(await priceRows.last().boundingBox()).y)
  await confirmPrice.click()
  const priceHeart=priceCell.getByRole('img',{name:'단가 확정',exact:true})
@@ -485,6 +493,8 @@ try{
  await addedColor.or(saveError).first().waitFor()
  assert.deepEqual(await saveError.allTextContents(),[], '컬러 저장 오류')
  assert.equal(await addedColor.inputValue(),'흰색')
+ assert.equal(await mdCell.getByRole('textbox',{name:'흰색 발주 수량',exact:true}).inputValue(),'')
+ await assertOrderAlignment()
  assert.equal(await colorForm.count(),0)
  assert.deepEqual(Object.keys(colorPayload).sort(),['p_colors','p_draft_id','p_expected_updated_at'])
  assert.equal(colorPayload.p_draft_id,'fixture')

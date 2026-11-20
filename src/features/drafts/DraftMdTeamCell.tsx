@@ -100,27 +100,28 @@ export function DraftMdTeamCell({ draft, readOnly }: { draft: ProductDraft; read
     <td className="draft-sheet-md-cell">
       <div className="draft-md-layout">
         <div className="draft-md-order">
-          <div className="draft-md-order-summary">
+          <div className="draft-color-pad justify-center">
             <Button type="button" variant="outline" size="sm"
               className={`draft-md-order-status${orderConfirmed || draft.orderDone ? ' is-done' : ''}`}
               disabled={readOnly} onClick={confirmOrder}>발주확정</Button>
           </div>
-          {draft.colors.map((color, index) => {
-            const name = color.name.trim() || `컬러 ${index + 1}`
-            const quantity = quantities[color.id] ?? color.orderQty?.toString() ?? ''
-            return (
-              <div key={color.id} className="draft-md-order-color">
-                <label className="draft-md-order-quantity">
-                  <Input inputMode="numeric" aria-label={`${name} 발주 수량`} disabled={readOnly}
-                    value={quantity.replace(/\B(?=(\d{3})+(?!\d))/g, ',')} onChange={event => {
-                      const next = event.currentTarget.value.replaceAll(',', '')
-                      if (/^\d*$/.test(next)) setQuantities(current => ({ ...current, [color.id]: next }))
-                    }} />
-                </label>
-                <div className="draft-md-color"><span title={name}>{name}</span></div>
-              </div>
-            )
-          })}
+          <div className="draft-color-lines">
+            {draft.colors.map((color, index) => {
+              const name = color.name.trim() || `컬러 ${index + 1}`
+              const quantity = quantities[color.id] ?? color.orderQty?.toString() ?? ''
+              return (
+                <div key={color.id} className={`draft-color-line${index % 2 === 1 ? ' is-alt' : ''}`}>
+                  <label className="draft-md-order-quantity">
+                    <Input inputMode="numeric" aria-label={`${name} 발주 수량`} disabled={readOnly}
+                      value={quantity.replace(/\B(?=(\d{3})+(?!\d))/g, ',')} onChange={event => {
+                        const next = event.currentTarget.value.replaceAll(',', '')
+                        if (/^\d*$/.test(next)) setQuantities(current => ({ ...current, [color.id]: next }))
+                      }} />
+                  </label>
+                </div>
+              )
+            })}
+          </div>
         </div>
 
         <div className="draft-md-main">
