@@ -27,6 +27,7 @@ import { DraftSampleProgress } from './DraftSampleProgress'
 import { DraftColorSampleProgress } from './DraftColorSampleProgress'
 import { DraftPriceRequestButton, type DraftPriceControls } from './DraftPriceRequestButton'
 import { DraftInformationPanel } from './DraftInformationPanel'
+import { DraftMdTeamCell } from './DraftMdTeamCell'
 
 const SAMPLE_WORK_ORDER_ACCEPT =
   'application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp,.xls,.xlsx'
@@ -89,13 +90,6 @@ function SampleWorkOrderButton({
       {error ? <span className="draft-sheet-field-error">{error}</span> : null}
     </>
   )
-}
-
-/** Individual actions will be connected as their workflows are defined. */
-function DraftAction({ children, label, tone = 'neutral', title }: {
-  children: ReactNode; label: string; tone?: 'neutral' | 'pending' | 'done'; title?: string
-}) {
-  return <button type="button" className={`draft-sheet-action is-${tone}`} disabled aria-label={label} title={`${title ? `${title} · ` : ''}${label} 기능 준비 중`}>{children}</button>
 }
 
 function SheetConfirmButton({
@@ -876,6 +870,17 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
       >
         {named ? '네임확정' : '네임 미정'}
       </SheetConfirmButton>
+      <div className="draft-sheet-brand-actions">
+        <button type="button" className="draft-sheet-edit" aria-label={`${draft.draftNo} 기획안 ${readOnly ? '조회' : '편집'}`} onClick={onOpen}><Pencil size={12} />기획안 {readOnly ? '조회' : '편집'}</button>
+        <button type="button" className="draft-sheet-schedule-button" disabled={readOnly} onClick={onSchedule}>{schedule?.group ? '일정 수정' : '일정 정하기'}</button>
+      </div>
+      {(draft.releaseIssue.trim() || schedule?.group) && (
+        <details className="draft-sheet-release">
+          <summary>발매 이슈</summary>
+          <p>{draft.releaseIssue.trim() || '등록된 이슈 없음'}</p>
+          {schedule?.group && <div className="draft-sheet-schedule">{formatReleaseGroupLabel(schedule.group)}{schedule.certainty ? ` · ${RELEASE_CERTAINTY_LABEL[schedule.certainty]}` : ''}{schedule.targetDate ? ` · ${formatTargetDate(schedule.targetDate)}` : ''}{schedule.isPreview ? ' · 미리보기' : ''}</div>}
+        </details>
+      )}
     </div></td>
     <td>
       {registeredDay ? <p className="draft-sheet-registered">등록일 : {registeredDay}</p> : null}
@@ -988,24 +993,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
         </div>
       </div>
     </td>
-    <td className="draft-sheet-md-cell">
-      <button type="button" className="draft-sheet-edit" aria-label={`${draft.draftNo} 기획안 ${readOnly ? '조회' : '편집'}`} onClick={onOpen}><Pencil size={12} />기획안 {readOnly ? '조회' : '편집'}</button>
-      <div className="draft-sheet-md">
-      <div className="draft-sheet-md-assets">
-        <div className="draft-color-pad" />
-        <div className="draft-color-lines">
-          {(draft.colors.length ? draft.colors : [{ id: 'none' }]).map((color, index) => (
-            <ColorLine key={color.id} index={index}>
-              <div className="draft-sheet-actions"><DraftAction label="MD Image">Image</DraftAction><DraftAction label="MD html">html</DraftAction></div>
-            </ColorLine>
-          ))}
-        </div>
-      </div>
-      <div className="draft-sheet-release"><strong>발매 이슈</strong><p>{draft.releaseIssue.trim() || '등록된 이슈 없음'}</p>
-        {schedule?.group && <div className="draft-sheet-schedule">{formatReleaseGroupLabel(schedule.group)}{schedule.certainty ? ` · ${RELEASE_CERTAINTY_LABEL[schedule.certainty]}` : ''}{schedule.targetDate ? ` · ${formatTargetDate(schedule.targetDate)}` : ''}{schedule.isPreview ? ' · 미리보기' : ''}</div>}
-        <button type="button" className="draft-sheet-schedule-button" disabled={readOnly} onClick={onSchedule}>{schedule?.group ? '일정 수정' : '일정 정하기'}</button>
-      </div>
-    </div></td>
+    <DraftMdTeamCell key={`${informationEditorId ?? ''}:${readOnly}`} draft={draft} readOnly={readOnly} />
     </tr>
     {information && (
       <DraftInformationPanel key={informationEditorId} id={informationId} anchor={information.anchor}
