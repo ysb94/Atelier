@@ -10,7 +10,7 @@ import { MAX_DRAFT_COLORS } from '@/lib/drafts/empty-draft'
 import {
   DRAFT_INFORMATION_LABELS, colorInformationEditKey, documentEditKey, hasInformationEdits, informationEditText,
   isColorInformationConfirmed, isSpecDocumentConfirmed, resolveColorSpec, type ColorInformationField,
-  type DraftInformationField, type InformationDrafts, type SaveColorSpec, type UpdateInformationEdits,
+  type InformationDrafts, type SaveColorSpec, type UpdateInformationEdits,
 } from '@/lib/drafts/color-spec'
 import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
 import { colorSampleLineStatus, resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
@@ -27,6 +27,7 @@ import { DraftSampleProgress } from './DraftSampleProgress'
 import { DraftColorSampleProgress } from './DraftColorSampleProgress'
 import { DraftPriceRequestButton, type DraftPriceControls } from './DraftPriceRequestButton'
 import { DraftInformationPanel } from './DraftInformationPanel'
+import type { DraftInformationPanelField, DraftVisualInformationField } from './draft-information-tabs'
 import { DraftMdTeamCell } from './DraftMdTeamCell'
 import { DraftVisualAmdCells } from './DraftVisualAmdCells'
 
@@ -791,13 +792,19 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
   const doneColorIds = new Set(latestColorRound ? draft.specs.colorSampleDone?.[latestColorRound.id] ?? [] : [])
   const [pendingDone, setPendingDone] = useState<Record<string, boolean>>({})
   const informationId = useId()
-  const [information, setInformation] = useState<{ anchor: HTMLButtonElement; colorId: string | null; field: DraftInformationField } | null>(null)
+  const [information, setInformation] = useState<{
+    anchor: HTMLButtonElement
+    colorId: string | null
+    field: DraftInformationPanelField
+    visualTrigger?: DraftVisualInformationField
+  } | null>(null)
+  const fromVisual = Boolean(information?.visualTrigger)
   const [informationEdits, setInformationEdits] = useState<InformationDrafts>({})
   useEffect(() => {
     setInformationEdits({})
   }, [readOnly, informationEditorId])
   function updateInformationEdits(key: string, update: UpdateInformationEdits) {
-    if (!readOnly) setInformationEdits(current => ({ ...current, [key]: update(current[key]) }))
+    if (!readOnly && !fromVisual) setInformationEdits(current => ({ ...current, [key]: update(current[key]) }))
   }
   const closeInformation = useCallback(() => setInformation(null), [])
   const name = draft.nameEn.trim() || draft.nameKo.trim() || '이름 미정'
@@ -816,7 +823,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
   const specDocument = draft.specs.coating.note
   const documentEditing = !readOnly &&
     informationEditText(specDocument, informationEdits[documentEditKey]?.specDoc).trim() !== specDocument.trim()
-  const documentOpen = information?.field === 'specDoc'
+  const documentOpen = !fromVisual && information?.field === 'specDoc'
   const colorRows: Array<DraftColorRow | null> = draft.colors.length ? draft.colors : [null]
   const priceAmounts = price?.reply?.amounts
   function colorSampleDone(colorId: string) {
@@ -958,7 +965,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
               const editing = !readOnly && color && spec
                 ? hasInformationEdits(spec, informationEdits[colorInformationEditKey(color.id, field)])
                 : false
-              const expanded = information?.colorId === color?.id && information?.field === field
+              const expanded = !fromVisual && information?.colorId === color?.id && information?.field === field
               return (
                 <InformationButton key={field} label={DRAFT_INFORMATION_LABELS[field]}
                   value={displayValue}
@@ -994,7 +1001,10 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
         </div>
       </div>
     </td>
-    <DraftVisualAmdCells key={`${informationEditorId ?? ''}:${readOnly}:visual-amd`} colors={draft.colors} readOnly={readOnly} />
+    <DraftVisualAmdCells key={`${informationEditorId ?? ''}:${readOnly}:visual-amd`} colors={draft.colors} readOnly={readOnly}
+      panelId={informationId} activeTrigger={information?.visualTrigger ? { colorId: information.colorId, field: information.visualTrigger } : null}
+      onOpenVisualTab={(anchor, colorId, field) => setInformation(current =>
+        current?.anchor === anchor && current.field === field ? null : { anchor, colorId, field, visualTrigger: field })} />
     <DraftMdTeamCell key={`${informationEditorId ?? ''}:${readOnly}`} draft={draft} readOnly={readOnly} actorId={informationEditorId} />
     <td />
     </tr>
@@ -1002,7 +1012,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
       <DraftInformationPanel key={informationEditorId} id={informationId} anchor={information.anchor}
         editorId={informationEditorId} temporaryStore={informationTemporaryStore}
         edits={informationEdits} onEditsChange={updateInformationEdits}
-        draft={draft} field={information.field} colorId={information.colorId} readOnly={readOnly}
+        draft={draft} field={information.field} colorId={information.colorId} readOnly={readOnly} fromVisual={fromVisual}
         onSave={onSaveSheetValue}
         onSaveSpecDocument={onSaveSpecDocument}
         onFieldChange={field => setInformation(current => current && { ...current, field })}

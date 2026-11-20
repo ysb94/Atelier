@@ -16,8 +16,8 @@ import { formatSizeSpec, parseSizeSpec, type SizeParts } from '@/lib/drafts/spec
 import type { DraftColorRow, ProductDraft } from '@/lib/types'
 import { draftInformationTemporaryStore, type DraftInformationTemporary, type DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
 import { cn } from '@/lib/utils'
+import { DRAFT_INFORMATION_PANEL_TABS, type DraftInformationPanelField } from './draft-information-tabs'
 
-const FIELDS: readonly DraftInformationField[] = ['size', 'fabric', 'specDoc']
 const MEASUREMENT_FIELDS = ['size', 'weight'] as const
 const SIZE_FIELDS = [...MEASUREMENT_FIELDS, 'sizeNote'] as const
 const FABRIC_FIELDS = ['fabric', 'coating'] as const
@@ -38,7 +38,8 @@ function informationPanelPosition(anchor: HTMLButtonElement): CSSProperties | nu
   if (!anchor.isConnected || trigger.bottom <= 0 || trigger.top >= height ||
     trigger.right <= Math.max(0, board?.left ?? 0) || trigger.left >= Math.min(width, board?.right ?? width)) return null
 
-  const lines = anchor.closest('.draft-sheet-information')?.getBoundingClientRect()
+  const lines = (anchor.closest('.draft-sheet-information') ??
+    anchor.closest('.draft-sheet-visual-cell .draft-color-lines'))?.getBoundingClientRect()
   const column = lines ? {
     left: Math.min(lines.left, trigger.left), right: Math.max(lines.right, trigger.right),
     top: Math.min(lines.top, trigger.top), bottom: Math.max(lines.bottom, trigger.bottom),
@@ -57,7 +58,7 @@ function informationPanelPosition(anchor: HTMLButtonElement): CSSProperties | nu
     }
   }
 
-  const line = anchor.closest('.draft-sheet-info')?.getBoundingClientRect() ?? trigger
+  const line = anchor.closest('.draft-sheet-info, .draft-color-line')?.getBoundingClientRect() ?? trigger
   // 좁은 화면에서도 선택한 컬러의 버튼 줄을 피하고, 컬러가 많을 때는 입력창 내부를 스크롤한다.
   const columnFits = Math.max(column.top, height - column.bottom) >= 240
   const keepVisible = columnFits ? column : line
@@ -156,9 +157,9 @@ function SizeFields({ text, weight, note, locked, onChange }: {
   )
 }
 
-function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, highlighted, canApplyBelow, edits, saved, onEditsChange, onSave, onSaveTemporary }: {
+function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, showWriteActions, highlighted, canApplyBelow, edits, saved, onEditsChange, onSave, onSaveTemporary }: {
   color: DraftColorRow; photo?: string | null; field: ColorInformationField; spec: ResolvedDraftColorSpec; confirmed: boolean
-  readOnly: boolean; highlighted: boolean; canApplyBelow: boolean; onSave: SaveColorSpec
+  readOnly: boolean; showWriteActions: boolean; highlighted: boolean; canApplyBelow: boolean; onSave: SaveColorSpec
   edits?: InformationEdits; onEditsChange: (update: UpdateInformationEdits) => void
   saved?: DraftInformationTemporary; onSaveTemporary?: SaveTemporaryInformation
 }) {
@@ -272,7 +273,7 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2 @[720px]:flex-col @[720px]:items-end">
-        {canApplyBelow && (
+        {showWriteActions && canApplyBelow && (
           <Button size="sm" type="button" variant="outline" disabled={locked || !hasCopyValues}
             onClick={event => {
               if (event.currentTarget.form?.reportValidity()) void save(true)
@@ -285,20 +286,20 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
           {isConfirmed ? '확정 완료' : hasChanges && !temporaryChanged ? '임시 저장됨' : hasValue || hasChanges ? '기입 중' : '미입력'}
           <span aria-hidden="true" className={cn('size-3 rounded-sm border border-border', isConfirmed && 'border-primary bg-primary')} />
         </span>
-        {showModify
+        {showWriteActions && (showModify
           ? <Button size="sm" type="button" variant="outline" disabled={locked} onClick={() => setEditing(true)}>수정</Button>
           : <div className="flex flex-wrap justify-end gap-2">
             <Button size="sm" type="button" variant="outline" disabled={locked || !onSaveTemporary || !temporaryChanged} onClick={() => void saveTemporary()}>임시 저장</Button>
             <Button size="sm" type="submit" disabled={locked || !canConfirm}>{busy ? '저장 중…' : '확정'}</Button>
-          </div>}
+          </div>)}
       </div>
       {error && <p className="text-xs text-danger @[720px]:col-span-3" role="alert">{error}</p>}
     </form>
   )
 }
 
-function SpecDocumentForm({ draft, readOnly, edits, saved, onEditChange, onSave, onSaveTemporary }: {
-  draft: ProductDraft; readOnly: boolean; edits: InformationEdits | undefined
+function SpecDocumentForm({ draft, readOnly, showWriteActions, edits, saved, onEditChange, onSave, onSaveTemporary }: {
+  draft: ProductDraft; readOnly: boolean; showWriteActions: boolean; edits: InformationEdits | undefined
   onEditChange: (update: UpdateInformationEdits) => void; onSave: (value: string, temporaryRevision?: string) => Promise<void>
   saved?: DraftInformationTemporary; onSaveTemporary?: SaveTemporaryInformation
 }) {
@@ -374,12 +375,12 @@ function SpecDocumentForm({ draft, readOnly, edits, saved, onEditChange, onSave,
         <span className="text-xs text-muted-foreground">
           {hasChanges && !temporaryChanged ? '임시 저장됨' : canConfirm ? '기입 중' : text.trim() ? '확정 완료' : '미입력'}
         </span>
-        {showModify
+        {showWriteActions && (showModify
           ? <Button size="sm" type="button" variant="outline" disabled={locked} onClick={() => setEditing(true)}>수정</Button>
           : <>
             <Button size="sm" type="button" variant="outline" disabled={locked || !onSaveTemporary || !temporaryChanged} onClick={() => void saveTemporary()}>임시 저장</Button>
             <Button size="sm" type="submit" disabled={locked || !canConfirm}>{busy ? '저장 중…' : '확정'}</Button>
-          </>}
+          </>)}
       </div>
       {error && <p className="text-xs text-danger" role="alert">{error}</p>}
     </form>
@@ -387,11 +388,12 @@ function SpecDocumentForm({ draft, readOnly, edits, saved, onEditChange, onSave,
 }
 
 export function DraftInformationPanel({
-  id, anchor, draft, field, colorId, readOnly, edits, onEditsChange, onFieldChange, onClose, onSave, onSaveSpecDocument,
+  id, anchor, draft, field, colorId, readOnly, fromVisual, edits, onEditsChange, onFieldChange, onClose, onSave, onSaveSpecDocument,
   editorId, temporaryStore = draftInformationTemporaryStore,
 }: {
-  id: string; anchor: HTMLButtonElement; draft: ProductDraft; field: DraftInformationField; colorId: string | null; readOnly: boolean
-  onFieldChange: (field: DraftInformationField) => void; onClose: () => void; onSave: SaveColorSpec
+  id: string; anchor: HTMLButtonElement; draft: ProductDraft; field: DraftInformationPanelField; colorId: string | null
+  readOnly: boolean; fromVisual: boolean
+  onFieldChange: (field: DraftInformationPanelField) => void; onClose: () => void; onSave: SaveColorSpec
   onSaveSpecDocument: (value: string, temporaryRevision?: string) => Promise<void>
   edits: InformationDrafts; onEditsChange: (key: string, update: UpdateInformationEdits) => void
   editorId?: string; temporaryStore?: DraftInformationTemporaryStore
@@ -399,7 +401,8 @@ export function DraftInformationPanel({
   const active = useWorkspaceTabActivity()
   const cache = useQueryClient()
   const queryKey = ['draft-information-temporary', editorId, draft.id] as const
-  const temporaryEnabled = Boolean(editorId && !readOnly)
+  const locked = readOnly || fromVisual
+  const temporaryEnabled = Boolean(editorId && !locked)
   const temporary = useQuery({
     queryKey,
     queryFn: ({ signal }) => temporaryStore.list(draft.id, editorId!, signal),
@@ -413,7 +416,7 @@ export function DraftInformationPanel({
   const savedDocument = temporaryEnabled ? temporary.data?.find(row => row.field === 'specDoc') : undefined
 
   async function saveTemporary(field: DraftInformationField, colorId: string | null, edits: InformationEdits) {
-    if (!editorId || readOnly) return
+    if (!editorId || locked) return
     const copy = { field, color_id: colorId, edits, revision: crypto.randomUUID() }
     await temporaryStore.save(draft.id, editorId, copy)
     await cache.cancelQueries({ queryKey, exact: true })
@@ -475,6 +478,8 @@ export function DraftInformationPanel({
   }
 
   const colors = draft.colors
+  const visualTab = field === 'image' || field === 'html'
+  const selectedColorName = visualTab && colors.find(color => color.id === colorId)?.name.trim()
   if (!active) return null
 
   const content = (
@@ -506,19 +511,19 @@ export function DraftInformationPanel({
       <div className="mx-4 mb-4 overflow-hidden rounded-xl border border-border">
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
           {field === 'specDoc' ? <span className="text-sm font-semibold">공통 스펙 문서</span>
-            : <span className="text-sm font-semibold">컬러 <span className="ml-1.5 font-normal text-muted-foreground">{colors.length}개</span></span>}
+            : <span className="text-sm font-semibold">컬러 <span className="ml-1.5 font-normal text-muted-foreground">{selectedColorName || `${colors.length}개`}</span></span>}
           <div role="group" aria-label="INFORMATION 입력 항목" className="flex flex-wrap gap-2">
-            {FIELDS.map(option => (
+            {DRAFT_INFORMATION_PANEL_TABS.map(({ field: option, label }) => (
               <Button key={option} type="button" size="sm" variant={field === option ? 'default' : 'outline'}
                 aria-pressed={field === option} onClick={() => onFieldChange(option)}>
                 {option === 'specDoc' && <FileText size={14} aria-hidden="true" />}
-                {DRAFT_INFORMATION_LABELS[option]}
+                {label}
               </Button>
             ))}
           </div>
         </div>
-        {field === 'specDoc' ? (
-          <SpecDocumentForm key={String(readOnly)} draft={draft} readOnly={readOnly || loadingTemporary} saved={savedDocument}
+        {visualTab ? <div className="min-h-24 border-t border-border" /> : field === 'specDoc' ? (
+          <SpecDocumentForm key={String(locked)} draft={draft} readOnly={locked || loadingTemporary} showWriteActions={!fromVisual} saved={savedDocument}
             onSave={async (value, revision) => {
               await onSaveSpecDocument(value, revision)
               removeConfirmedTemporary(revision)
@@ -531,12 +536,13 @@ export function DraftInformationPanel({
           const spec = resolveColorSpec(draft.specs, color.id)
           const editKey = colorInformationEditKey(color.id, field)
           const saved = temporaryEnabled ? temporary.data?.find(row => row.field === field && row.color_id === color.id) : undefined
-          return <ColorInformationForm key={`${color.id}:${field}:${readOnly}`} color={color} field={field}
+          return <ColorInformationForm key={`${color.id}:${field}:${locked}`} color={color} field={field}
             photo={draft.specs.colorPhotoUrls?.[color.id]} spec={spec} confirmed={isColorInformationConfirmed(draft.specs, spec, field)}
             edits={edits[editKey] ?? saved?.edits} saved={saved}
             onEditsChange={next => onEditsChange(editKey, current => next(current ?? saved?.edits))}
             onSaveTemporary={canSaveTemporary ? next => saveTemporary(field, color.id, next) : undefined}
-            highlighted={color.id === colorId} readOnly={readOnly || loadingTemporary} canApplyBelow={index === 0 && colors.length > 1} onSave={saveColor} />
+            highlighted={color.id === colorId} readOnly={locked || loadingTemporary} showWriteActions={!fromVisual}
+            canApplyBelow={index === 0 && colors.length > 1} onSave={saveColor} />
         }) : <p className="border-t border-border px-4 py-3 text-sm text-muted-foreground">등록된 컬러가 없습니다.</p>}
       </div>
     </Card>

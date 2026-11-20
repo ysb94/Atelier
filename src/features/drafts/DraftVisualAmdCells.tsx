@@ -2,8 +2,15 @@ import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import type { DraftColorRow } from '@/lib/types'
+import { DRAFT_VISUAL_INFORMATION_TABS, type DraftVisualInformationField } from './draft-information-tabs'
 
-export function DraftVisualAmdCells({ colors, readOnly }: { colors: DraftColorRow[]; readOnly: boolean }) {
+export function DraftVisualAmdCells({ colors, readOnly, panelId, activeTrigger, onOpenVisualTab }: {
+  colors: DraftColorRow[]
+  readOnly: boolean
+  panelId: string
+  activeTrigger: { colorId: string | null; field: DraftVisualInformationField } | null
+  onOpenVisualTab: (anchor: HTMLButtonElement, colorId: string, field: DraftVisualInformationField) => void
+}) {
   return <>
     <td className="draft-sheet-visual-cell">
       <div className="draft-color-pad draft-visual-assignee">
@@ -18,10 +25,14 @@ export function DraftVisualAmdCells({ colors, readOnly }: { colors: DraftColorRo
         {colors.map((color, index) => {
           const name = color.name.trim() || `컬러 ${index + 1}`
           return <div key={color.id} className={`draft-color-line${index % 2 ? ' is-alt' : ''}`}>
-            <Button type="button" variant="outline" size="sm" className="draft-team-control"
-              aria-label={`${name} Image`} disabled>Image</Button>
-            <Button type="button" variant="outline" size="sm" className="draft-team-control"
-              aria-label={`${name} html`} disabled>html</Button>
+            {DRAFT_VISUAL_INFORMATION_TABS.map(({ field, label }) => {
+              const expanded = activeTrigger?.colorId === color.id && activeTrigger.field === field
+              return <Button key={field} type="button" variant="outline" size="sm" className="draft-team-control"
+                aria-label={`${name} ${label}`} aria-haspopup="dialog" aria-expanded={expanded}
+                aria-controls={expanded ? panelId : undefined} onClick={event => onOpenVisualTab(event.currentTarget, color.id, field)}>
+                {label}
+              </Button>
+            })}
             {index === 0 && <Button type="button" variant="outline" size="sm" className="draft-team-control draft-team-confirm"
               aria-label="비주얼 팀 확정" disabled>확정</Button>}
           </div>
