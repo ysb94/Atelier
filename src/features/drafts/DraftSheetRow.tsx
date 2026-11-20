@@ -800,8 +800,10 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
   } | null>(null)
   const fromVisual = Boolean(information?.visualTrigger)
   const [informationEdits, setInformationEdits] = useState<InformationDrafts>({})
+  const [visualImages, setVisualImages] = useState<Partial<Record<string, string>>>({})
   useEffect(() => {
     setInformationEdits({})
+    setVisualImages({})
   }, [readOnly, informationEditorId])
   function updateInformationEdits(key: string, update: UpdateInformationEdits) {
     if (!readOnly && !fromVisual) setInformationEdits(current => ({ ...current, [key]: update(current[key]) }))
@@ -1012,6 +1014,9 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
       <DraftInformationPanel key={informationEditorId} id={informationId} anchor={information.anchor}
         editorId={informationEditorId} temporaryStore={informationTemporaryStore}
         edits={informationEdits} onEditsChange={updateInformationEdits}
+        visualImages={visualImages} onSaveVisualImage={(colorId, photo) => {
+          if (!readOnly) setVisualImages(current => ({ ...current, [colorId]: photo }))
+        }}
         draft={draft} field={information.field} colorId={information.colorId} readOnly={readOnly} fromVisual={fromVisual}
         onSave={onSaveSheetValue}
         onSaveSpecDocument={onSaveSpecDocument}

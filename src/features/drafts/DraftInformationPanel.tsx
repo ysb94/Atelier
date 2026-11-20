@@ -17,6 +17,7 @@ import type { DraftColorRow, ProductDraft } from '@/lib/types'
 import { draftInformationTemporaryStore, type DraftInformationTemporary, type DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
 import { cn } from '@/lib/utils'
 import { DRAFT_INFORMATION_PANEL_TABS, type DraftInformationPanelField } from './draft-information-tabs'
+import { DraftVisualImagePanel } from './DraftVisualImagePanel'
 
 const MEASUREMENT_FIELDS = ['size', 'weight'] as const
 const SIZE_FIELDS = [...MEASUREMENT_FIELDS, 'sizeNote'] as const
@@ -389,13 +390,15 @@ function SpecDocumentForm({ draft, readOnly, showWriteActions, edits, saved, onE
 
 export function DraftInformationPanel({
   id, anchor, draft, field, colorId, readOnly, fromVisual, edits, onEditsChange, onFieldChange, onClose, onSave, onSaveSpecDocument,
-  editorId, temporaryStore = draftInformationTemporaryStore,
+  visualImages, onSaveVisualImage, editorId, temporaryStore = draftInformationTemporaryStore,
 }: {
   id: string; anchor: HTMLButtonElement; draft: ProductDraft; field: DraftInformationPanelField; colorId: string | null
   readOnly: boolean; fromVisual: boolean
   onFieldChange: (field: DraftInformationPanelField) => void; onClose: () => void; onSave: SaveColorSpec
   onSaveSpecDocument: (value: string, temporaryRevision?: string) => Promise<void>
   edits: InformationDrafts; onEditsChange: (key: string, update: UpdateInformationEdits) => void
+  visualImages: Readonly<Partial<Record<string, string>>>
+  onSaveVisualImage: (colorId: string, photo: string) => void
   editorId?: string; temporaryStore?: DraftInformationTemporaryStore
 }) {
   const active = useWorkspaceTabActivity()
@@ -478,8 +481,7 @@ export function DraftInformationPanel({
   }
 
   const colors = draft.colors
-  const visualTab = field === 'image' || field === 'html'
-  const selectedColorName = visualTab && colors.find(color => color.id === colorId)?.name.trim()
+  const selectedColorName = field === 'html' && colors.find(color => color.id === colorId)?.name.trim()
   if (!active) return null
 
   const content = (
@@ -511,18 +513,21 @@ export function DraftInformationPanel({
       <div className="mx-4 mb-4 overflow-hidden rounded-xl border border-border">
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
           {field === 'specDoc' ? <span className="text-sm font-semibold">공통 스펙 문서</span>
-            : <span className="text-sm font-semibold">컬러 <span className="ml-1.5 font-normal text-muted-foreground">{selectedColorName || `${colors.length}개`}</span></span>}
+            : <span className="text-sm font-semibold">컬러 <span className="ml-1.5 font-normal text-muted-foreground">
+              {field === 'image' ? `${colors.length}color` : selectedColorName || `${colors.length}개`}
+            </span></span>}
           <div role="group" aria-label="INFORMATION 입력 항목" className="flex flex-wrap gap-2">
             {DRAFT_INFORMATION_PANEL_TABS.map(({ field: option, label }) => (
               <Button key={option} type="button" size="sm" variant={field === option ? 'default' : 'outline'}
-                aria-pressed={field === option} onClick={() => onFieldChange(option)}>
+                className={option === 'html' ? 'uppercase' : undefined} aria-pressed={field === option} onClick={() => onFieldChange(option)}>
                 {option === 'specDoc' && <FileText size={14} aria-hidden="true" />}
                 {label}
               </Button>
             ))}
           </div>
         </div>
-        {visualTab ? <div className="min-h-24 border-t border-border" /> : field === 'specDoc' ? (
+        {field === 'image' ? <DraftVisualImagePanel key={`${editorId ?? ''}:${readOnly}`} colors={colors} photos={visualImages}
+          readOnly={readOnly} onSave={onSaveVisualImage} /> : field === 'html' ? <div className="min-h-24 border-t border-border" /> : field === 'specDoc' ? (
           <SpecDocumentForm key={String(locked)} draft={draft} readOnly={locked || loadingTemporary} showWriteActions={!fromVisual} saved={savedDocument}
             onSave={async (value, revision) => {
               await onSaveSpecDocument(value, revision)
