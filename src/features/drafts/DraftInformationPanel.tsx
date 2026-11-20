@@ -530,8 +530,8 @@ export function DraftInformationPanel({
             ))}
           </div>
         </div>
-        {field === 'image' ? <DraftVisualImagePanel key={`${editorId ?? ''}:${readOnly}`} colors={colors} photos={visualImages}
-          readOnly={readOnly} onSave={onSaveVisualImage} /> : field === 'html' ? <div className="min-h-24 border-t border-border" /> : field === 'specDoc' ? (
+        {field === 'image' ? <DraftVisualImagePanel key={`${editorId ?? ''}:${readOnly}`} colors={colors}
+          photos={{ ...draft.specs.colorPhotoUrls, ...visualImages }} readOnly={readOnly} onSave={onSaveVisualImage} /> : field === 'html' ? <div className="min-h-24 border-t border-border" /> : field === 'specDoc' ? (
           <SpecDocumentForm key={String(locked)} draft={draft} readOnly={locked || loadingTemporary} showWriteActions={!fromVisual} saved={savedDocument}
             onSave={async (value, revision) => {
               await onSaveSpecDocument(value, revision)
