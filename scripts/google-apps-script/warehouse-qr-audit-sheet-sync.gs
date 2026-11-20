@@ -1,7 +1,7 @@
 // Install in the same bound project as DB.gs and Masma Works.gs so all three writers share one lock.
 const ATELIER_PENDING_REMOVAL_NOTE = 'Atelier 시트 삭제 확인 대기: ';
 
-function writeAtelierQrAuditSheet(sheet, entry, recordRepair) {
+function writeAtelierQrAuditSheet(sheet, entry, recordRepair, vacancyCache) {
   const first = 3;
   const limit = ATELIER_WAREHOUSE_SNAPSHOT_LAST_ROW;
   const height = sheet.getMaxRows() - first + 1;
@@ -101,7 +101,7 @@ function writeAtelierQrAuditSheet(sheet, entry, recordRepair) {
       if (row.sheetRow > limit) throw new Error('OUTSIDE_SNAPSHOT_RANGE');
       relevant.set(row.id, row);
     });
-    return { display, relevant };
+    return { relevant };
   }
 
   function matchesValue(actual, expected, index, beforeWrite) {
@@ -162,16 +162,20 @@ function writeAtelierQrAuditSheet(sheet, entry, recordRepair) {
   }
 
   const snapshot = read();
-  const { display, relevant } = snapshot;
+  const { relevant } = snapshot;
   const alreadyWritten = verified(snapshot);
   if (alreadyWritten) return alreadyWritten;
 
   const baseline = new Map(relevant);
+  const reserved = [];
   if (versioned) {
     // An older manual-receive writer could reserve AA and stop before filling B:H.
     for (const [id, row] of baseline) {
       if (!before.has(id) && after.has(id) && /^at_manual_[0-9a-f]{32}$/.test(id) &&
-          !row.qr && row.values.every(value => !value)) baseline.delete(id);
+          !row.qr && row.values.every(value => !value)) {
+        reserved.push(row);
+        baseline.delete(id);
+      }
     }
   }
   let repair = null;
@@ -186,13 +190,9 @@ function writeAtelierQrAuditSheet(sheet, entry, recordRepair) {
     repair = differences;
   }
   const fresh = entry.after.filter(row => !relevant.has(row.id));
-  let empty = [];
-  if (fresh.length) {
-    const writableHeight = Math.min(height, limit - first + 1);
-    const candidates = stockWork ? sheet.getRange(first, 1, writableHeight, 27).getDisplayValues() : display.slice(0, writableHeight);
-    empty = findWarehousePlacementEmptyRows(sheet, first, candidates, fresh.length);
-  }
+  const empty = fresh.length ? _atelierFindVacantStockRows(sheet, fresh.length, vacancyCache) : [];
   if (empty.length !== fresh.length) throw new Error('NO_EMPTY_ROW');
+  let nextEmpty = 0;
 
   const requests = [];
   const writes = [];
@@ -229,11 +229,13 @@ function writeAtelierQrAuditSheet(sheet, entry, recordRepair) {
   }
 
   for (const row of entry.after) {
-    const target = relevant.get(row.id)?.sheetRow ?? empty.shift();
     const current = relevant.get(row.id);
-    checkPhysicalRow(target, current, row.id);
-    if (!stockWork || !current) ensureWritable(target, row.id);
-    if (repair) writes.push({ target, current, id: row.id });
+    const target = current?.sheetRow ?? empty[nextEmpty++];
+    if (current) {
+      checkPhysicalRow(target, current, row.id);
+      if (!stockWork) ensureWritable(target, row.id);
+      if (repair) writes.push({ target, current, id: row.id });
+    }
     const formulas = stockWork && current ? sheet.getRange(target, 1, 1, 27).getFormulas()[0] : [];
     const values = [...row.values, row.qr, row.id];
     for (let i = 0; i < manage.length; i++) {
@@ -255,11 +257,18 @@ function writeAtelierQrAuditSheet(sheet, entry, recordRepair) {
     if (repair) {
       recordRepair(repair);
       // Verify the exact cells again after the network call that records the repair.
-      read(); // Recheck duplicate IDs, QR ownership and other stock occupying picking slots.
+      const latest = read(); // Includes QR ownership and other stock occupying picking slots.
+      for (const id of plannedIds) {
+        if (latest.relevant.get(id)?.sheetRow !== relevant.get(id)?.sheetRow) throw new Error('SHEET_STOCK_CHANGED');
+      }
       for (const { target, current, id } of writes) {
         checkPhysicalRow(target, current, id);
         ensureWritable(target, id);
       }
+    }
+    if (empty.length) _atelierCheckVacantStockRows(sheet, empty);
+    for (const row of reserved) {
+      if (!_atelierVacantStockRowsInRange(sheet, row.sheetRow, 1, row.id).length) throw new Error('ROW_OCCUPIED');
     }
     warehousePlacementSheetApi(sheet, ':batchUpdate', 'post', { requests });
     SpreadsheetApp.flush();
@@ -306,6 +315,7 @@ function _releaseAtelierStockSheetRemovals(sheet, completed) {
 function _syncAtelierStockSheetJobs(sheet) {
   const { jobs, cleanup = [] } = _atelierStockConditionCall('claim-stock-sheet-jobs');
   let synced = 0;
+  let vacancyCache = {};
   for (const entry of jobs) {
     try {
       const { rows, absent, cleared } = writeAtelierQrAuditSheet(sheet, entry, differences => {
@@ -316,11 +326,12 @@ function _syncAtelierStockSheetJobs(sheet) {
           error.differences = differences;
           throw error;
         }
-      });
+      }, vacancyCache);
       _atelierStockConditionCall('finish-stock-sheet-job', { id: entry.id, lease: entry.lease, rows, absent });
       synced++;
       if (cleared.size) cleanup.push({ id: entry.id, ids: [...cleared.keys()] });
     } catch (error) {
+      vacancyCache = {};
       const reason = /^[A-Z_]{1,60}$/.test(error.message) ? error.message : 'SYNC_REQUEST_FAILED';
       try {
         _atelierStockConditionCall('fail-stock-sheet-job', {

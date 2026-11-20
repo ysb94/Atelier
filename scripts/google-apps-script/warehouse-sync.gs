@@ -44,13 +44,6 @@
         return sh.getRange(r, c, nr, nc).getValues();
       };
 
-  const _writeRange = (typeof global.writeRange === 'function')
-    ? global.writeRange
-    : function (sh, r, c, values) {
-        if (!values || !values.length) return;
-        sh.getRange(r, c, values.length, values[0].length).setValues(values);
-      };
-
   function _newSuffix() {
     return Utilities.getUuid().replace(/-/g, '').slice(0, 16).toLowerCase();
   }
@@ -70,31 +63,17 @@
     const curAA  = _readRange(sh, ROW_START, COL_AA, numRows, 1);
 
     const existing = new Set(curAA.map(r => _norm(r[0])).filter(Boolean));
-    const outAA = new Array(numRows);
-    let changed = false;
-
     for (let i = 0; i < numRows; i++) {
       const hasAny  = dataBH[i].some(v => _norm(v));
       const current = _norm(curAA[i][0]);
-
-      if (hasAny) {
-        if (current) {
-          outAA[i] = [current];
-        } else {
-          let id;
-          do { id = _makeDocId(); } while (existing.has(id));
-          existing.add(id);
-          outAA[i] = [id];
-          changed = true;
-        }
-      } else {
-        outAA[i] = [current || ''];
+      if (hasAny && !current) {
+        const cell = sh.getRange(ROW_START + i, COL_AA);
+        if (cell.getValue() !== '' || cell.getFormula() || cell.getNote()) continue;
+        let id;
+        do { id = _makeDocId(); } while (existing.has(id));
+        existing.add(id);
+        cell.setNumberFormat('@').setValue(id);
       }
-    }
-
-    if (changed) {
-      _writeRange(sh, ROW_START, COL_AA, outAA);
-      sh.getRange(ROW_START, COL_AA, numRows, 1).setNumberFormat('@');
     }
   }
 
@@ -117,13 +96,9 @@
 
       const rowVals = sh.getRange(r, COL_B, 1, COL_H - COL_B + 1).getValues()[0];
       const hasAny  = rowVals.some(v => _norm(v));
-      const curAA   = _norm(sh.getRange(r, COL_AA).getValue());
-
-      if (hasAny) {
-        if (!curAA) {
-          const id = _makeDocId();
-          sh.getRange(r, COL_AA).setNumberFormat('@').setValue(id);
-        }
+      const cell = sh.getRange(r, COL_AA);
+      if (hasAny && cell.getValue() === '' && !cell.getFormula() && !cell.getNote()) {
+        cell.setNumberFormat('@').setValue(_makeDocId());
       }
     } catch (_) {}
   }
@@ -137,9 +112,19 @@
 })(typeof globalThis !== 'undefined' ? globalThis
    : (typeof window !== 'undefined' ? window : this));
 
-function assignDocIdToAA_v2() { return __docid_mod.assignDocIdToAA_core(); }
+function _atelierWithStockSheetLock(work) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    return work();
+  } finally {
+    try { SpreadsheetApp.flush(); } finally { lock.releaseLock(); }
+  }
+}
+
+function assignDocIdToAA_v2() { return _atelierWithStockSheetLock(__docid_mod.assignDocIdToAA_core); }
 function onOpen_DocIdMenu_v2() { return __docid_mod.buildMenu_core(); }
-function onEdit_AssignDocId_v2(e) { return __docid_mod.onEdit_core(e); }
+function onEdit_AssignDocId_v2(e) { return _atelierWithStockSheetLock(() => __docid_mod.onEdit_core(e)); }
 
 if (typeof onOpen === 'undefined') {
   function onOpen() {
@@ -152,6 +137,10 @@ if (typeof onOpen === 'undefined') {
  *  B) 스냅샷 함수: B~H → AB~AH, X → AI  (3행~3000행)
  * ========================================================== */
 function snapshotBtoH_toABtoAH() {
+  return _atelierWithStockSheetLock(_snapshotBtoH_toABtoAH);
+}
+
+function _snapshotBtoH_toABtoAH() {
   const sh = SpreadsheetApp.getActive().getSheetByName('창고입력');
   if (!sh) throw new Error('시트를 찾을 수 없습니다: 창고입력');
 
@@ -342,7 +331,7 @@ function _collectAtelierWarehouseRows(sh, options) {
   if ((!options || options.enforceRange !== false) && endRow > ATELIER_WAREHOUSE_SNAPSHOT_LAST_ROW) {
     throw new Error('창고입력 데이터가 전체 동기화 상한을 넘었습니다: ' + endRow);
   }
-  if (!options || options.assignIds !== false) assignDocIdToAA_v2();
+  if (!options || options.assignIds !== false) __docid_mod.assignDocIdToAA_core();
   const docIds = _readRange(sh, ROW_START, COL.AA, numRows, 1);
   const boxQrs = sh.getRange(ROW_START, 19, numRows, 1).getDisplayValues();
   const rows = [];
@@ -356,6 +345,9 @@ function _collectAtelierWarehouseRows(sh, options) {
     const h = _norm(curBH[i][6]);
     const aa = _norm(docIds[i][0]);
     if (!(b || c || d || e || f || g || h)) continue;
+    if (!aa && (!options || options.assignIds !== false)) {
+      throw new Error('창고입력 AA를 확인한 뒤 다시 동기화해 주세요: ' + (ROW_START + i));
+    }
     rows.push({
       externalRowId: aa,
       sourceStyleNo: b,
@@ -396,8 +388,10 @@ function syncAtelierWarehouseSnapshot_(options) {
   }
   const sh = SpreadsheetApp.getActive().getSheetByName(WPS_SHEET);
   if (!sh) throw new Error(`시트를 찾을 수 없습니다: ${WPS_SHEET}`);
-  const snapshotAt = Date.now();
-  const rows = _collectAtelierWarehouseRows(sh, { assignIds: !validateOnly });
+  const { snapshotAt, rows } = _atelierWithStockSheetLock(() => ({
+    snapshotAt: Date.now(),
+    rows: _collectAtelierWarehouseRows(sh, { assignIds: !validateOnly }),
+  }));
   if (!rows.length) throw new Error('사이트에 보낼 창고 행이 없습니다.');
 
   const body = JSON.stringify({
@@ -492,35 +486,50 @@ function upsertWPS_WhenRowDiff_resume(){
     const willSetSnapshotX  = new Array(numRows).fill(null);
     const nowIso = _nowIso();
 
+    function syncLockedSlice(offset, slice) {
+      const indexes = jobRowIdx.slice(offset, offset + slice.length);
+      const first = indexes[0];
+      const height = indexes[indexes.length - 1] - first + 1;
+      const start = startRow + first;
+      const current = sh.getRange(start, COL.B, height, COL.AI - COL.B + 1).getValues();
+      const notes = sh.getRange(start, COL.AA, height, 1).getNotes();
+      // A Finder/Atelier job may have finished since the original chunk read.
+      // Reject stale Firebase requests before sending them or changing any WPS snapshots.
+      const ready = indexes.flatMap((i, j) => {
+        const row = current[i - first];
+        const same = (col, value) => _norm(row[col - COL.B]) === _norm(value);
+        const matches = curBH[i].every((v, k) => same(COL.B + k, v)) &&
+          snapAB[i].every((v, k) => same(COL.AB + k, v)) && same(COL.AA, docIds[i][0]) &&
+          same(COL.X, curX[i][0]) && same(COL.AI, xSnaps[i][0]) && notes[i - first][0] === docNotes[i][0];
+        return matches ? [{ i, request: slice[j] }] : [];
+      });
+      firebaseFailures += slice.length - ready.length;
+      if (!ready.length) return;
+      const resps = UrlFetchApp.fetchAll(ready.map(({ request }) => ({ url: request.url, ...request.options })));
+      resps.forEach((res, idx) => {
+        const code = res.getResponseCode();
+        if (code < 200 || code >= 300) { firebaseFailures++; return; }
+        const localIdx = ready[idx].i;
+        const rowIdx = startRow + localIdx;
+        if (willClearSnapshot[localIdx]) {
+          _writeRange(sh, rowIdx, COL.AB, [['','','','','','','']]);
+          _writeRange(sh, rowIdx, COL.AI, [['']]);
+          const idCell = sh.getRange(rowIdx, COL.AA);
+          if (docNotes[localIdx][0].startsWith(removedIdPrefix) &&
+              idCell.getNote() === docNotes[localIdx][0]) idCell.clearNote();
+        } else {
+          _writeRange(sh, rowIdx, COL.AB, [willSetSnapshotBH[localIdx]]);
+          _writeRange(sh, rowIdx, COL.AI, [[willSetSnapshotX[localIdx]]]);
+        }
+      });
+    }
+
     function flushBatch(){
       if (!jobs.length) return;
       for (let s=0; s<jobs.length; s+=CONCURRENCY){
         const slice = jobs.slice(s, s+CONCURRENCY);
         try{
-          const resps = UrlFetchApp.fetchAll(slice.map(j=>({ url:j.url, ...j.options })));
-          resps.forEach((res, idx)=>{
-            const code = res.getResponseCode();
-            const localIdx = jobRowIdx[s+idx];
-            const rowIdx = startRow + localIdx;
-            if (code>=200 && code<300){
-              if (willClearSnapshot[localIdx] === true){
-                _writeRange(sh, rowIdx, COL.AB, [['','','','','','','']]);
-                _writeRange(sh, rowIdx, COL.AI, [['']]);
-                const idCell = sh.getRange(rowIdx, COL.AA);
-                if (docNotes[localIdx][0].startsWith(removedIdPrefix) &&
-                    idCell.getNote() === docNotes[localIdx][0]) idCell.clearNote();
-              } else {
-                if (Array.isArray(willSetSnapshotBH[localIdx])){
-                  _writeRange(sh, rowIdx, COL.AB, [ willSetSnapshotBH[localIdx] ]);
-                }
-                if (willSetSnapshotX[localIdx] !== null){
-                  _writeRange(sh, rowIdx, COL.AI, [[ willSetSnapshotX[localIdx] ]]);
-                }
-              }
-            } else {
-              firebaseFailures += 1;
-            }
-          });
+          _atelierWithStockSheetLock(() => syncLockedSlice(s, slice));
         }catch(e){
           firebaseFailures += 1;
         }
