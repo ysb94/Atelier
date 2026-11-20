@@ -1,19 +1,25 @@
-import { useContext, useMemo, useState, type ReactNode } from 'react'
+import { useContext, useId, useMemo, useState, type ReactNode } from 'react'
 import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
-import type { ProductDraft } from '@/lib/types'
+import { DRAFT_OPEN_DETAIL_OPTIONS, type ProductDraft } from '@/lib/types'
 import {
   DEFAULT_DRAFT_MD_OPTIONS, DRAFT_MD_OPTION_LABELS, DraftMdOptionsContext, initialDraftMdOptionId,
   type DraftMdOption, type DraftMdOptionField,
 } from './draft-md-options'
 import { DraftMdOptionDialog } from './DraftMdOptionDialog'
+import { DraftMdOptionEntries, type DraftMdOptionEntry } from './DraftMdOptionEntries'
 
 type MdSection = 'listing' | 'price' | 'options'
 
 const ORDER_DATE = new Intl.DateTimeFormat('sv-SE', {
   timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
 })
+const EDIT_CONFIRMED_HINT = '오른쪽 수정 버튼을 눌러 변경한 뒤 다시 확정해 주세요.'
+
+function displayDate(value: string) {
+  return value.slice(2).replaceAll('-', '.')
+}
 
 export function DraftMdOptionsProvider({ children }: { children: ReactNode }) {
   const [lists, setLists] = useState(DEFAULT_DRAFT_MD_OPTIONS)
@@ -25,16 +31,18 @@ export function DraftMdOptionsProvider({ children }: { children: ReactNode }) {
   return <DraftMdOptionsContext.Provider value={catalog}>{children}</DraftMdOptionsContext.Provider>
 }
 
-function MdSelect({ label, value, options, disabled, onChange }: {
+function MdSelect({ label, value, options, disabled, confirmed = false, onChange }: {
   label: string
   value: string
   options: DraftMdOption[]
   disabled: boolean
+  confirmed?: boolean
   onChange: (value: string) => void
 }) {
+  const selected = options.some(option => option.id === value) ? value : ''
   return (
-    <span className="draft-md-select">
-      <Select aria-label={label} value={options.some(option => option.id === value) ? value : ''} disabled={disabled}
+    <span className={`draft-md-select${selected && !confirmed ? ' draft-md-unconfirmed' : ''}`}>
+      <Select aria-label={label} value={selected} disabled={disabled}
         onChange={event => onChange(event.currentTarget.value)}>
         <option value="">select</option>
         {options.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
@@ -43,8 +51,8 @@ function MdSelect({ label, value, options, disabled, onChange }: {
   )
 }
 
-function MdField({ label, children }: { label: string; children: ReactNode }) {
-  return <div className="draft-md-field"><span>{label}</span>{children}</div>
+function MdField({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
+  return <div className={`draft-md-field${className ? ` ${className}` : ''}`}><span>{label}</span>{children}</div>
 }
 
 export function DraftMdTeamCell({ draft, readOnly }: { draft: ProductDraft; readOnly: boolean }) {
@@ -56,17 +64,32 @@ export function DraftMdTeamCell({ draft, readOnly }: { draft: ProductDraft; read
   const [managingOptions, setManagingOptions] = useState<DraftMdOptionField | null>(null)
   const [registerType, setRegisterType] = useState(() => initialDraftMdOptionId('register', draft.registerType))
   const [openType, setOpenType] = useState(() => initialDraftMdOptionId('open', draft.openType))
+  const [release, setRelease] = useState({ partner: draft.openTypeDetail.trim(), from: '', to: '', assignee: '' })
+  const [editingPeriod, setEditingPeriod] = useState(false)
+  const assigneeListId = useId()
   const [retailPrice, setRetailPrice] = useState(draft.retailPrice?.toString() ?? '')
   const [discountPrice, setDiscountPrice] = useState(draft.discountPrice?.toString() ?? '')
   const [extraDiscount, setExtraDiscount] = useState('')
   const [auto, setAuto] = useState(false)
-  const [option, setOption] = useState(() => initialDraftMdOptionId('option', draft.hasOptions ? '있음' : ''))
+  const [option, setOption] = useState(() => draft.hasOptions
+    ? draft.options.some(item => (item.price ?? 0) > 0) ? 'option-surcharge' : 'option-included'
+    : '')
+  const [optionEntries, setOptionEntries] = useState<DraftMdOptionEntry[]>(() => draft.options.length
+    ? draft.options.map(item => ({ id: item.id, name: item.name, price: item.price?.toString() ?? '' }))
+    : [{ id: 'initial', name: '', price: '' }])
   const [confirmed, setConfirmed] = useState({ listing: false, price: false, options: false })
   if (!catalog) throw new Error('DraftMdTeamCell requires DraftMdOptionsProvider')
 
   const listingLocked = readOnly || confirmed.listing
   const priceLocked = readOnly || confirmed.price
   const optionsLocked = readOnly || confirmed.options
+  const releaseType = catalog.lists.open.find(item => item.id === openType)
+  const specialRelease = releaseType && (releaseType.id === 'open-early' || releaseType.id === 'open-exclusive')
+  const releasePeriod = [release.from, release.to].filter(Boolean).map(displayDate).join(' ~ ')
+  const releasePartners = [...new Set(['카카오톡', ...DRAFT_OPEN_DETAIL_OPTIONS, release.partner].filter(Boolean))]
+    .map(name => ({ id: name, label: name }))
+  const selectedOption = catalog.lists.option.find(item => item.id === option)
+  const hasOptionEntries = Boolean(selectedOption && selectedOption.id !== 'option-none')
 
   function confirmOrder() {
     const expectedDay = new Date(`${ORDER_DATE.format(new Date())}T00:00:00Z`)
@@ -89,8 +112,12 @@ export function DraftMdTeamCell({ draft, readOnly }: { draft: ProductDraft; read
   function confirmButton(section: MdSection, label: string) {
     const action = confirmed[section] ? '수정' : '확정'
     return (
-      <Button type="button" variant="outline" size="sm" className="draft-md-confirm" aria-label={`${label} ${action}`} disabled={readOnly}
-        onClick={() => setConfirmed(current => ({ ...current, [section]: !current[section] }))}>
+      <Button type="button" variant="outline" size="sm" className={`draft-md-confirm${confirmed[section] ? ' is-confirmed' : ''}`}
+        aria-label={`${label} ${action}`} title={confirmed[section] && !readOnly ? EDIT_CONFIRMED_HINT : undefined} disabled={readOnly}
+        onClick={() => {
+          if (section === 'listing') setEditingPeriod(false)
+          setConfirmed(current => ({ ...current, [section]: !current[section] }))
+        }}>
         {action}
       </Button>
     )
@@ -126,28 +153,72 @@ export function DraftMdTeamCell({ draft, readOnly }: { draft: ProductDraft; read
 
         <div className="draft-md-main">
           <section className="draft-md-section draft-md-listing" aria-label="등록 및 오픈 유형">
-            <div className="draft-md-arrival">
+            <div className={`draft-md-arrival${specialRelease ? ' has-release' : ''}`}>
+              {specialRelease && <strong className="draft-md-release-notice" title={releasePeriod || undefined}>
+                * {[release.partner, releaseType.label].filter(Boolean).join(' ')}{releasePeriod ? ` / ${releasePeriod}` : ''} *
+              </strong>}
               {editingArrival && !listingLocked ? (
                 <label>예상입고일 : <Input type="date" autoFocus value={arrival} onBlur={() => setEditingArrival(false)}
                   onChange={event => setArrival(event.currentTarget.value)} /></label>
               ) : (
                 <button type="button" disabled={listingLocked} onClick={() => setEditingArrival(true)}>
-                  예상입고일 : {arrival ? arrival.slice(2).replaceAll('-', '.') : '미정'}
+                  예상입고일 : {arrival ? displayDate(arrival) : '미정'}
                 </button>
               )}
             </div>
-            <MdField label="등록유형">
-              <MdSelect label="등록유형" value={registerType} options={catalog.lists.register} disabled={listingLocked} onChange={setRegisterType} />
-              {manageOptionButton('register', listingLocked)}
-            </MdField>
-            <MdField label="오픈유형">
-              <MdSelect label="오픈유형" value={openType} options={catalog.lists.open} disabled={listingLocked} onChange={setOpenType} />
-              {manageOptionButton('open', listingLocked)}
-            </MdField>
+            <div className={`draft-md-listing-fields${specialRelease ? ' has-release' : ''}`}>
+              <div>
+                <MdField label="등록유형">
+                  <MdSelect label="등록유형" value={registerType} options={catalog.lists.register} disabled={listingLocked}
+                    confirmed={confirmed.listing} onChange={setRegisterType} />
+                  {manageOptionButton('register', listingLocked)}
+                </MdField>
+                <MdField label="오픈유형">
+                  <MdSelect label="오픈유형" value={openType} options={catalog.lists.open} disabled={listingLocked}
+                    confirmed={confirmed.listing} onChange={value => {
+                      setOpenType(value)
+                      setEditingPeriod(false)
+                    }} />
+                  {manageOptionButton('open', listingLocked)}
+                </MdField>
+                {specialRelease && <MdField className="draft-md-release-partner" label="진행업체">
+                  <MdSelect label="진행업체" value={release.partner} options={releasePartners} disabled={listingLocked}
+                    confirmed={confirmed.listing} onChange={partner => setRelease(current => ({ ...current, partner }))} />
+                </MdField>}
+              </div>
+              {specialRelease && <div className="draft-md-release-fields">
+                <div className="draft-md-release-field">
+                  <span>기간</span>
+                  <div className="draft-md-select">
+                    <Button type="button" variant="outline" size="sm" aria-label="발매 기간" aria-expanded={editingPeriod}
+                      className="draft-md-period-button" title={releasePeriod || undefined} disabled={listingLocked}
+                      onClick={() => setEditingPeriod(current => !current)}>{releasePeriod || 'select'}</Button>
+                    {editingPeriod && !listingLocked && <div className="draft-md-period-panel">
+                      <label>시작일<Input type="date" value={release.from} onChange={event => {
+                        const from = event.currentTarget.value
+                        setRelease(current => ({ ...current, from, to: from && current.to < from ? '' : current.to }))
+                      }} /></label>
+                      <label>종료일<Input type="date" min={release.from || undefined} value={release.to} onChange={event => {
+                        const to = event.currentTarget.value
+                        if (!to || !release.from || to >= release.from) setRelease(current => ({ ...current, to }))
+                      }} /></label>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setEditingPeriod(false)}>닫기</Button>
+                    </div>}
+                  </div>
+                </div>
+                <label className="draft-md-release-field"><span>담당자</span>
+                  <Input className="draft-md-assignee" aria-label="담당자" list={assigneeListId} placeholder="select"
+                    value={release.assignee} disabled={listingLocked}
+                    onChange={event => setRelease(current => ({ ...current, assignee: event.target.value }))} />
+                  <datalist id={assigneeListId}>{draft.owner.trim() && <option value={draft.owner.trim()} />}</datalist>
+                </label>
+              </div>}
+            </div>
             {confirmButton('listing', '등록 및 오픈 유형')}
           </section>
 
-          <section className="draft-md-section draft-md-pricing" aria-label="판매가 및 할인가">
+          <section className={`draft-md-section draft-md-pricing${confirmed.price ? ' is-confirmed' : ''}`}
+            aria-label="판매가 및 할인가" title={confirmed.price && !readOnly ? EDIT_CONFIRMED_HINT : undefined}>
             <MdField label="판매가">
               <Input className="draft-md-input" aria-label="판매가" inputMode="numeric" placeholder="직접등록"
                 value={retailPrice} disabled={priceLocked} onChange={event => setRetailPrice(event.currentTarget.value)} />
@@ -165,9 +236,12 @@ export function DraftMdTeamCell({ draft, readOnly }: { draft: ProductDraft; read
 
           <section className="draft-md-section draft-md-product" aria-label="제조국 및 옵션">
             <div className="draft-md-origin"><span>제조국</span><span>{draft.originCountry.trim() || '미정'}</span></div>
-            <MdField label="옵션유무">
-              <MdSelect label="옵션유무" value={option} options={catalog.lists.option} disabled={optionsLocked} onChange={setOption} />
+            <MdField className="draft-md-option-field" label="옵션유무">
+              <MdSelect label="옵션유무" value={option} options={catalog.lists.option} disabled={optionsLocked}
+                confirmed={confirmed.options} onChange={setOption} />
               {manageOptionButton('option', optionsLocked)}
+              {hasOptionEntries && <DraftMdOptionEntries entries={optionEntries} surcharge={selectedOption?.id === 'option-surcharge'}
+                disabled={optionsLocked} confirmed={confirmed.options} onChange={setOptionEntries} />}
             </MdField>
             {confirmButton('options', '제조국 및 옵션')}
           </section>
