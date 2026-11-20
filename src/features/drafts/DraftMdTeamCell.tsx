@@ -186,7 +186,8 @@ export function DraftMdTeamCell({ draft, readOnly, actorId }: { draft: ProductDr
         </div>
 
         <div className="draft-md-main">
-          <section className="draft-md-section draft-md-listing" aria-label="등록 및 오픈 유형">
+          <section className={`draft-md-section draft-md-listing${confirmed.listing ? ' is-confirmed' : ''}`}
+            aria-label="등록 및 오픈 유형">
             <div className={`draft-md-arrival${specialRelease ? ' has-release' : ''}`}>
               {specialRelease && <strong className="draft-md-release-notice" title={releasePeriod || undefined}>
                 * {[release.partner, releaseType.label].filter(Boolean).join(' ')}{releasePeriod ? ` / ${releasePeriod}` : ''} *
@@ -264,7 +265,8 @@ export function DraftMdTeamCell({ draft, readOnly, actorId }: { draft: ProductDr
             {confirmButton('price', '판매가 및 할인가')}
           </section>
 
-          <section className="draft-md-section draft-md-product" aria-label="제조국 및 옵션">
+          <section className={`draft-md-section draft-md-product${confirmed.options ? ' is-confirmed' : ''}`}
+            aria-label="제조국 및 옵션">
             <div className="draft-md-origin"><span>제조국</span><span>{draft.originCountry.trim() || '미정'}</span></div>
             <MdField className="draft-md-option-field" label="옵션유무">
               <MdSelect label="옵션유무" value={option} options={catalog.lists.option} disabled={optionsLocked}

@@ -228,7 +228,7 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-md-layout .draft-md-auto[aria-pressed=true]{border-color:var(--color-primary);color:var(--color-primary)}
 .draft-md-layout .draft-md-confirm{position:absolute;right:16px;width:41px;height:27px;border:1px solid #e1e1e1;border-radius:7px;padding:0;box-shadow:none;color:var(--color-primary);font-size:12px;font-weight:500}
 .draft-md-layout .draft-md-confirm.is-confirmed{border-color:var(--color-primary);background:var(--color-primary);color:var(--color-primary-foreground)}
-.draft-md-pricing.is-confirmed .draft-md-field::before{border-color:var(--color-primary);background:var(--color-primary)}
+.draft-md-section.is-confirmed .draft-md-field::before{border-color:var(--color-primary);background:var(--color-primary)}
 .draft-md-listing .draft-md-confirm{top:56px}
 .draft-md-pricing .draft-md-confirm{top:18px}
 .draft-md-product .draft-md-confirm{top:9px}
