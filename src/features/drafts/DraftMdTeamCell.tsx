@@ -90,6 +90,43 @@ function MdField({ label, className, children }: { label: string; className?: st
   return <div className={`draft-md-field${className ? ` ${className}` : ''}`}><span>{label}</span>{children}</div>
 }
 
+function formatMdPrice(value: string) {
+  const [whole, fraction] = value.split('.')
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return fraction === undefined ? grouped : `${grouped}.${fraction}`
+}
+
+function MdPriceInput({ label, value, disabled, onChange }: {
+  label: string
+  value: string
+  disabled: boolean
+  onChange: (value: string) => void
+}) {
+  return <Input className="draft-md-input tabular-nums" aria-label={label} inputMode="decimal" placeholder="직접등록"
+    value={formatMdPrice(value)} disabled={disabled} onChange={event => {
+      const input = event.currentTarget
+      const raw = input.value
+      const next = raw.replaceAll(',', '')
+      if (!/^-?\d*(\.\d*)?$/.test(next)) return
+      const formatted = formatMdPrice(next)
+      const position = input.selectionStart ?? raw.length
+      onChange(next)
+      if (formatted === raw) return
+
+      // Keep the caret at the same digit when a grouping separator moves.
+      let caret = raw.slice(0, position).replaceAll(',', '').length
+      for (let index = 0; index < caret; index += 1) {
+        if (formatted[index] === ',') caret += 1
+      }
+      if (next === value && formatted[caret] === ',' && (event.nativeEvent as InputEvent).inputType === 'deleteContentForward') {
+        caret += 1
+      }
+      requestAnimationFrame(() => {
+        if (document.activeElement === input && input.value === formatted) input.setSelectionRange(caret, caret)
+      })
+    }} />
+}
+
 export function DraftMdTeamCell({ draft, readOnly, actorId }: { draft: ProductDraft; readOnly: boolean; actorId?: string }) {
   const catalog = useContext(DraftMdOptionsContext)
   const [arrival, setArrival] = useState('')
@@ -251,16 +288,13 @@ export function DraftMdTeamCell({ draft, readOnly, actorId }: { draft: ProductDr
           <section className={`draft-md-section draft-md-pricing${confirmed.price ? ' is-confirmed' : ''}`}
             aria-label="판매가 및 할인가" title={confirmed.price && !readOnly ? EDIT_CONFIRMED_HINT : undefined}>
             <MdField label="판매가">
-              <Input className="draft-md-input" aria-label="판매가" inputMode="numeric" placeholder="직접등록"
-                value={retailPrice} disabled={priceLocked} onChange={event => setRetailPrice(event.currentTarget.value)} />
+              <MdPriceInput label="판매가" value={retailPrice} disabled={priceLocked} onChange={setRetailPrice} />
               <Button type="button" variant="outline" size="sm" className="draft-md-auto" aria-pressed={auto} disabled={priceLocked}
                 onClick={() => setAuto(current => !current)}>Auto</Button>
             </MdField>
             <MdField label="할인가">
-              <Input className="draft-md-input" aria-label="할인가" inputMode="numeric" placeholder="직접등록"
-                value={discountPrice} disabled={priceLocked} onChange={event => setDiscountPrice(event.currentTarget.value)} />
-              <Input className="draft-md-input" aria-label="할인가 추가 입력" inputMode="numeric" placeholder="직접등록"
-                value={extraDiscount} disabled={priceLocked} onChange={event => setExtraDiscount(event.currentTarget.value)} />
+              <MdPriceInput label="할인가" value={discountPrice} disabled={priceLocked} onChange={setDiscountPrice} />
+              <MdPriceInput label="할인가 추가 입력" value={extraDiscount} disabled={priceLocked} onChange={setExtraDiscount} />
             </MdField>
             {confirmButton('price', '판매가 및 할인가')}
           </section>
