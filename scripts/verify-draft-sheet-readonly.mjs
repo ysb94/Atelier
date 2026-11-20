@@ -11,8 +11,10 @@ const fixtureClient={
  name:'draft-color-fixture-client',
  enforce:'pre',
  resolveId(source,importer) {
-   if(/\/lib\/supabase\/client(?:\.ts)?$/.test(source.replaceAll('\\','/')) &&
-      importer?.replaceAll('\\','/').endsWith('/product-drafts.ts')) return '\0draft-color-client'
+   const modulePath = importer?.replaceAll('\\','/') ?? ''
+   if ((/\/lib\/supabase\/client(?:\.ts)?$/.test(source.replaceAll('\\','/')) &&
+       /\/(product-drafts|profiles)\.ts$/.test(modulePath)) ||
+       (source === './client' && modulePath.endsWith('/attendance-exemptions.ts'))) return '\0draft-color-client'
  },
  load(id) {
    if(id==='\0draft-color-client') return `import { createClient } from '@supabase/supabase-js'
@@ -53,6 +55,18 @@ try{
  const page=await browser.newPage({viewport:{width:1800,height:950},timezoneId:'UTC'}),errors=[]
  page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(15000)
  await page.route('**/*',route=>route.request().url().startsWith(origin+'/')||route.request().url().startsWith('data:')?route.continue():route.abort())
+ const mdDepartment = '919b2c44-afb6-4d7e-a5b8-b7203df9cef9'
+ let directoryReads = 0
+ await page.route('**/rpc/list_org_chart_members', route => {
+   directoryReads++
+   return route.fulfill({json:{data:[
+     {id:'fixture-md', display_name:'MD 검증 담당', department_id:mdDepartment},
+     {id:'fixture-md-second', display_name:'MD 검증 팀원', department_id:mdDepartment},
+     {id:'fixture-md-unnamed', display_name:null, department_id:mdDepartment},
+     {id:'fixture-visual', display_name:'Visual 검증 담당', department_id:'fixture-visual-department'},
+   ],error:null}})
+ })
+ await page.route('**/rpc/list_company_attendance_exempt', route => route.fulfill({json:{data:['fixture-md'],error:null}}))
  await page.clock.setFixedTime(new Date('2026-11-02T15:01:00Z'))
  await page.goto(origin,{waitUntil:'commit',timeout:45000});const row=page.locator('.draft-sheet-row');await row.waitFor({timeout:60000})
  const mdCell=row.locator(':scope > td').nth(5)
@@ -101,6 +115,7 @@ try{
    await page.getByRole('dialog',{name:`${field} 목록`}).getByRole('button',{name:'닫기',exact:true}).click()
  }
  const openType=mdCell.getByRole('combobox',{name:'오픈유형',exact:true})
+ assert.equal(directoryReads,0,'The MD directory is loaded when special release controls open')
  await openType.selectOption({label:'선발매'})
  await mdCell.getByRole('combobox',{name:'진행업체',exact:true}).selectOption({label:'카카오톡'})
  await mdCell.getByRole('button',{name:'발매 기간',exact:true}).click()
@@ -108,11 +123,19 @@ try{
  await mdCell.getByLabel('종료일',{exact:true}).fill('2027-02-21')
  await mdCell.getByRole('button',{name:'닫기',exact:true}).click()
  await mdCell.getByText('* 카카오톡 선발매 / 26.11.23 ~ 27.02.21 *',{exact:true}).waitFor()
- await mdCell.getByLabel('담당자',{exact:true}).fill('MD 검증 담당')
+ const assignee=mdCell.getByRole('combobox',{name:'담당자',exact:true})
+ await assignee.selectOption({label:'MD 검증 담당'})
+ assert.deepEqual(await assignee.locator('option').allTextContents(),['select','MD 검증 담당','MD 검증 팀원'])
+ assert.equal(await assignee.inputValue(),'fixture-md')
  await openType.selectOption({label:'단독발매'})
  await mdCell.getByText('* 카카오톡 단독발매 / 26.11.23 ~ 27.02.21 *',{exact:true}).waitFor()
+ assert.equal(await assignee.inputValue(),'fixture-md')
+ await mdCell.getByRole('button',{name:'등록 및 오픈 유형 확정',exact:true}).click()
+ assert.equal(await assignee.isDisabled(),true)
+ await mdCell.getByRole('button',{name:'등록 및 오픈 유형 수정',exact:true}).click()
  await openType.selectOption({label:'일반발매'})
  assert.equal(await mdCell.locator('.draft-md-release-notice').count(),0)
+ assert.equal(await assignee.count(),0)
 
  const optionType=mdCell.getByRole('combobox',{name:'옵션유무',exact:true})
  assert.deepEqual(await optionType.locator('option').allTextContents(),['select','옵션없음','옵션 추가금 O','옵션 추가금 X'])

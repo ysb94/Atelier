@@ -204,7 +204,7 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-md-release-fields{display:grid;align-content:start;gap:3px;padding-top:26px}
 .draft-md-release-field{display:grid;grid-template-columns:36px 108px;gap:8px;align-items:center;min-height:22px;font-size:12px}
 .draft-md-release-field>span:first-child{text-align:right}
-.draft-md-release-field .draft-md-period-button,.draft-md-release-field .draft-md-assignee{display:block;width:108px;height:20px;border-color:#dedede;border-radius:3px;padding:0 6px;box-shadow:none;text-align:center;font-size:12px;font-weight:400}
+.draft-md-release-field .draft-md-period-button{display:block;width:108px;height:20px;border-color:#dedede;border-radius:3px;padding:0 6px;box-shadow:none;text-align:center;font-size:12px;font-weight:400}
 .draft-md-release-field .draft-md-period-button{overflow:hidden;padding-right:24px;text-overflow:ellipsis}
 .draft-md-release-fields .draft-md-select::after{right:8px}
 .draft-md-period-panel{position:absolute;z-index:4;top:calc(100% + 4px);right:0;display:grid;width:190px;gap:6px;padding:8px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-card);box-shadow:0 6px 16px #0002}

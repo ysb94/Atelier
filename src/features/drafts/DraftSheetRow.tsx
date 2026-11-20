@@ -993,7 +993,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
         </div>
       </div>
     </td>
-    <DraftMdTeamCell key={`${informationEditorId ?? ''}:${readOnly}`} draft={draft} readOnly={readOnly} />
+    <DraftMdTeamCell key={`${informationEditorId ?? ''}:${readOnly}`} draft={draft} readOnly={readOnly} actorId={informationEditorId} />
     </tr>
     {information && (
       <DraftInformationPanel key={informationEditorId} id={informationId} anchor={information.anchor}

@@ -1,7 +1,11 @@
-import { useContext, useId, useMemo, useState, type ReactNode } from 'react'
+import { useContext, useMemo, useState, type ReactNode } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
+import { RELEASE_MD_ID } from '@/lib/company/release-access'
+import { listOrgChartMembers } from '@/lib/supabase/profiles'
 import { DRAFT_OPEN_DETAIL_OPTIONS, type ProductDraft } from '@/lib/types'
 import {
   DEFAULT_DRAFT_MD_OPTIONS, DRAFT_MD_OPTION_LABELS, DraftMdOptionsContext, initialDraftMdOptionId,
@@ -31,12 +35,13 @@ export function DraftMdOptionsProvider({ children }: { children: ReactNode }) {
   return <DraftMdOptionsContext.Provider value={catalog}>{children}</DraftMdOptionsContext.Provider>
 }
 
-function MdSelect({ label, value, options, disabled, confirmed = false, onChange }: {
+function MdSelect({ label, value, options, disabled, confirmed = false, placeholder = 'select', onChange }: {
   label: string
   value: string
   options: DraftMdOption[]
   disabled: boolean
   confirmed?: boolean
+  placeholder?: string
   onChange: (value: string) => void
 }) {
   const selected = options.some(option => option.id === value) ? value : ''
@@ -44,18 +49,48 @@ function MdSelect({ label, value, options, disabled, confirmed = false, onChange
     <span className={`draft-md-select${selected && !confirmed ? ' draft-md-unconfirmed' : ''}`}>
       <Select aria-label={label} value={selected} disabled={disabled}
         onChange={event => onChange(event.currentTarget.value)}>
-        <option value="">select</option>
+        <option value="">{placeholder}</option>
         {options.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
       </Select>
     </span>
   )
 }
 
+function MdAssigneeSelect({ actorId, value, disabled, confirmed, onChange }: {
+  actorId?: string
+  value: string
+  disabled: boolean
+  confirmed: boolean
+  onChange: (value: string) => void
+}) {
+  const active = useWorkspaceTabActivity()
+  const directory = useQuery({
+    queryKey: ['orgChartMembers', actorId],
+    queryFn: listOrgChartMembers,
+    enabled: active && Boolean(actorId) && (!disabled || Boolean(value)),
+    staleTime: 15_000,
+    retry: false,
+  })
+  const options = (directory.data ?? []).flatMap(member => {
+    const label = member.displayName?.trim()
+    return member.departmentId === RELEASE_MD_ID && label ? [{ id: member.id, label }] : []
+  })
+  let placeholder = 'select'
+  if (directory.isLoading) placeholder = '불러오는 중…'
+  else if (directory.isError && !directory.data) placeholder = '조회 실패'
+  else if (directory.isSuccess && !options.length) placeholder = 'MD 직원 없음'
+
+  return <label className="draft-md-release-field"><span>담당자</span>
+    <MdSelect label="담당자" value={value} options={options} disabled={disabled || !options.length}
+      confirmed={confirmed} placeholder={placeholder} onChange={onChange} />
+  </label>
+}
+
 function MdField({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
   return <div className={`draft-md-field${className ? ` ${className}` : ''}`}><span>{label}</span>{children}</div>
 }
 
-export function DraftMdTeamCell({ draft, readOnly }: { draft: ProductDraft; readOnly: boolean }) {
+export function DraftMdTeamCell({ draft, readOnly, actorId }: { draft: ProductDraft; readOnly: boolean; actorId?: string }) {
   const catalog = useContext(DraftMdOptionsContext)
   const [arrival, setArrival] = useState('')
   const [editingArrival, setEditingArrival] = useState(false)
@@ -66,7 +101,6 @@ export function DraftMdTeamCell({ draft, readOnly }: { draft: ProductDraft; read
   const [openType, setOpenType] = useState(() => initialDraftMdOptionId('open', draft.openType))
   const [release, setRelease] = useState({ partner: draft.openTypeDetail.trim(), from: '', to: '', assignee: '' })
   const [editingPeriod, setEditingPeriod] = useState(false)
-  const assigneeListId = useId()
   const [retailPrice, setRetailPrice] = useState(draft.retailPrice?.toString() ?? '')
   const [discountPrice, setDiscountPrice] = useState(draft.discountPrice?.toString() ?? '')
   const [extraDiscount, setExtraDiscount] = useState('')
@@ -206,12 +240,8 @@ export function DraftMdTeamCell({ draft, readOnly }: { draft: ProductDraft; read
                     </div>}
                   </div>
                 </div>
-                <label className="draft-md-release-field"><span>담당자</span>
-                  <Input className="draft-md-assignee" aria-label="담당자" list={assigneeListId} placeholder="select"
-                    value={release.assignee} disabled={listingLocked}
-                    onChange={event => setRelease(current => ({ ...current, assignee: event.target.value }))} />
-                  <datalist id={assigneeListId}>{draft.owner.trim() && <option value={draft.owner.trim()} />}</datalist>
-                </label>
+                <MdAssigneeSelect actorId={actorId} value={release.assignee} disabled={listingLocked}
+                  confirmed={confirmed.listing} onChange={assignee => setRelease(current => ({ ...current, assignee }))} />
               </div>}
             </div>
             {confirmButton('listing', '등록 및 오픈 유형')}
