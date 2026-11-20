@@ -301,13 +301,14 @@ try{
  const blackSizeButton=row.getByRole('button',{name:'size',exact:true}).first()
  const ivorySizeButton=row.getByRole('button',{name:'size',exact:true}).nth(1)
  assert.equal(await blackSizeButton.getAttribute('aria-description'),'기입 중')
- assert.deepEqual(await blackSizeButton.evaluate(el=>[
-   getComputedStyle(el).backgroundColor,
-   getComputedStyle(el,'::after').borderTopWidth,
-   getComputedStyle(el,'::after').borderLeftWidth,
-   getComputedStyle(el,'::after').borderRightWidth,
-   getComputedStyle(el,'::after').left,
- ]),['rgb(255, 255, 255)','3px','3px','0px','-1px'])
+ const cornerMarker=locator=>locator.evaluate(element=>{
+   const {content,top,left,width,height,backgroundColor,clipPath}=getComputedStyle(element,'::before')
+   return {content,top,left,width,height,backgroundColor,clipPath}
+ })
+ const orderMarker=await cornerMarker(blackOrder.locator('..'))
+ assert.match(orderMarker.clipPath,/^polygon\(/)
+ assert.equal(await blackSizeButton.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 255)')
+ assert.deepEqual(await cornerMarker(blackSizeButton),orderMarker)
  assert.equal(await page.getByTestId('writes').textContent(),'1','입력만 하면 저장하지 않는다')
  await panel.press('Escape')
  assert.equal(await blackSizeButton.getAttribute('aria-description'),'기입 중')
@@ -417,6 +418,7 @@ try{
  await size.getByLabel('Weight 값').fill('275g')
  await temporarySize.click()
  await size.getByText('임시 저장됨',{exact:true}).waitFor()
+ assert.deepEqual(await cornerMarker(sizeTrigger),orderMarker,'임시 저장된 Size는 발주 수량과 같은 모서리 표시를 쓴다')
  assert.equal(await temporarySize.isDisabled(),true)
  assert.equal(await page.getByTestId('writes').textContent(),'0')
  await page.reload()
@@ -429,6 +431,7 @@ try{
  await size.getByText('임시 저장됨',{exact:true}).waitFor()
  await size.getByRole('button',{name:'확정',exact:true}).click()
  await modifySize.waitFor()
+ assert.equal((await cornerMarker(sizeTrigger)).content,'none')
  assert.equal(await temporarySize.count(),0)
  await modifySize.click()
  assert.equal(await temporarySize.isDisabled(),true)
@@ -441,10 +444,12 @@ try{
  await coating.fill('생활 발수 -- OK')
  await fabric.getByRole('button',{name:'임시 저장',exact:true}).click()
  await fabric.getByText('임시 저장됨',{exact:true}).waitFor()
+ assert.deepEqual(await cornerMarker(fabricTrigger),orderMarker)
  await fields.getByRole('button',{name:'스펙 문서',exact:true}).click()
  await documentInput.fill('임시 공통 문서')
  await specDocument.getByRole('button',{name:'임시 저장',exact:true}).click()
  await specDocument.getByText('임시 저장됨',{exact:true}).waitFor()
+ assert.deepEqual(await cornerMarker(documentButton),orderMarker)
  await specDocument.getByRole('button',{name:'확정',exact:true}).click()
  await modifyDocument.waitFor()
  assert.equal(await specDocument.getByRole('button',{name:'임시 저장',exact:true}).count(),0)
