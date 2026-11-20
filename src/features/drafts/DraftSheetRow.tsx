@@ -28,6 +28,7 @@ import { DraftColorSampleProgress } from './DraftColorSampleProgress'
 import { DraftPriceRequestButton, type DraftPriceControls } from './DraftPriceRequestButton'
 import { DraftInformationPanel } from './DraftInformationPanel'
 import { DraftMdTeamCell } from './DraftMdTeamCell'
+import { DraftVisualAmdCells } from './DraftVisualAmdCells'
 
 const SAMPLE_WORK_ORDER_ACCEPT =
   'application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp,.xls,.xlsx'
@@ -993,7 +994,9 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
         </div>
       </div>
     </td>
+    <DraftVisualAmdCells key={`${informationEditorId ?? ''}:${readOnly}:visual-amd`} colors={draft.colors} readOnly={readOnly} />
     <DraftMdTeamCell key={`${informationEditorId ?? ''}:${readOnly}`} draft={draft} readOnly={readOnly} actorId={informationEditorId} />
+    <td />
     </tr>
     {information && (
       <DraftInformationPanel key={informationEditorId} id={informationId} anchor={information.anchor}

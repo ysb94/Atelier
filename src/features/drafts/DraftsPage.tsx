@@ -42,6 +42,7 @@ import { DraftBrandScopeBar, countScheduleRows } from './DraftBrandScopeBar'
 import { DraftFolderBar, DraftFolderHeading } from './DraftFolderBar'
 import { matchesDraftFolder } from './draft-folder-filter'
 import { DraftSheetRow, type DraftConfirmFlag } from './DraftSheetRow'
+import { DRAFT_SHEET_COLUMN_COUNT, DraftSheetColumns } from './DraftSheetColumns'
 import { DraftMdOptionsProvider } from './DraftMdTeamCell'
 import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
 import { useDraftPriceRequests } from './useDraftPriceRequests'
@@ -630,38 +631,19 @@ export function CompanyDraftsPage() {
 
       <div className="draft-board-scroll" role="region" aria-label={showingCompleted ? '완료된 기획안 목록' : '기획안 목록'} tabIndex={0}>
         <table className="draft-board-table">
-          <caption className="sr-only">기획안별 샘플, 상품 정보 및 MD 진행 현황</caption>
-          <colgroup>{Array.from({ length: 6 }, (_, index) => <col key={index} />)}</colgroup>
-          <thead>
-            <tr>
-              {(['BRAND', 'SAMPLE', 'PRICE', 'COLOR', 'INFORMATION'] as const).map(
-                (label) => (
-                  <th
-                    key={label}
-                    scope="col"
-                  >
-                    {label}
-                  </th>
-                ),
-              )}
-              <th
-                scope="col"
-              >
-                MD TEAM
-              </th>
-            </tr>
-          </thead>
+          <caption className="sr-only">기획안별 샘플, 상품 정보 및 팀별 진행 현황</caption>
+          <DraftSheetColumns />
           <DraftMdOptionsProvider key={profile?.id}><tbody>
             {showingCompleted ? (
               <tr>
-                <td colSpan={6} className="bg-white px-4 py-10 text-center text-sm text-muted-foreground">
+                <td colSpan={DRAFT_SHEET_COLUMN_COUNT} className="bg-white px-4 py-10 text-center text-sm text-muted-foreground">
                   이 폴더에 완료된 기획안이 없습니다.
                 </td>
               </tr>
             ) : loading ? (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={DRAFT_SHEET_COLUMN_COUNT}
                   className="bg-white px-4 py-10 text-center text-sm text-muted-foreground"
                 >
                   불러오는 중...
@@ -670,7 +652,7 @@ export function CompanyDraftsPage() {
             ) : visible.length === 0 ? (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={DRAFT_SHEET_COLUMN_COUNT}
                   className="bg-white px-4 py-10 text-center text-sm text-muted-foreground"
                 >
                   {emptyMessage(
