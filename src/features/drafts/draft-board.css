@@ -180,14 +180,15 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-row>td.draft-sheet-md-cell{position:relative;padding:0;color:#4a4a4a}
 .draft-sheet-md-cell::before{position:absolute;inset-block:0;left:93px;border-left:1px solid #efeeee;content:'';pointer-events:none}
 .draft-md-layout{display:grid;grid-template-columns:94px minmax(0,1fr);min-height:360px}
-.draft-md-order-summary{display:flex;flex-direction:column;align-items:center;gap:18px;padding:28px 0 8px}
-.draft-md-order-status,.draft-md-order-quantity,.draft-md-color span{display:grid;place-items:center;border:1px solid #e1e1e1;background:var(--color-card);white-space:nowrap}
-.draft-md-order-status{width:59px;height:27px;border-radius:7px;color:#797979;font-size:11px;font-weight:600}
-.draft-md-order-status.is-done{color:var(--color-primary)}
-.draft-md-order-quantity{position:relative;width:61px;height:22px;border-radius:4px;font-weight:500;font-variant-numeric:tabular-nums}
+.draft-md-order-summary{display:flex;justify-content:center;padding:28px 0 18px}
+.draft-md-layout .draft-md-order-status{width:59px;height:27px;border:1px solid #e1e1e1;border-radius:7px;padding:0;background:var(--color-card);box-shadow:none;color:#797979;font-size:11px;font-weight:600}
+.draft-md-layout .draft-md-order-status.is-done{color:var(--color-primary)}
+.draft-md-order-color+.draft-md-order-color{padding-top:10px}
+.draft-md-order-quantity{position:relative;display:block;width:61px;margin:0 auto 8px}
+.draft-md-order-quantity input{width:100%;height:22px;border:1px solid #e1e1e1;border-radius:4px;padding:0 4px;box-shadow:none;text-align:center;font-size:12px;font-weight:500;font-variant-numeric:tabular-nums}
 .draft-md-order-quantity::before{position:absolute;top:0;left:0;width:6px;height:6px;background:var(--color-primary);clip-path:polygon(0 0,100% 0,0 100%);content:''}
 .draft-md-color{display:grid;min-height:42px;place-items:center;border-top:1px solid #e9dada;background:#f9f5f4}
-.draft-md-color span{display:block;width:61px;height:21px;overflow:hidden;border-radius:4px;background:transparent;color:#777;text-align:center;text-overflow:ellipsis;line-height:19px}
+.draft-md-color span{display:block;width:61px;height:21px;overflow:hidden;border:1px solid #e1e1e1;border-radius:4px;background:transparent;color:#777;text-align:center;text-overflow:ellipsis;white-space:nowrap;line-height:19px}
 .draft-md-section{position:relative;padding:0 68px 0 20px}
 .draft-md-section+.draft-md-section::before{position:absolute;top:0;right:0;left:3px;border-top:1px solid #eae9e9;content:''}
 .draft-md-listing{min-height:146px;padding-top:20px;padding-bottom:16px}
@@ -197,7 +198,6 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-md-arrival button,.draft-md-arrival label{display:inline-flex;align-items:center;gap:5px;font:inherit}
 .draft-md-arrival button:not(:disabled){cursor:pointer}
 .draft-md-arrival input{width:108px;height:22px;border-radius:4px;padding:0 4px;box-shadow:none;font-size:12px}
-.draft-md-fields+.draft-md-fields{margin-top:8px}
 .draft-md-field{position:relative;display:grid;grid-template-columns:55px 108px max-content;min-height:22px;align-items:center;justify-content:start;column-gap:10px;padding-left:24px;font-size:13px;font-weight:500;white-space:nowrap}
 .draft-md-field>span:first-child,.draft-md-origin>span:first-child{justify-self:center}
 .draft-md-product .draft-md-field{grid-template-columns:50px 108px max-content}

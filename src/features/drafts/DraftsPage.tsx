@@ -42,6 +42,7 @@ import { DraftBrandScopeBar, countScheduleRows } from './DraftBrandScopeBar'
 import { DraftFolderBar, DraftFolderHeading } from './DraftFolderBar'
 import { matchesDraftFolder } from './draft-folder-filter'
 import { DraftSheetRow, type DraftConfirmFlag } from './DraftSheetRow'
+import { DraftMdOptionsProvider } from './DraftMdTeamCell'
 import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
 import { useDraftPriceRequests } from './useDraftPriceRequests'
 import {
@@ -650,7 +651,7 @@ export function CompanyDraftsPage() {
               </th>
             </tr>
           </thead>
-          <tbody>
+          <DraftMdOptionsProvider key={profile?.id}><tbody>
             {showingCompleted ? (
               <tr>
                 <td colSpan={6} className="bg-white px-4 py-10 text-center text-sm text-muted-foreground">
@@ -861,7 +862,7 @@ export function CompanyDraftsPage() {
                 )
               })
             )}
-          </tbody>
+          </tbody></DraftMdOptionsProvider>
         </table>
       </div>
 

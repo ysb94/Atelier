@@ -1,26 +1,43 @@
-import { useState, type ReactNode } from 'react'
+import { useContext, useMemo, useState, type ReactNode } from 'react'
 import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
-import { DRAFT_OPEN_TYPE_OPTIONS, DRAFT_REGISTER_TYPE_OPTIONS, type ProductDraft } from '@/lib/types'
-import { formatNumber } from '@/lib/utils'
+import type { ProductDraft } from '@/lib/types'
+import {
+  DEFAULT_DRAFT_MD_OPTIONS, DRAFT_MD_OPTION_LABELS, DraftMdOptionsContext, initialDraftMdOptionId,
+  type DraftMdOption, type DraftMdOptionField,
+} from './draft-md-options'
+import { DraftMdOptionDialog } from './DraftMdOptionDialog'
 
-type MdListing = { registerType: string; openType: string }
 type MdSection = 'listing' | 'price' | 'options'
+
+const ORDER_DATE = new Intl.DateTimeFormat('sv-SE', {
+  timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
+})
+
+export function DraftMdOptionsProvider({ children }: { children: ReactNode }) {
+  const [lists, setLists] = useState(DEFAULT_DRAFT_MD_OPTIONS)
+  const catalog = useMemo(() => ({
+    lists,
+    update: (field: DraftMdOptionField, options: DraftMdOption[]) =>
+      setLists(current => ({ ...current, [field]: options })),
+  }), [lists])
+  return <DraftMdOptionsContext.Provider value={catalog}>{children}</DraftMdOptionsContext.Provider>
+}
 
 function MdSelect({ label, value, options, disabled, onChange }: {
   label: string
   value: string
-  options: readonly string[]
+  options: DraftMdOption[]
   disabled: boolean
   onChange: (value: string) => void
 }) {
   return (
     <span className="draft-md-select">
-      <Select aria-label={label} value={value} disabled={disabled} onChange={event => onChange(event.currentTarget.value)}>
+      <Select aria-label={label} value={options.some(option => option.id === value) ? value : ''} disabled={disabled}
+        onChange={event => onChange(event.currentTarget.value)}>
         <option value="">select</option>
-        {value && !options.includes(value) && <option value={value}>{value}</option>}
-        {options.map(option => <option key={option} value={option}>{option}</option>)}
+        {options.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
       </Select>
     </span>
   )
@@ -31,24 +48,42 @@ function MdField({ label, children }: { label: string; children: ReactNode }) {
 }
 
 export function DraftMdTeamCell({ draft, readOnly }: { draft: ProductDraft; readOnly: boolean }) {
+  const catalog = useContext(DraftMdOptionsContext)
   const [arrival, setArrival] = useState('')
   const [editingArrival, setEditingArrival] = useState(false)
-  const [listings, setListings] = useState<MdListing[]>([{ registerType: draft.registerType, openType: draft.openType }])
+  const [orderConfirmed, setOrderConfirmed] = useState(false)
+  const [quantities, setQuantities] = useState<Record<string, string>>({})
+  const [managingOptions, setManagingOptions] = useState<DraftMdOptionField | null>(null)
+  const [registerType, setRegisterType] = useState(() => initialDraftMdOptionId('register', draft.registerType))
+  const [openType, setOpenType] = useState(() => initialDraftMdOptionId('open', draft.openType))
   const [retailPrice, setRetailPrice] = useState(draft.retailPrice?.toString() ?? '')
   const [discountPrice, setDiscountPrice] = useState(draft.discountPrice?.toString() ?? '')
   const [extraDiscount, setExtraDiscount] = useState('')
   const [auto, setAuto] = useState(false)
-  const [option, setOption] = useState(draft.hasOptions ? '있음' : '')
+  const [option, setOption] = useState(() => initialDraftMdOptionId('option', draft.hasOptions ? '있음' : ''))
   const [confirmed, setConfirmed] = useState({ listing: false, price: false, options: false })
+  if (!catalog) throw new Error('DraftMdTeamCell requires DraftMdOptionsProvider')
 
-  const orderQuantities = draft.colors.flatMap(color => color.orderQty == null ? [] : [color.orderQty])
-  const orderQuantity = orderQuantities.length ? formatNumber(orderQuantities.reduce((total, quantity) => total + quantity, 0)) : '—'
   const listingLocked = readOnly || confirmed.listing
   const priceLocked = readOnly || confirmed.price
   const optionsLocked = readOnly || confirmed.options
 
-  function updateListing(index: number, field: keyof MdListing, value: string) {
-    setListings(current => current.map((listing, position) => position === index ? { ...listing, [field]: value } : listing))
+  function confirmOrder() {
+    const expectedDay = new Date(`${ORDER_DATE.format(new Date())}T00:00:00Z`)
+    expectedDay.setUTCDate(expectedDay.getUTCDate() + 60)
+    setArrival(expectedDay.toISOString().slice(0, 10))
+    setEditingArrival(false)
+    setOrderConfirmed(true)
+  }
+
+  function manageOptionButton(field: DraftMdOptionField, disabled: boolean) {
+    return (
+      <Button type="button" variant="secondary" size="icon" className="draft-md-add"
+        aria-label={`${DRAFT_MD_OPTION_LABELS[field]} 목록 관리`} disabled={disabled}
+        onClick={() => setManagingOptions(field)}>
+        <Plus size={15} strokeWidth={3} aria-hidden="true" />
+      </Button>
+    )
   }
 
   function confirmButton(section: MdSection, label: string) {
@@ -66,14 +101,26 @@ export function DraftMdTeamCell({ draft, readOnly }: { draft: ProductDraft; read
       <div className="draft-md-layout">
         <div className="draft-md-order">
           <div className="draft-md-order-summary">
-            <span className={`draft-md-order-status${draft.orderDone ? ' is-done' : ''}`}>발주확정</span>
-            <span className="draft-md-order-quantity" aria-label={`총 발주 수량 ${orderQuantity}`}>{orderQuantity}</span>
+            <Button type="button" variant="outline" size="sm"
+              className={`draft-md-order-status${orderConfirmed || draft.orderDone ? ' is-done' : ''}`}
+              disabled={readOnly} onClick={confirmOrder}>발주확정</Button>
           </div>
-          {draft.colors.map(color => (
-            <div className="draft-md-color" key={color.id}>
-              <span title={color.name.trim()}>{color.name.trim() || '—'}</span>
-            </div>
-          ))}
+          {draft.colors.map((color, index) => {
+            const name = color.name.trim() || `컬러 ${index + 1}`
+            const quantity = quantities[color.id] ?? color.orderQty?.toString() ?? ''
+            return (
+              <div key={color.id} className="draft-md-order-color">
+                <label className="draft-md-order-quantity">
+                  <Input inputMode="numeric" aria-label={`${name} 발주 수량`} disabled={readOnly}
+                    value={quantity.replace(/\B(?=(\d{3})+(?!\d))/g, ',')} onChange={event => {
+                      const next = event.currentTarget.value.replaceAll(',', '')
+                      if (/^\d*$/.test(next)) setQuantities(current => ({ ...current, [color.id]: next }))
+                    }} />
+                </label>
+                <div className="draft-md-color"><span title={name}>{name}</span></div>
+              </div>
+            )
+          })}
         </div>
 
         <div className="draft-md-main">
@@ -88,24 +135,14 @@ export function DraftMdTeamCell({ draft, readOnly }: { draft: ProductDraft; read
                 </button>
               )}
             </div>
-            {listings.map((listing, index) => (
-              <div className="draft-md-fields" key={index}>
-                <MdField label="등록유형">
-                  <MdSelect label={index ? `등록유형 ${index + 1}` : '등록유형'} value={listing.registerType} options={DRAFT_REGISTER_TYPE_OPTIONS}
-                    disabled={listingLocked} onChange={value => updateListing(index, 'registerType', value)} />
-                  {index === 0 && (
-                    <Button type="button" variant="secondary" size="icon" className="draft-md-add" aria-label="등록유형 추가" disabled={listingLocked}
-                      onClick={() => setListings(current => [...current, { registerType: '', openType: '' }])}>
-                      <Plus size={15} strokeWidth={3} aria-hidden="true" />
-                    </Button>
-                  )}
-                </MdField>
-                <MdField label="오픈유형">
-                  <MdSelect label={index ? `오픈유형 ${index + 1}` : '오픈유형'} value={listing.openType} options={DRAFT_OPEN_TYPE_OPTIONS}
-                    disabled={listingLocked} onChange={value => updateListing(index, 'openType', value)} />
-                </MdField>
-              </div>
-            ))}
+            <MdField label="등록유형">
+              <MdSelect label="등록유형" value={registerType} options={catalog.lists.register} disabled={listingLocked} onChange={setRegisterType} />
+              {manageOptionButton('register', listingLocked)}
+            </MdField>
+            <MdField label="오픈유형">
+              <MdSelect label="오픈유형" value={openType} options={catalog.lists.open} disabled={listingLocked} onChange={setOpenType} />
+              {manageOptionButton('open', listingLocked)}
+            </MdField>
             {confirmButton('listing', '등록 및 오픈 유형')}
           </section>
 
@@ -128,12 +165,17 @@ export function DraftMdTeamCell({ draft, readOnly }: { draft: ProductDraft; read
           <section className="draft-md-section draft-md-product" aria-label="제조국 및 옵션">
             <div className="draft-md-origin"><span>제조국</span><span>{draft.originCountry.trim() || '미정'}</span></div>
             <MdField label="옵션유무">
-              <MdSelect label="옵션유무" value={option} options={['있음', '없음']} disabled={optionsLocked} onChange={setOption} />
+              <MdSelect label="옵션유무" value={option} options={catalog.lists.option} disabled={optionsLocked} onChange={setOption} />
+              {manageOptionButton('option', optionsLocked)}
             </MdField>
             {confirmButton('options', '제조국 및 옵션')}
           </section>
         </div>
       </div>
+      {managingOptions && (
+        <DraftMdOptionDialog label={DRAFT_MD_OPTION_LABELS[managingOptions]} options={catalog.lists[managingOptions]}
+          onChange={options => catalog.update(managingOptions, options)} onClose={() => setManagingOptions(null)} />
+      )}
     </td>
   )
 }
