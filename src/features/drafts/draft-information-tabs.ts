@@ -8,9 +8,11 @@ export const DRAFT_VISUAL_INFORMATION_TABS = [
 export type DraftVisualInformationField = typeof DRAFT_VISUAL_INFORMATION_TABS[number]['field']
 export type DraftInformationPanelField = DraftInformationField | DraftVisualInformationField
 
-export const DRAFT_INFORMATION_PANEL_TABS = [
-  ...DRAFT_VISUAL_INFORMATION_TABS,
-  { field: 'size', label: DRAFT_INFORMATION_LABELS.size },
-  { field: 'fabric', label: DRAFT_INFORMATION_LABELS.fabric },
-  { field: 'specDoc', label: DRAFT_INFORMATION_LABELS.specDoc },
+export const DRAFT_INFORMATION_PANEL_TAB_GROUPS = [
+  [
+    { field: 'size', label: DRAFT_INFORMATION_LABELS.size },
+    { field: 'fabric', label: DRAFT_INFORMATION_LABELS.fabric },
+    { field: 'specDoc', label: DRAFT_INFORMATION_LABELS.specDoc },
+  ],
+  DRAFT_VISUAL_INFORMATION_TABS,
 ] as const

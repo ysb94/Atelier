@@ -16,7 +16,7 @@ import { formatSizeSpec, parseSizeSpec, type SizeParts } from '@/lib/drafts/spec
 import type { DraftColorRow, ProductDraft } from '@/lib/types'
 import { draftInformationTemporaryStore, type DraftInformationTemporary, type DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
 import { cn } from '@/lib/utils'
-import { DRAFT_INFORMATION_PANEL_TABS, type DraftInformationPanelField } from './draft-information-tabs'
+import { DRAFT_INFORMATION_PANEL_TAB_GROUPS, type DraftInformationPanelField } from './draft-information-tabs'
 import { DraftVisualImagePanel } from './DraftVisualImagePanel'
 
 const MEASUREMENT_FIELDS = ['size', 'weight'] as const
@@ -516,13 +516,17 @@ export function DraftInformationPanel({
             : <span className="text-sm font-semibold">컬러 <span className="ml-1.5 font-normal text-muted-foreground">
               {field === 'image' ? `${colors.length}color` : selectedColorName || `${colors.length}개`}
             </span></span>}
-          <div role="group" aria-label="INFORMATION 입력 항목" className="flex flex-wrap gap-2">
-            {DRAFT_INFORMATION_PANEL_TABS.map(({ field: option, label }) => (
-              <Button key={option} type="button" size="sm" variant={field === option ? 'default' : 'outline'}
-                className={option === 'html' ? 'uppercase' : undefined} aria-pressed={field === option} onClick={() => onFieldChange(option)}>
-                {option === 'specDoc' && <FileText size={14} aria-hidden="true" />}
-                {label}
-              </Button>
+          <div role="group" aria-label="INFORMATION 입력 항목" className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            {DRAFT_INFORMATION_PANEL_TAB_GROUPS.map((tabs, index) => (
+              <div key={tabs[0].field} className={cn('flex flex-wrap gap-2', index > 0 && 'border-l border-border pl-3')}>
+                {tabs.map(({ field: option, label }) => (
+                  <Button key={option} type="button" size="sm" variant={field === option ? 'default' : 'outline'}
+                    aria-pressed={field === option} onClick={() => onFieldChange(option)}>
+                    {option === 'specDoc' && <FileText size={14} aria-hidden="true" />}
+                    {label}
+                  </Button>
+                ))}
+              </div>
             ))}
           </div>
         </div>
