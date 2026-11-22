@@ -609,7 +609,7 @@ export function DraftInformationPanel({
           </div>
         </div>
         {field === 'image' ? <DraftVisualImagePanel key={`${editorId ?? ''}:${readOnly}`} colors={colors}
-          photos={{ ...draft.specs.colorPhotoUrls, ...visualImages }} readOnly={readOnly} onSave={onSaveVisualImage} /> : field === 'html' ? (
+          colorPhotos={draft.specs.colorPhotoUrls} visualPhotos={visualImages} readOnly={readOnly} onSave={onSaveVisualImage} /> : field === 'html' ? (
           <div className="border-t border-border">
             {colors.length ? <>
               {!readOnly && <p className="px-3 pt-2 text-[11px] text-muted-foreground">HTML은 현재 기획안 화면에서만 저장됩니다.</p>}
