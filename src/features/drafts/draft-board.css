@@ -171,6 +171,9 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-board-table .draft-team-control{height:22px;min-width:0;padding-inline:7px;border-radius:4px;box-shadow:none;font-size:11px;font-weight:400;line-height:1}
 .draft-board-table .draft-team-control:disabled{cursor:default;opacity:.65}
 .draft-board-table .draft-team-confirm{margin-left:auto;color:var(--color-primary)}
+.draft-team-actions{display:flex;align-items:center;gap:4px;white-space:nowrap}
+.draft-board-table .draft-team-actions .draft-team-confirm.is-confirmed{border-color:var(--color-primary);background:var(--color-primary);color:var(--color-primary-foreground)}
+.draft-team-notice{padding:4px 8px;font-size:11px;line-height:1.35;color:var(--color-danger)}
 .draft-amd-header{gap:8px;padding-inline:8px}
 .draft-amd-header .draft-amd-entry{width:86px}
 .draft-amd-entry{position:relative;min-width:0}
@@ -203,8 +206,7 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-md-layout{display:grid;grid-template-columns:94px minmax(0,1fr);min-height:360px}
 .draft-md-order{padding-top:var(--draft-sheet-cell-block-padding)}
 .draft-md-order .draft-color-line{justify-content:center}
-.draft-md-layout .draft-md-order-status{width:59px;height:27px;border:1px solid #e1e1e1;border-radius:7px;padding:0;background:var(--color-card);box-shadow:none;color:#797979;font-size:11px;font-weight:600}
-.draft-md-layout .draft-md-order-status.is-done{color:var(--color-primary)}
+.draft-board-table .draft-md-quantity-actions .draft-team-control{padding-inline:4px}
 .draft-md-order-quantity{position:relative;display:block;width:61px}
 .draft-md-order-quantity input{width:100%;height:22px;border:1px solid #e1e1e1;border-radius:4px;padding:0 4px;box-shadow:none;text-align:center;font-size:12px;font-weight:500;font-variant-numeric:tabular-nums}
 .draft-md-section{position:relative;padding:0 68px 0 20px}
@@ -251,8 +253,9 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-md-layout .draft-md-confirm.is-confirmed{border-color:var(--color-primary);background:var(--color-primary);color:var(--color-primary-foreground)}
 .draft-md-section.is-confirmed .draft-md-field::before{border-color:var(--color-primary);background:var(--color-primary)}
 .draft-md-listing .draft-md-confirm{top:56px}
-.draft-md-pricing .draft-md-confirm{top:18px}
-.draft-md-product .draft-md-confirm{top:9px}
+.draft-md-section-actions{position:absolute;right:16px}
+.draft-md-pricing .draft-md-section-actions{top:18px}
+.draft-md-product .draft-md-section-actions{top:9px}
 .draft-md-origin{display:grid;grid-template-columns:55px auto;min-height:22px;align-items:center;gap:10px;margin:0 0 9px 24px;font-size:13px;font-weight:500}
 .draft-md-origin span:last-child{color:var(--color-muted-foreground)}
 .draft-md-product .draft-md-option-field{grid-template-columns:50px 108px 23px minmax(0,1fr);align-items:start;margin-right:-52px}

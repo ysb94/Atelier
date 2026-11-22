@@ -46,6 +46,7 @@ import { DRAFT_SHEET_COLUMN_COUNT, DraftSheetColumns } from './DraftSheetColumns
 import { DraftMdOptionsProvider } from './DraftMdTeamCell'
 import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
 import { useDraftPriceRequests } from './useDraftPriceRequests'
+import { useDraftTeamWork } from './use-draft-team-work'
 import {
   formatReleaseGroupLabel,
   isUnassignedReleaseFolder,
@@ -384,6 +385,7 @@ export function CompanyDraftsPage() {
       return true
     })
   }, [boardFilter, folderDrafts, scheduleByDraft])
+  const teamWork = useDraftTeamWork(profileId, visible, !showingCompleted)
 
   const scheduleDraft = scheduleDraftId
     ? (ownerDrafts.find((draft) => draft.id === scheduleDraftId) ??
@@ -634,6 +636,12 @@ export function CompanyDraftsPage() {
         </div>
       ) : null}
 
+      {!showingCompleted && teamWork.query.isError && <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+        <p role="status" className="text-muted-foreground">{teamWork.missingSchema
+          ? 'AMD·MD 저장 기능은 공유 DB 적용 후 사용할 수 있습니다.' : 'AMD·MD 저장 정보를 불러오지 못했습니다.'}</p>
+        <Button type="button" size="sm" variant="outline" disabled={teamWork.query.isFetching}
+          onClick={() => { void teamWork.query.refetch() }}>AMD·MD 다시 조회</Button>
+      </div>}
       <div className="draft-board-scroll" role="region" aria-label={showingCompleted ? '완료된 기획안 목록' : '기획안 목록'} tabIndex={0}>
         <table className="draft-board-table">
           <caption className="sr-only">기획안별 샘플, 상품 정보 및 팀별 진행 현황</caption>
@@ -679,6 +687,7 @@ export function CompanyDraftsPage() {
                   <DraftSheetRow
                     key={draft.id}
                     draft={draft}
+                    teamWork={teamWork.forDraft(draft.id)}
                     readOnly={!canWriteDraft(workAccess.access,draft)}
                     informationEditorId={profile?.id}
                     schedule={schedule}

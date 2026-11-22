@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { DraftSheetRow } from '@/features/drafts/DraftSheetRow'
 import { DraftSheetColumns } from '@/features/drafts/DraftSheetColumns'
 import { DraftMdOptionsProvider } from '@/features/drafts/DraftMdTeamCell'
+import { useDraftTeamWork } from '@/features/drafts/use-draft-team-work'
 import { resolveReleaseSchedule } from '@/features/drafts/release-schedule-preview'
 import { emptyDraftInput, newColorRow } from '@/lib/drafts/empty-draft'
 import { normalizeColorSpecs, writeColorSpec, type SaveColorSpec } from '@/lib/drafts/color-spec'
@@ -69,6 +70,7 @@ function Fixture() {
       }),colorSampleRounds:[{id:'round',round:1,url:'color.pdf',name:'컬러 지시서',shippedAt:'2026-10-14T00:00:00Z',returnedAt:'2026-10-15T00:00:00Z',passed:false}]}}
   })
   const shown={...draft,sampleWorkOrders:phase==='new'?[]:draft.sampleWorkOrders,specs:{...draft.specs,colorSampleRounds:phase==='review'?draft.specs.colorSampleRounds:[]}}
+  const teamWork=useDraftTeamWork(readOnly?'fixture-viewer':'fixture-owner',[draft])
   const write=async()=>{setWrites(n=>n+1)}
   const saveColors = async (rows: DraftColorEdit[], revision: string) => {
     setDraft(await saveDraftColors(draft, rows, revision))
@@ -96,7 +98,7 @@ function Fixture() {
     })}>단가 회신 반영</button>
     <div className="draft-board-scroll"><table className="draft-board-table"><DraftSheetColumns /><DraftMdOptionsProvider><tbody><DraftSheetRow draft={shown} readOnly={readOnly} brand={brand} schedule={savedRelease?resolveReleaseSchedule(shown,releaseSeasonMap,[],{}):{group:{id:'group',brandId:'fixture-brand',name:'11월 출시',releaseTiming:''},targetDate:'2026-11-03',certainty:'confirmed',brandId:null,isPreview:false}}
       releaseFolders={releaseFolders} onChangeReleaseFolder={async seasonId => { setDraft(await saveDraftReleaseFolder(draft, seasonId)) }}
-      informationEditorId="fixture-owner" informationTemporaryStore={temporaryStore}
+      informationEditorId="fixture-owner" informationTemporaryStore={temporaryStore} teamWork={teamWork.forDraft(draft.id)}
       price={{
         latest: priceRequest, reply: priceRequest?.answeredAt ? priceRequest : previousPriceReply,
         loading: false, error: '', retry: () => {},
