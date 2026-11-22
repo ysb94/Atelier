@@ -18,6 +18,7 @@ import type { DraftColorRow, ProductDraft } from '@/lib/types'
 import { draftInformationTemporaryStore, type DraftInformationTemporary, type DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
 import { cn } from '@/lib/utils'
 import { DRAFT_INFORMATION_PANEL_TAB_GROUPS, type DraftInformationPanelField } from './draft-information-tabs'
+import { DraftVendorHtmlDialog, type DraftVendorHtml } from './DraftVendorHtmlDialog'
 import { DraftVisualImagePanel } from './DraftVisualImagePanel'
 
 const MEASUREMENT_FIELDS = ['size', 'weight'] as const
@@ -456,7 +457,8 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, entry,
 
 export function DraftInformationPanel({
   id, anchor, draft, field, colorId, readOnly, fromVisual, edits, onEditsChange, onFieldChange, onClose, onSave, onSaveSpecDocument,
-  visualImages, onSaveVisualImage, visualHtml, onSaveVisualHtml, editorId, temporaryStore = draftInformationTemporaryStore,
+  visualImages, onSaveVisualImage, visualHtml, onSaveVisualHtml, vendorHtml, onSaveVendorHtml,
+  editorId, temporaryStore = draftInformationTemporaryStore,
 }: {
   id: string; anchor: HTMLButtonElement; draft: ProductDraft; field: DraftInformationPanelField; colorId: string | null
   readOnly: boolean; fromVisual: boolean
@@ -467,9 +469,12 @@ export function DraftInformationPanel({
   onSaveVisualImage: (colorId: string, photo: string) => void
   visualHtml: DraftVisualHtml
   onSaveVisualHtml: (colorId: string, text: string, temporary: boolean) => void
+  vendorHtml: DraftVendorHtml
+  onSaveVendorHtml: (value: DraftVendorHtml) => void
   editorId?: string; temporaryStore?: DraftInformationTemporaryStore
 }) {
   const active = useWorkspaceTabActivity()
+  const [vendorHtmlOpen, setVendorHtmlOpen] = useState(false)
   const cache = useQueryClient()
   const queryKey = ['draft-information-temporary', editorId, draft.id] as const
   const locked = readOnly || fromVisual
@@ -570,13 +575,12 @@ export function DraftInformationPanel({
         </div>
         {field === 'html' && (
           <div className="flex w-full justify-end border-t border-border pt-3 @[560px]:w-auto @[560px]:basis-[28%] @[560px]:self-stretch @[560px]:items-center @[560px]:justify-center @[560px]:border-l @[560px]:border-t-0 @[560px]:pl-4 @[560px]:pt-0">
-            <span title="업체별 Top Buttom 등록 기능은 아직 연결되지 않았습니다.">
-              <Button type="button" variant="secondary" disabled
-                className="h-auto min-h-11 flex-col gap-0 bg-muted-foreground px-4 py-2 text-center text-xs text-background">
-                <span>업체별</span>
-                <span>Top Buttom 등록</span>
-              </Button>
-            </span>
+            <Button type="button" variant="secondary" disabled={readOnly} aria-haspopup="dialog"
+              className="h-auto min-h-11 flex-col gap-0 bg-muted-foreground px-4 py-2 text-center text-xs text-background hover:bg-muted-foreground/85"
+              onClick={() => setVendorHtmlOpen(true)}>
+              <span>업체별</span>
+              <span>Top Buttom 등록</span>
+            </Button>
           </div>
         )}
         <Button type="button" size="icon" variant="ghost"
@@ -585,6 +589,9 @@ export function DraftInformationPanel({
           <X size={16} aria-hidden="true" />
         </Button>
       </div>
+      {field === 'html' && vendorHtmlOpen && !readOnly &&
+        <DraftVendorHtmlDialog preferredVendor={draft.openTypeDetail} value={vendorHtml}
+          onSave={onSaveVendorHtml} onClose={() => setVendorHtmlOpen(false)} />}
       {loadingTemporary && <p role="status" className="px-4 pb-2 text-xs text-muted-foreground">임시 저장 내용을 불러오는 중…</p>}
       {temporaryEnabled && temporary.isError && <div className="flex items-center gap-2 px-4 pb-2 text-xs text-muted-foreground">
         <p role="status">{missingTemporary ? '임시 저장 서버 연결 대기' : '임시 저장 내용을 불러오지 못했습니다.'}</p>
