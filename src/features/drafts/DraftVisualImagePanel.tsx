@@ -3,27 +3,30 @@ import { ImagePlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DRAFT_COLOR_PHOTO_ACCEPT, prepareDraftColorPhoto, resolveDraftVisualPhoto } from '@/lib/drafts/color-photo'
+import { draftVisualSaveError, type DraftVisualContent } from '@/lib/supabase/draft-visual-content'
 import type { DraftColorRow } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
-function DraftVisualImageCard({ name, visualPhoto, colorPhoto, readOnly, onSave }: {
+function DraftVisualImageCard({ name, visualPhoto, revision, colorPhoto, readOnly, onSave }: {
   name: string
   visualPhoto?: string
+  revision?: string
   colorPhoto?: string
   readOnly: boolean
-  onSave: (photo: string) => void
+  onSave: (photo: string, revision: string | null) => Promise<void>
 }) {
   const picker = useRef<HTMLInputElement>(null)
-  const [pending, setPending] = useState<string>()
+  const [pending, setPending] = useState<{ photo: string; revision: string | null }>()
   const [preparing, setPreparing] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const { src: preview, temporary: showingTemporaryPhoto } = resolveDraftVisualPhoto(pending ?? visualPhoto, colorPhoto)
+  const { src: preview, temporary: showingTemporaryPhoto } = resolveDraftVisualPhoto(pending?.photo ?? visualPhoto, colorPhoto)
 
   async function chooseImage(file: File) {
     setPreparing(true)
     setError('')
     try {
-      setPending(await prepareDraftColorPhoto(file))
+      setPending({ photo: await prepareDraftColorPhoto(file), revision: revision ?? null })
     } catch (err) {
       setError(err instanceof Error ? err.message : '이미지를 불러오지 못했습니다.')
     } finally {
@@ -34,14 +37,14 @@ function DraftVisualImageCard({ name, visualPhoto, colorPhoto, readOnly, onSave 
   return <section aria-label={`${name} 이미지`}
     className="grid min-w-0 grid-cols-[minmax(0,0.78fr)_minmax(0,1fr)] items-start gap-4 border-b border-primary/45 p-4 @[720px]:gap-5 @[720px]:px-6 @[720px]:py-7 @[720px]:odd:border-r @[720px]:odd:border-r-border">
     <input ref={picker} type="file" hidden accept={DRAFT_COLOR_PHOTO_ACCEPT} aria-label={`${name} 이미지 파일`}
-      disabled={readOnly || preparing} onChange={event => {
+      disabled={readOnly || preparing || saving} onChange={event => {
         const file = event.currentTarget.files?.[0]
         event.currentTarget.value = ''
         if (file) void chooseImage(file)
       }} />
     <Button type="button" variant="outline" aria-label={`${name} 이미지 ${preview ? '변경' : '등록'}`}
       aria-description={showingTemporaryPhoto ? '컬러에 등록된 임시 이미지' : undefined}
-      aria-busy={preparing} disabled={readOnly || preparing} onClick={() => picker.current?.click()}
+      aria-busy={preparing || saving} disabled={readOnly || preparing || saving} onClick={() => picker.current?.click()}
       className={cn('relative grid aspect-square h-auto w-full place-items-center overflow-hidden rounded-xl bg-muted/35 p-0 disabled:opacity-100',
         pending && 'draft-visual-image-pending',
         showingTemporaryPhoto && 'draft-visual-image-temporary')}>
@@ -53,12 +56,19 @@ function DraftVisualImageCard({ name, visualPhoto, colorPhoto, readOnly, onSave 
         <Input value={name} readOnly className="h-8 min-w-0 font-medium text-foreground" />
       </label>
       {!readOnly && <Button type="button" aria-label={`${name} 이미지 저장`} size="sm" className="self-end px-4"
-        disabled={!pending || preparing} onClick={() => {
+        disabled={!pending || preparing || saving} onClick={async () => {
           if (!pending) return
-          onSave(pending)
-          setPending(undefined)
+          setSaving(true)
           setError('')
-        }}>저장</Button>}
+          try {
+            await onSave(pending.photo, pending.revision)
+            setPending(undefined)
+          } catch (error) {
+            setError(draftVisualSaveError(error))
+          } finally {
+            setSaving(false)
+          }
+        }}>{saving ? '저장 중…' : '저장'}</Button>}
     </div>
     {error && <p role="alert" className="col-span-2 text-xs text-danger">{error}</p>}
   </section>
@@ -66,16 +76,20 @@ function DraftVisualImageCard({ name, visualPhoto, colorPhoto, readOnly, onSave 
 
 export function DraftVisualImagePanel({ colors, visualPhotos, colorPhotos, readOnly, onSave }: {
   colors: DraftColorRow[]
-  visualPhotos: Readonly<Partial<Record<string, string>>>
+  visualPhotos: readonly DraftVisualContent[]
   colorPhotos?: Readonly<Record<string, string>>
   readOnly: boolean
-  onSave: (colorId: string, photo: string) => void
+  onSave: (colorId: string, photo: string, revision: string | null) => Promise<void>
 }) {
   if (!colors.length) return <p className="border-t border-border px-4 py-3 text-sm text-muted-foreground">등록된 컬러가 없습니다.</p>
 
   return <div className="grid border-t border-border @[720px]:grid-cols-2">
-    {colors.map((color, index) => <DraftVisualImageCard key={color.id} name={color.name.trim() || `컬러 ${index + 1}`}
-      visualPhoto={visualPhotos[color.id]} colorPhoto={colorPhotos?.[color.id]}
-      readOnly={readOnly} onSave={photo => onSave(color.id, photo)} />)}
+    {colors.map((color, index) => {
+      const saved = visualPhotos.find(row => row.kind === 'color-photo' && row.entry_key === color.id)
+      return <DraftVisualImageCard key={color.id} name={color.name.trim() || `컬러 ${index + 1}`}
+        visualPhoto={typeof saved?.payload === 'string' ? saved.payload : undefined} revision={saved?.revision}
+        colorPhoto={colorPhotos?.[color.id]} readOnly={readOnly}
+        onSave={(photo, revision) => onSave(color.id, photo, revision)} />
+    })}
   </div>
 }

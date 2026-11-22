@@ -329,6 +329,7 @@ export type DraftSpecs = Record<DraftSpecKey, DraftSpec> & {
   confirmedPriceRequestId?: string
   colorImageChoices?: Record<string, DraftColorImageChoice>
   colorPhotoUrls?: Record<string, string>
+  releaseSchedule?: { seasonId: string; targetDate: string | null; certainty: 'tentative' | 'confirmed' }
   /** 상품명 최종 확정. 출시 전에도 이름은 고칠 수 있다. */
   nameConfirmed?: boolean
   /** 컬러 종류 확정. 컬러 샘플 작업지시서를 보내는 조건이다. */

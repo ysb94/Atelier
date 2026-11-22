@@ -473,6 +473,10 @@ export function CompanyDraftsPage() {
       ...draftToInput(current),
       brandId: value.brandId,
       seasonId,
+      specs: {
+        ...current.specs,
+        releaseSchedule: { seasonId, targetDate: value.targetDate, certainty: value.certainty },
+      },
     }))
     setTempGroups((prev) => prev.filter((group) => group.id !== value.group.id))
     setAssignments((prev) => {
@@ -488,6 +492,7 @@ export function CompanyDraftsPage() {
     await saveDraftChange(draftId, (current) => ({
       ...draftToInput(current),
       seasonId: null,
+      specs: { ...current.specs, releaseSchedule: undefined },
     }))
     setAssignments((prev) => {
       if (!prev[draftId]) return prev

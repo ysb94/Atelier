@@ -11,14 +11,18 @@ import { resolveDraftVisualPhoto } from '@/lib/drafts/color-photo'
 import {
   DRAFT_INFORMATION_LABELS, colorInformationEditKey, documentEditKey, informationEditText, isColorInformationConfirmed,
   isSpecDocumentConfirmed, resolveColorSpec, type ColorInformationField, type ColorSpecField, type ColorSpecValues,
-  type DraftInformationField, type InformationDrafts, type InformationEdits, type ResolvedDraftColorSpec, type SaveColorSpec, type UpdateInformationEdits,
+  type InformationDrafts, type InformationEdits, type ResolvedDraftColorSpec, type SaveColorSpec, type UpdateInformationEdits,
 } from '@/lib/drafts/color-spec'
 import { formatSizeSpec, parseSizeSpec, type SizeParts } from '@/lib/drafts/spec-format'
 import type { DraftColorRow, ProductDraft } from '@/lib/types'
 import { draftInformationTemporaryStore, type DraftInformationTemporary, type DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
+import {
+  draftVisualSaveError, listDraftVisualContent, saveDraftVisualContent,
+  type DraftVendorHtml, type DraftVisualChange, type DraftVisualContent,
+} from '@/lib/supabase/draft-visual-content'
 import { cn } from '@/lib/utils'
 import { DRAFT_INFORMATION_PANEL_TAB_GROUPS, type DraftInformationPanelField } from './draft-information-tabs'
-import { DRAFT_HTML_VENDORS, DraftVendorHtmlDialog, type DraftVendorHtml } from './DraftVendorHtmlDialog'
+import { DRAFT_HTML_VENDORS, DraftVendorHtmlDialog } from './DraftVendorHtmlDialog'
 import { DraftVisualImagePanel } from './DraftVisualImagePanel'
 
 const MEASUREMENT_FIELDS = ['size', 'weight'] as const
@@ -392,7 +396,13 @@ function SpecDocumentForm({ draft, readOnly, showWriteActions, edits, saved, onE
   )
 }
 
-export type DraftVisualHtml = Readonly<Partial<Record<string, { temporary?: string; saved?: string }>>>
+function vendorTemplates(rows: readonly DraftVisualContent[]) {
+  const templates: DraftVendorHtml = {}
+  for (const row of rows) {
+    if (row.kind === 'vendor-html') templates[row.entry_key] = row.payload
+  }
+  return templates
+}
 
 function VendorHtmlCode({ id, name, text, templates }: { id: string; name: string; text: string; templates: DraftVendorHtml }) {
   const [vendor, setVendor] = useState('')
@@ -421,23 +431,47 @@ function VendorHtmlCode({ id, name, text, templates }: { id: string; name: strin
   </div>
 }
 
-function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, entry, vendorHtml, onSave }: {
+function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSaveTemporary, entry, workingCopy, vendorHtml, onSave }: {
   color: DraftColorRow; index: number; visualPhoto?: string; colorPhoto?: string; readOnly: boolean
-  entry: DraftVisualHtml[string]; vendorHtml: DraftVendorHtml; onSave: (text: string, temporary: boolean) => void
+  canSaveTemporary: boolean
+  entry?: DraftVisualContent; workingCopy?: DraftInformationTemporary; vendorHtml: DraftVendorHtml
+  onSave: (text: string, revision: string | null, temporary: boolean, temporaryRevision?: string) => Promise<void>
 }) {
   const name = color.name.trim() || `컬러 ${index + 1}`
   const { src: photo, temporary: showingTemporaryPhoto } = resolveDraftVisualPhoto(visualPhoto, colorPhoto)
-  const [text, setText] = useState(entry?.temporary ?? entry?.saved ?? '')
+  const [edit, setEdit] = useState<{ text: string; revision: string | null }>()
   const [preview, setPreview] = useState('')
   const [codeOpen, setCodeOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
   const codeId = useId()
+  const stored = typeof entry?.payload === 'string' ? entry.payload : ''
+  const working = readOnly ? undefined : workingCopy?.edits.html
+  const text = edit?.text ?? working?.text ?? stored
+  const revision = edit ? edit.revision : working ? working.source || null : entry?.revision ?? null
+  const versionChanged = revision !== (entry?.revision ?? null)
   const hasContent = Boolean(text.trim())
-  const saved = entry?.temporary === undefined && entry?.saved === text
-  const temporary = entry?.temporary === text
+  const saved = Boolean(entry) && !working && stored === text
+  const temporary = working?.text === text
   const previewDocument = preview
     ? `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
       <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">${preview}`
     : undefined
+
+  async function save(asTemporary: boolean) {
+    if (readOnly || saving) return
+    setSaving(true)
+    setError('')
+    try {
+      await onSave(text, revision, asTemporary, workingCopy?.revision)
+      setEdit(undefined)
+      if (!hasContent) setPreview('')
+    } catch (error) {
+      setError(draftVisualSaveError(error))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return <section aria-label={`${name} HTML`}
     className="grid min-w-0 grid-cols-[3.5rem_minmax(0,1fr)] items-start gap-x-3 gap-y-2 border-b border-primary/45 p-3 @[560px]:grid-cols-[minmax(5rem,0.9fr)_minmax(0,2.8fr)_minmax(7.75rem,1fr)] @[560px]:gap-x-4">
@@ -454,9 +488,9 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, entry,
     <div className="min-w-0">
       <p className="text-xs text-muted-foreground">HTML</p>
       <div className="relative mt-0.5">
-        <Textarea aria-label={`${name} HTML 입력`} value={text} readOnly={readOnly} placeholder="직접 입력…"
+        <Textarea aria-label={`${name} HTML 입력`} value={text} readOnly={readOnly || saving} placeholder="직접 입력…"
           spellCheck={false} className="h-[9.5rem] min-h-[9.5rem] resize-none bg-muted/35 pb-8 text-xs text-foreground shadow-none"
-          onChange={event => setText(event.target.value)} />
+          onChange={event => setEdit({ text: event.target.value, revision })} />
         <InformationCopyButton label={`${name} HTML`} text={text} className="absolute bottom-2 right-2" />
       </div>
       <div className="mt-1 flex flex-wrap items-center justify-end gap-1.5">
@@ -467,10 +501,10 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, entry,
           disabled={!hasContent} onClick={() => setPreview(text)}>미리보기</Button>
         {!readOnly && <>
           <Button type="button" size="sm" variant="secondary" className="h-6 px-2"
-            disabled={!hasContent || saved || temporary} onClick={() => onSave(text, true)}>임시저장</Button>
+            disabled={!canSaveTemporary || !hasContent || saved || temporary || saving || versionChanged} onClick={() => void save(true)}>임시저장</Button>
           <Button type="button" size="sm" className="h-6 px-3"
-            disabled={(!hasContent && entry?.temporary === undefined && !entry?.saved) || saved}
-            onClick={() => { onSave(text, false); if (!hasContent) setPreview('') }}>저장</Button>
+            disabled={(!hasContent && !working && !stored) || saved || saving || versionChanged}
+            onClick={() => void save(false)}>{saving ? '저장 중…' : '저장'}</Button>
         </>}
       </div>
     </div>
@@ -484,12 +518,19 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, entry,
         onClick={() => setCodeOpen(open => !open)}>업체별 코드 자동생성</Button>}
     </div>
     {!readOnly && codeOpen && <VendorHtmlCode id={codeId} name={name} text={text} templates={vendorHtml} />}
+    {!readOnly && versionChanged ? <div className="col-span-full flex flex-wrap items-center gap-2">
+      <p role="alert" className="text-xs text-danger">다른 화면에서 먼저 저장했습니다. 작성 중인 HTML은 복사할 수 있습니다.</p>
+      <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => {
+        setEdit({ text: stored, revision: entry?.revision ?? null })
+        setPreview('')
+        setError('')
+      }}>최신 저장본 불러오기</Button>
+    </div> : error && <p role="alert" className="col-span-full text-xs text-danger">{error}</p>}
   </section>
 }
 
 export function DraftInformationPanel({
   id, anchor, draft, field, colorId, readOnly, fromVisual, edits, onEditsChange, onFieldChange, onClose, onSave, onSaveSpecDocument,
-  visualImages, onSaveVisualImage, visualHtml, onSaveVisualHtml, vendorHtml, onSaveVendorHtml,
   editorId, temporaryStore = draftInformationTemporaryStore,
 }: {
   id: string; anchor: HTMLButtonElement; draft: ProductDraft; field: DraftInformationPanelField; colorId: string | null
@@ -497,20 +538,25 @@ export function DraftInformationPanel({
   onFieldChange: (field: DraftInformationPanelField) => void; onClose: () => void; onSave: SaveColorSpec
   onSaveSpecDocument: (value: string, temporaryRevision?: string) => Promise<void>
   edits: InformationDrafts; onEditsChange: (key: string, update: UpdateInformationEdits) => void
-  visualImages: Readonly<Partial<Record<string, string>>>
-  onSaveVisualImage: (colorId: string, photo: string) => void
-  visualHtml: DraftVisualHtml
-  onSaveVisualHtml: (colorId: string, text: string, temporary: boolean) => void
-  vendorHtml: DraftVendorHtml
-  onSaveVendorHtml: (value: DraftVendorHtml) => void
   editorId?: string; temporaryStore?: DraftInformationTemporaryStore
 }) {
   const active = useWorkspaceTabActivity()
-  const [vendorHtmlOpen, setVendorHtmlOpen] = useState(false)
+  const [vendorHtmlSnapshot, setVendorHtmlSnapshot] = useState<readonly DraftVisualContent[]>()
   const cache = useQueryClient()
   const queryKey = ['draft-information-temporary', editorId, draft.id] as const
   const locked = readOnly || fromVisual
-  const temporaryEnabled = Boolean(editorId && !locked)
+  const visualTab = field === 'image' || field === 'html'
+  const temporaryEnabled = Boolean(editorId && (field === 'html' ? !readOnly : !locked && !visualTab))
+  const visualKey = ['draft-visual-content', editorId, draft.id] as const
+  const visual = useQuery({
+    queryKey: visualKey,
+    queryFn: ({ signal }) => listDraftVisualContent(draft.id, signal),
+    enabled: active && visualTab,
+    retry: false,
+  })
+  const visualRows = visual.data ?? []
+  const templates = vendorTemplates(visualRows)
+  const visualLocked = readOnly || !visual.data
   const temporary = useQuery({
     queryKey,
     queryFn: ({ signal }) => temporaryStore.list(draft.id, editorId!, signal),
@@ -523,13 +569,39 @@ export function DraftInformationPanel({
   const missingTemporary = temporaryErrorCode === 'PGRST205' || temporaryErrorCode === '42P01'
   const savedDocument = temporaryEnabled ? temporary.data?.find(row => row.field === 'specDoc') : undefined
 
-  async function saveTemporary(field: DraftInformationField, colorId: string | null, edits: InformationEdits) {
-    if (!editorId || locked) return
+  async function saveTemporary(field: DraftInformationTemporary['field'], colorId: string | null, edits: DraftInformationTemporary['edits']) {
+    if (!editorId || (field === 'html' ? readOnly : locked)) return
     const copy = { field, color_id: colorId, edits, revision: crypto.randomUUID() }
     await temporaryStore.save(draft.id, editorId, copy)
     await cache.cancelQueries({ queryKey, exact: true })
     cache.setQueryData<DraftInformationTemporary[]>(queryKey, current =>
       [...(current ?? []).filter(row => row.field !== field || row.color_id !== colorId), copy])
+  }
+
+  async function saveVisual(changes: DraftVisualChange[], temporaryRevision?: string) {
+    const saved = await saveDraftVisualContent(draft.id, changes, temporaryRevision).catch(error => {
+      if ((error as { code?: string } | null)?.code === '40001') {
+        void cache.invalidateQueries({ queryKey: visualKey, exact: true })
+      }
+      throw error
+    })
+    await cache.cancelQueries({ queryKey: visualKey, exact: true })
+    cache.setQueryData<DraftVisualContent[]>(visualKey, current => [
+      ...(current ?? []).filter(row => !saved.some(next => row.kind === next.kind && row.entry_key === next.entry_key)),
+      ...saved,
+    ])
+    removeConfirmedTemporary(temporaryRevision)
+  }
+
+  async function saveVendorHtml(rows: readonly DraftVisualContent[], templates: DraftVendorHtml) {
+    const changes: DraftVisualChange[] = []
+    for (const [entry_key, payload] of Object.entries(templates)) {
+      if (!payload) continue
+      const current = rows.find(row => row.kind === 'vendor-html' && row.entry_key === entry_key)
+      if (current?.kind === 'vendor-html' && current.payload.top === payload.top && current.payload.bottom === payload.bottom) continue
+      changes.push({ kind: 'vendor-html', entry_key, payload, revision: current?.revision ?? null })
+    }
+    if (changes.length) await saveVisual(changes)
   }
 
   function removeConfirmedTemporary(revision: string | undefined) {
@@ -607,9 +679,9 @@ export function DraftInformationPanel({
         </div>
         {field === 'html' && (
           <div className="flex w-full justify-end border-t border-border pt-3 @[560px]:w-auto @[560px]:basis-[28%] @[560px]:self-stretch @[560px]:items-center @[560px]:justify-center @[560px]:border-l @[560px]:border-t-0 @[560px]:pl-4 @[560px]:pt-0">
-            <Button type="button" variant="secondary" disabled={readOnly} aria-haspopup="dialog"
+            <Button type="button" variant="secondary" disabled={visualLocked} aria-haspopup="dialog"
               className="h-auto min-h-11 flex-col gap-0 bg-muted-foreground px-4 py-2 text-center text-xs text-background hover:bg-muted-foreground/85"
-              onClick={() => setVendorHtmlOpen(true)}>
+              onClick={() => setVendorHtmlSnapshot(visualRows)}>
               <span>업체별</span>
               <span>Top Buttom 등록</span>
             </Button>
@@ -621,9 +693,16 @@ export function DraftInformationPanel({
           <X size={16} aria-hidden="true" />
         </Button>
       </div>
-      {field === 'html' && vendorHtmlOpen && !readOnly &&
-        <DraftVendorHtmlDialog preferredVendor={draft.openTypeDetail} value={vendorHtml}
-          onSave={onSaveVendorHtml} onClose={() => setVendorHtmlOpen(false)} />}
+      {field === 'html' && vendorHtmlSnapshot && !readOnly &&
+        <DraftVendorHtmlDialog preferredVendor={draft.openTypeDetail} value={vendorTemplates(vendorHtmlSnapshot)}
+          onSave={templates => saveVendorHtml(vendorHtmlSnapshot, templates)}
+          onClose={() => setVendorHtmlSnapshot(undefined)} />}
+      {visualTab && visual.isPending && <p role="status" className="px-4 pb-2 text-xs text-muted-foreground">비주얼 정보를 불러오는 중…</p>}
+      {visualTab && visual.isError && <div className="flex items-center gap-2 px-4 pb-2 text-xs text-muted-foreground">
+        <p role="status">{['PGRST205', '42P01'].includes((visual.error as { code?: string }).code ?? '')
+          ? '비주얼 저장 서버 연결 대기' : '비주얼 정보를 불러오지 못했습니다.'}</p>
+        <Button type="button" variant="outline" size="sm" onClick={() => void visual.refetch()}>비주얼 다시 조회</Button>
+      </div>}
       {loadingTemporary && <p role="status" className="px-4 pb-2 text-xs text-muted-foreground">임시 저장 내용을 불러오는 중…</p>}
       {temporaryEnabled && temporary.isError && <div className="flex items-center gap-2 px-4 pb-2 text-xs text-muted-foreground">
         <p role="status">{missingTemporary ? '임시 저장 서버 연결 대기' : '임시 저장 내용을 불러오지 못했습니다.'}</p>
@@ -650,15 +729,21 @@ export function DraftInformationPanel({
           </div>
         </div>
         {field === 'image' ? <DraftVisualImagePanel key={`${editorId ?? ''}:${readOnly}`} colors={colors}
-          colorPhotos={draft.specs.colorPhotoUrls} visualPhotos={visualImages} readOnly={readOnly} onSave={onSaveVisualImage} /> : field === 'html' ? (
+          colorPhotos={draft.specs.colorPhotoUrls} visualPhotos={visualRows} readOnly={visualLocked}
+          onSave={(entry_key, payload, revision) => saveVisual([{ kind: 'color-photo', entry_key, payload, revision }])} /> : field === 'html' ? (
           <div className="border-t border-border">
-            {colors.length ? <>
-              {!readOnly && <p className="px-3 pt-2 text-[11px] text-muted-foreground">HTML은 현재 기획안 화면에서만 저장됩니다.</p>}
-              {colors.map((color, index) => <VisualHtmlRow key={`${color.id}:${readOnly}`} color={color} index={index}
-                visualPhoto={visualImages[color.id]} colorPhoto={draft.specs.colorPhotoUrls?.[color.id]}
-                readOnly={readOnly} entry={visualHtml[color.id]} vendorHtml={vendorHtml}
-                onSave={(text, temporary) => onSaveVisualHtml(color.id, text, temporary)} />)}
-            </> : <p className="px-4 py-3 text-sm text-muted-foreground">등록된 컬러가 없습니다.</p>}
+            {colors.length ? colors.map((color, index) => {
+              const photo = visualRows.find(row => row.kind === 'color-photo' && row.entry_key === color.id)
+              const entry = visualRows.find(row => row.kind === 'color-html' && row.entry_key === color.id)
+              const working = temporaryEnabled ? temporary.data?.find(row => row.field === 'html' && row.color_id === color.id) : undefined
+              return <VisualHtmlRow key={`${color.id}:${readOnly}`} color={color} index={index}
+                visualPhoto={typeof photo?.payload === 'string' ? photo.payload : undefined}
+                colorPhoto={draft.specs.colorPhotoUrls?.[color.id]} readOnly={visualLocked || loadingTemporary}
+                canSaveTemporary={canSaveTemporary} entry={entry} workingCopy={working} vendorHtml={templates}
+                onSave={(payload, revision, asTemporary, temporaryRevision) => asTemporary
+                  ? saveTemporary('html', color.id, { html: { source: revision ?? '', text: payload } })
+                  : saveVisual([{ kind: 'color-html', entry_key: color.id, payload, revision }], temporaryRevision)} />
+            }) : <p className="px-4 py-3 text-sm text-muted-foreground">등록된 컬러가 없습니다.</p>}
           </div>
         ) : field === 'specDoc' ? (
           <SpecDocumentForm key={String(locked)} draft={draft} readOnly={locked || loadingTemporary} showWriteActions={!fromVisual} saved={savedDocument}

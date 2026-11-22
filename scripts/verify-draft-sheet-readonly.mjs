@@ -14,7 +14,7 @@ const fixtureClient={
    const modulePath = importer?.replaceAll('\\','/') ?? ''
    if ((/\/lib\/supabase\/client(?:\.ts)?$/.test(source.replaceAll('\\','/')) &&
        /\/(product-drafts|profiles)\.ts$/.test(modulePath)) ||
-       (source === './client' && modulePath.endsWith('/attendance-exemptions.ts'))) return '\0draft-color-client'
+       (source === './client' && /\/(attendance-exemptions|draft-visual-content)\.ts$/.test(modulePath))) return '\0draft-color-client'
  },
  load(id) {
    if(id==='\0draft-color-client') return `import { createClient } from '@supabase/supabase-js'
@@ -67,6 +67,22 @@ try{
    ],error:null}})
  })
  await page.route('**/rpc/list_company_attendance_exempt', route => route.fulfill({json:{data:['fixture-md'],error:null}}))
+ let visualContent=[]
+ await page.route('**/rest/v1/draft_visual_content?*',route=>route.fulfill({json:visualContent}))
+ await page.route('**/rpc/save_draft_visual_content',async route=>{
+   const {p_changes,p_temporary_revision}=route.request().postDataJSON()
+   if(p_changes.some(change=>change.revision!==(visualContent.find(row=>row.kind===change.kind&&row.entry_key===change.entry_key)?.revision??null))) {
+     return route.fulfill({json:{data:null,error:{code:'40001'}}})
+   }
+   const saved=p_changes.map(change=>({...change, revision:crypto.randomUUID()}))
+   visualContent=[...visualContent.filter(row=>!saved.some(next=>row.kind===next.kind&&row.entry_key===next.entry_key)),...saved]
+   if(p_temporary_revision) await page.evaluate(revision=>{
+     const key='atelier-fixture-information-temporary'
+     const rows=JSON.parse(sessionStorage.getItem(key)??'[]')
+     sessionStorage.setItem(key,JSON.stringify(rows.filter(row=>row.revision!==revision)))
+   },p_temporary_revision)
+   return route.fulfill({json:{data:saved,error:null}})
+ })
  await page.clock.setFixedTime(new Date('2026-11-02T15:01:00Z'))
  await page.goto(origin,{waitUntil:'commit',timeout:45000});const row=page.locator('.draft-sheet-row');await row.waitFor({timeout:60000})
  assert.deepEqual(await page.getByRole('columnheader').allTextContents(),
@@ -726,10 +742,12 @@ try{
  assert.ok(previewBox.x>=editorBox.x+editorBox.width,'The preview sits to the right of the HTML input')
  await expectCopy(ivoryHtml,'아이보리 HTML','<p>아이보리 상세 HTML</p><script>document.body.dataset.previewScript = "ran"</script>')
  await ivoryHtml.getByRole('button',{name:'임시저장',exact:true}).click()
+ await ivoryHtml.getByText('임시저장됨',{exact:true}).waitFor()
  await panel.getByRole('button',{name:'INFORMATION 닫기'}).click()
  await visualHtml.click()
  assert.match(await ivoryInput.inputValue(),/아이보리 상세 HTML/)
  await ivoryHtml.getByRole('button',{name:'저장',exact:true}).click()
+ await ivoryHtml.getByText('저장됨',{exact:true}).waitFor()
  assert.equal(await ivoryHtml.getByText('저장됨',{exact:true}).isVisible(),true)
  await generateVendorCode(ivoryHtml).click()
  const ivoryVendor=ivoryHtml.getByRole('combobox',{name:'업체 선택',exact:true})
@@ -838,6 +856,38 @@ try{
  await page.reload({waitUntil:'domcontentloaded'})
  await brandCell.getByText('No. PL-TEST',{exact:true}).waitFor()
  assert.equal(await brandCell.locator('.draft-sheet-proposer').count(),0)
+ await visualHtml.click()
+ await ivoryHtml.getByText('저장됨',{exact:true}).waitFor()
+ assert.equal(await blackHtmlPhoto.getAttribute('src'),newPhoto)
+ await generateVendorCode(ivoryHtml).click()
+ await ivoryVendor.selectOption('무신사')
+ assert.equal(await ivoryVendorHtml.inputValue(),musinsaIvoryCode)
+
+ const ivoryHtmlInput=ivoryHtml.getByRole('textbox',{name:'아이보리 HTML 입력'})
+ await ivoryHtmlInput.fill('<p>내 편집</p>')
+ visualContent=visualContent.map(row=>row.kind==='color-html'&&row.entry_key==='ivory'
+   ? {...row, payload:'<p>다른 화면 저장본</p>',revision:crypto.randomUUID()} : row)
+ await ivoryHtml.getByRole('button',{name:'저장',exact:true}).click()
+ const reloadHtml=ivoryHtml.getByRole('button',{name:'최신 저장본 불러오기'})
+ await reloadHtml.waitFor()
+ assert.equal(await ivoryHtmlInput.inputValue(),'<p>내 편집</p>')
+ await reloadHtml.click()
+ assert.equal(await ivoryHtmlInput.inputValue(),'<p>다른 화면 저장본</p>')
+
+ await page.goto(`${origin}/#saved-release`)
+ await page.reload({waitUntil:'domcontentloaded'})
+ await row.locator('.draft-sheet-schedule').filter({hasText:/2026\. 11\. 27\./}).waitFor({state:'attached'})
+ await page.route('**/rest/v1/product_drafts?*',async route=>{
+   const request=route.request()
+   const params=new URL(request.url()).searchParams
+   assert.equal(params.get('updated_at'),'eq.2026-10-01')
+   const payload=request.postDataJSON()
+   assert.deepEqual(payload,{season_id:'group-dec'})
+   return route.fulfill({json:{season_id:'group-dec',updated_at:folderRevision}})
+ })
+ await releaseFolder.selectOption('group-dec')
+ await row.locator('.draft-sheet-schedule').filter({hasText:/12월 출시/}).waitFor({state:'attached'})
+ assert.doesNotMatch(await row.locator('.draft-sheet-schedule').textContent(),/2026\. 11\. 27\./)
  assert.deepEqual(errors,[])
- console.log('draft-sheet-readonly: existing actions, INFORMATION, color updates, and BRAND folder selection passed')
+ console.log('draft-sheet-readonly: existing actions, saved Visual content after reload, color updates, and release schedules passed')
 }finally{await browser?.close();await server?.close()}

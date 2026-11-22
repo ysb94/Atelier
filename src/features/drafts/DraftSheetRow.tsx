@@ -26,8 +26,7 @@ import './draft-board.css'
 import { DraftSampleProgress } from './DraftSampleProgress'
 import { DraftColorSampleProgress } from './DraftColorSampleProgress'
 import { DraftPriceRequestButton, type DraftPriceControls } from './DraftPriceRequestButton'
-import { DraftInformationPanel, type DraftVisualHtml } from './DraftInformationPanel'
-import type { DraftVendorHtml } from './DraftVendorHtmlDialog'
+import { DraftInformationPanel } from './DraftInformationPanel'
 import type { DraftInformationPanelField, DraftVisualInformationField } from './draft-information-tabs'
 import { DraftMdTeamCell } from './DraftMdTeamCell'
 import { DraftVisualAmdCells } from './DraftVisualAmdCells'
@@ -801,14 +800,8 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
   } | null>(null)
   const fromVisual = Boolean(information?.visualTrigger)
   const [informationEdits, setInformationEdits] = useState<InformationDrafts>({})
-  const [visualImages, setVisualImages] = useState<Partial<Record<string, string>>>({})
-  const [visualHtml, setVisualHtml] = useState<DraftVisualHtml>({})
-  const [vendorHtml, setVendorHtml] = useState<DraftVendorHtml>({})
   useEffect(() => {
     setInformationEdits({})
-    setVisualImages({})
-    setVisualHtml({})
-    setVendorHtml({})
   }, [readOnly, informationEditorId])
   function updateInformationEdits(key: string, update: UpdateInformationEdits) {
     if (!readOnly && !fromVisual) setInformationEdits(current => ({ ...current, [key]: update(current[key]) }))
@@ -1019,18 +1012,6 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
       <DraftInformationPanel key={informationEditorId} id={informationId} anchor={information.anchor}
         editorId={informationEditorId} temporaryStore={informationTemporaryStore}
         edits={informationEdits} onEditsChange={updateInformationEdits}
-        visualImages={visualImages} onSaveVisualImage={(colorId, photo) => {
-          if (!readOnly) setVisualImages(current => ({ ...current, [colorId]: photo }))
-        }}
-        visualHtml={visualHtml} onSaveVisualHtml={(colorId, text, temporary) => {
-          if (!readOnly) setVisualHtml(current => ({
-            ...current,
-            [colorId]: temporary ? { ...current[colorId], temporary: text } : { saved: text },
-          }))
-        }}
-        vendorHtml={vendorHtml} onSaveVendorHtml={value => {
-          if (!readOnly) setVendorHtml(value)
-        }}
         draft={draft} field={information.field} colorId={information.colorId} readOnly={readOnly} fromVisual={fromVisual}
         onSave={onSaveSheetValue}
         onSaveSpecDocument={onSaveSpecDocument}
