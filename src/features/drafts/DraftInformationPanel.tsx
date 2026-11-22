@@ -388,9 +388,72 @@ function SpecDocumentForm({ draft, readOnly, showWriteActions, edits, saved, onE
   )
 }
 
+export type DraftVisualHtml = Readonly<Partial<Record<string, { temporary?: string; saved?: string }>>>
+
+function VisualHtmlRow({ color, index, photo, selected, readOnly, entry, onSave }: {
+  color: DraftColorRow; index: number; photo?: string; selected: boolean; readOnly: boolean
+  entry: DraftVisualHtml[string]; onSave: (text: string, temporary: boolean) => void
+}) {
+  const name = color.name.trim() || `컬러 ${index + 1}`
+  const [text, setText] = useState(entry?.temporary ?? entry?.saved ?? '')
+  const [preview, setPreview] = useState('')
+  const hasContent = Boolean(text.trim())
+  const saved = entry?.temporary === undefined && entry?.saved === text
+  const temporary = entry?.temporary === text
+  const previewDocument = preview
+    ? `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">${preview}`
+    : undefined
+
+  return <section aria-label={`${name} HTML`}
+    className="grid min-w-0 grid-cols-[3.5rem_minmax(0,1fr)] items-start gap-x-3 gap-y-2 border-b border-primary/45 p-3 @[560px]:grid-cols-[minmax(5rem,0.9fr)_minmax(0,2.8fr)_minmax(7.75rem,1fr)] @[560px]:gap-x-4">
+    <div className="self-center text-center">
+      <div className={cn('relative grid aspect-square w-full place-items-center overflow-hidden rounded-xl border border-border bg-muted/35 font-semibold',
+        selected && 'draft-visual-image-pending')}>
+        {photo
+          ? <img src={photo} alt={`${name} 컬러 이미지`} loading="lazy" className="size-full object-contain" />
+          : <span aria-hidden="true" className="text-2xl @[560px]:text-5xl">{name[0]}</span>}
+      </div>
+      <p className="mt-1 break-words text-xs font-medium @[560px]:text-sm">{name}</p>
+    </div>
+    <div className="min-w-0">
+      <p className="text-xs text-muted-foreground">HTML</p>
+      <div className="relative mt-0.5">
+        <Textarea aria-label={`${name} HTML 입력`} value={text} readOnly={readOnly} placeholder="직접 입력…"
+          spellCheck={false} className="h-[9.5rem] min-h-[9.5rem] resize-none bg-muted/35 pb-8 text-xs text-foreground shadow-none"
+          onChange={event => setText(event.target.value)} />
+        <InformationCopyButton label={`${name} HTML`} text={text} className="absolute bottom-2 right-2" />
+      </div>
+      <div className="mt-1 flex flex-wrap items-center justify-end gap-1.5">
+        <span className="mr-auto text-[10px] text-muted-foreground" role="status">
+          {saved ? '저장됨' : temporary ? '임시저장됨' : ''}
+        </span>
+        <Button type="button" size="sm" variant="outline" className="h-6 px-2"
+          disabled={!hasContent} onClick={() => setPreview(text)}>미리보기</Button>
+        {!readOnly && <>
+          <Button type="button" size="sm" variant="secondary" className="h-6 px-2"
+            disabled={!hasContent || saved || temporary} onClick={() => onSave(text, true)}>임시저장</Button>
+          <Button type="button" size="sm" className="h-6 px-3"
+            disabled={(!hasContent && entry?.temporary === undefined && !entry?.saved) || saved}
+            onClick={() => { onSave(text, false); if (!hasContent) setPreview('') }}>저장</Button>
+        </>}
+      </div>
+    </div>
+    <div className="col-start-2 grid min-w-0 gap-1 @[560px]:col-start-3">
+      <div className="h-24 overflow-hidden rounded-md border border-border bg-card @[560px]:h-[10.65rem]">
+        {previewDocument && <iframe title={`${name} HTML 미리보기`} sandbox="" srcDoc={previewDocument}
+          tabIndex={-1} className="pointer-events-none size-full" />}
+      </div>
+      {!readOnly && <span className="flex justify-end" title="업체별 코드 생성은 아직 연결되지 않았습니다.">
+        <Button type="button" size="sm" variant="outline" className="h-6 px-2" disabled>업체별 코드 자동생성</Button>
+      </span>}
+    </div>
+  </section>
+}
+
 export function DraftInformationPanel({
   id, anchor, draft, field, colorId, readOnly, fromVisual, edits, onEditsChange, onFieldChange, onClose, onSave, onSaveSpecDocument,
-  visualImages, onSaveVisualImage, editorId, temporaryStore = draftInformationTemporaryStore,
+  visualImages, onSaveVisualImage, visualHtml, onSaveVisualHtml, editorId, temporaryStore = draftInformationTemporaryStore,
 }: {
   id: string; anchor: HTMLButtonElement; draft: ProductDraft; field: DraftInformationPanelField; colorId: string | null
   readOnly: boolean; fromVisual: boolean
@@ -399,6 +462,8 @@ export function DraftInformationPanel({
   edits: InformationDrafts; onEditsChange: (key: string, update: UpdateInformationEdits) => void
   visualImages: Readonly<Partial<Record<string, string>>>
   onSaveVisualImage: (colorId: string, photo: string) => void
+  visualHtml: DraftVisualHtml
+  onSaveVisualHtml: (colorId: string, text: string, temporary: boolean) => void
   editorId?: string; temporaryStore?: DraftInformationTemporaryStore
 }) {
   const active = useWorkspaceTabActivity()
@@ -531,7 +596,17 @@ export function DraftInformationPanel({
           </div>
         </div>
         {field === 'image' ? <DraftVisualImagePanel key={`${editorId ?? ''}:${readOnly}`} colors={colors}
-          photos={{ ...draft.specs.colorPhotoUrls, ...visualImages }} readOnly={readOnly} onSave={onSaveVisualImage} /> : field === 'html' ? <div className="min-h-24 border-t border-border" /> : field === 'specDoc' ? (
+          photos={{ ...draft.specs.colorPhotoUrls, ...visualImages }} readOnly={readOnly} onSave={onSaveVisualImage} /> : field === 'html' ? (
+          <div className="border-t border-border">
+            {colors.length ? <>
+              {!readOnly && <p className="px-3 pt-2 text-[11px] text-muted-foreground">HTML은 현재 기획안 화면에서만 저장됩니다.</p>}
+              {colors.map((color, index) => <VisualHtmlRow key={`${color.id}:${readOnly}`} color={color} index={index}
+                photo={visualImages[color.id] ?? draft.specs.colorPhotoUrls?.[color.id]}
+                selected={color.id === colorId} readOnly={readOnly} entry={visualHtml[color.id]}
+                onSave={(text, temporary) => onSaveVisualHtml(color.id, text, temporary)} />)}
+            </> : <p className="px-4 py-3 text-sm text-muted-foreground">등록된 컬러가 없습니다.</p>}
+          </div>
+        ) : field === 'specDoc' ? (
           <SpecDocumentForm key={String(locked)} draft={draft} readOnly={locked || loadingTemporary} showWriteActions={!fromVisual} saved={savedDocument}
             onSave={async (value, revision) => {
               await onSaveSpecDocument(value, revision)
