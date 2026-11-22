@@ -14,6 +14,10 @@ const MAX_DATA_LENGTH = 96 * 1024
 
 export const DRAFT_COLOR_PHOTO_ACCEPT = [...ALLOWED_TYPES].join(',')
 
+export function resolveDraftVisualPhoto(visualPhoto?: string, colorPhoto?: string) {
+  return { src: visualPhoto || colorPhoto, temporary: !visualPhoto && Boolean(colorPhoto) }
+}
+
 function isColorPhotoDataUrl(value: unknown): value is string {
   return typeof value === 'string'
     && value.length <= MAX_DATA_LENGTH

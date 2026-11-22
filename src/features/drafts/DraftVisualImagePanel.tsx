@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { ImagePlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { DRAFT_COLOR_PHOTO_ACCEPT, prepareDraftColorPhoto } from '@/lib/drafts/color-photo'
+import { DRAFT_COLOR_PHOTO_ACCEPT, prepareDraftColorPhoto, resolveDraftVisualPhoto } from '@/lib/drafts/color-photo'
 import type { DraftColorRow } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -17,8 +17,7 @@ function DraftVisualImageCard({ name, visualPhoto, colorPhoto, readOnly, onSave 
   const [pending, setPending] = useState<string>()
   const [preparing, setPreparing] = useState(false)
   const [error, setError] = useState('')
-  const preview = pending ?? visualPhoto ?? colorPhoto
-  const showingTemporaryPhoto = pending === undefined && visualPhoto === undefined && Boolean(colorPhoto)
+  const { src: preview, temporary: showingTemporaryPhoto } = resolveDraftVisualPhoto(pending ?? visualPhoto, colorPhoto)
 
   async function chooseImage(file: File) {
     setPreparing(true)

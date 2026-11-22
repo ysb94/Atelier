@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Textarea } from '@/components/ui/input'
 import { copyText } from '@/lib/clipboard'
+import { resolveDraftVisualPhoto } from '@/lib/drafts/color-photo'
 import {
   DRAFT_INFORMATION_LABELS, colorInformationEditKey, documentEditKey, informationEditText, isColorInformationConfirmed,
   isSpecDocumentConfirmed, resolveColorSpec, type ColorInformationField, type ColorSpecField, type ColorSpecValues,
@@ -390,11 +391,12 @@ function SpecDocumentForm({ draft, readOnly, showWriteActions, edits, saved, onE
 
 export type DraftVisualHtml = Readonly<Partial<Record<string, { temporary?: string; saved?: string }>>>
 
-function VisualHtmlRow({ color, index, photo, selected, readOnly, entry, onSave }: {
-  color: DraftColorRow; index: number; photo?: string; selected: boolean; readOnly: boolean
+function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, entry, onSave }: {
+  color: DraftColorRow; index: number; visualPhoto?: string; colorPhoto?: string; readOnly: boolean
   entry: DraftVisualHtml[string]; onSave: (text: string, temporary: boolean) => void
 }) {
   const name = color.name.trim() || `컬러 ${index + 1}`
+  const { src: photo, temporary: showingTemporaryPhoto } = resolveDraftVisualPhoto(visualPhoto, colorPhoto)
   const [text, setText] = useState(entry?.temporary ?? entry?.saved ?? '')
   const [preview, setPreview] = useState('')
   const hasContent = Boolean(text.trim())
@@ -409,9 +411,10 @@ function VisualHtmlRow({ color, index, photo, selected, readOnly, entry, onSave 
     className="grid min-w-0 grid-cols-[3.5rem_minmax(0,1fr)] items-start gap-x-3 gap-y-2 border-b border-primary/45 p-3 @[560px]:grid-cols-[minmax(5rem,0.9fr)_minmax(0,2.8fr)_minmax(7.75rem,1fr)] @[560px]:gap-x-4">
     <div className="self-center text-center">
       <div className={cn('relative grid aspect-square w-full place-items-center overflow-hidden rounded-xl border border-border bg-muted/35 font-semibold',
-        selected && 'draft-visual-image-pending')}>
+        showingTemporaryPhoto && 'draft-visual-image-temporary')}>
         {photo
-          ? <img src={photo} alt={`${name} 컬러 이미지`} loading="lazy" className="size-full object-contain" />
+          ? <img src={photo} alt={`${name} 컬러 이미지`} loading="lazy" className="size-full object-contain"
+            aria-description={showingTemporaryPhoto ? '컬러에 등록된 임시 이미지' : undefined} />
           : <span aria-hidden="true" className="text-2xl @[560px]:text-5xl">{name[0]}</span>}
       </div>
       <p className="mt-1 break-words text-xs font-medium @[560px]:text-sm">{name}</p>
@@ -546,7 +549,6 @@ export function DraftInformationPanel({
   }
 
   const colors = draft.colors
-  const selectedColorName = field === 'html' && colors.find(color => color.id === colorId)?.name.trim()
   if (!active) return null
 
   const content = (
@@ -592,7 +594,7 @@ export function DraftInformationPanel({
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
           {field === 'specDoc' ? <span className="text-sm font-semibold">공통 스펙 문서</span>
             : <span className="text-sm font-semibold">컬러 <span className="ml-1.5 font-normal text-muted-foreground">
-              {field === 'image' ? `${colors.length}color` : selectedColorName || `${colors.length}개`}
+              {field === 'image' || field === 'html' ? `${colors.length}color` : `${colors.length}개`}
             </span></span>}
           <div role="group" aria-label="INFORMATION 입력 항목" className="flex flex-wrap items-center gap-x-3 gap-y-2">
             {DRAFT_INFORMATION_PANEL_TAB_GROUPS.map((tabs, index) => (
@@ -614,8 +616,8 @@ export function DraftInformationPanel({
             {colors.length ? <>
               {!readOnly && <p className="px-3 pt-2 text-[11px] text-muted-foreground">HTML은 현재 기획안 화면에서만 저장됩니다.</p>}
               {colors.map((color, index) => <VisualHtmlRow key={`${color.id}:${readOnly}`} color={color} index={index}
-                photo={visualImages[color.id] ?? draft.specs.colorPhotoUrls?.[color.id]}
-                selected={color.id === colorId} readOnly={readOnly} entry={visualHtml[color.id]}
+                visualPhoto={visualImages[color.id]} colorPhoto={draft.specs.colorPhotoUrls?.[color.id]}
+                readOnly={readOnly} entry={visualHtml[color.id]}
                 onSave={(text, temporary) => onSaveVisualHtml(color.id, text, temporary)} />)}
             </> : <p className="px-4 py-3 text-sm text-muted-foreground">등록된 컬러가 없습니다.</p>}
           </div>
