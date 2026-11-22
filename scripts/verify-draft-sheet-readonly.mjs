@@ -618,8 +618,8 @@ try{
  assert.equal(await ivoryImageCard.locator('.draft-visual-image-temporary').count(),0)
  assert.equal(await temporaryPhoto.evaluate(button=>{
    const corner=getComputedStyle(button,'::before')
-   return corner.top==='0px'&&corner.right==='0px'&&corner.clipPath==='polygon(0px 0px, 100% 0px, 100% 100%)'
- }),true,'The temporary photo has a triangle at the top-right corner')
+   return corner.top==='0px'&&corner.left==='0px'&&corner.clipPath==='polygon(0px 0px, 100% 0px, 0px 100%)'
+ }),true,'The temporary photo has a triangle at the top-left corner')
  assert.equal(await ivoryImageCard.getByRole('img').count(),0)
  const saveImage=blackImageCard.getByRole('button',{name:'블랙 이미지 저장',exact:true})
  assert.equal(await saveImage.isDisabled(),true)
