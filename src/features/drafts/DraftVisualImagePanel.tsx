@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react'
 import { ImagePlus } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DRAFT_COLOR_PHOTO_ACCEPT, prepareDraftColorPhoto } from '@/lib/drafts/color-photo'
@@ -44,13 +43,11 @@ function DraftVisualImageCard({ name, visualPhoto, colorPhoto, readOnly, onSave 
     <Button type="button" variant="outline" aria-label={`${name} 이미지 ${preview ? '변경' : '등록'}`}
       aria-description={showingTemporaryPhoto ? '컬러에 등록된 임시 이미지' : undefined}
       aria-busy={preparing} disabled={readOnly || preparing} onClick={() => picker.current?.click()}
-      className={cn('relative grid aspect-square h-auto w-full place-items-center overflow-hidden rounded-xl bg-muted/35 p-0 disabled:opacity-100', pending && 'draft-visual-image-pending')}>
+      className={cn('relative grid aspect-square h-auto w-full place-items-center overflow-hidden rounded-xl bg-muted/35 p-0 disabled:opacity-100',
+        pending && 'draft-visual-image-pending',
+        showingTemporaryPhoto && 'draft-visual-image-temporary')}>
       {preview ? <img src={preview} alt={`${name} 이미지 미리보기`} className="absolute inset-0 size-full object-contain" />
         : <ImagePlus size={30} aria-hidden="true" className="text-muted-foreground" />}
-      {showingTemporaryPhoto && <Badge variant="danger"
-        className="pointer-events-none absolute right-1 top-1 border-transparent bg-danger px-1.5 py-0 text-[10px] font-semibold text-white">
-        임시
-      </Badge>}
     </Button>
     <div className="flex h-full min-w-0 flex-col justify-between gap-3 @[720px]:py-2">
       <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">color

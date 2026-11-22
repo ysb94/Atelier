@@ -113,8 +113,9 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-action.is-pending{background:#c60920;border-color:#c60920;color:#fff}
 .draft-information-action.is-done{background:var(--color-primary);border-color:var(--color-primary);color:var(--color-primary-foreground)}
 .draft-information-action.is-editing{position:relative}
-.draft-information-action.is-editing::before,.draft-md-order-quantity::before,.draft-md-unconfirmed::before,.draft-amd-entry:has(input:not(:placeholder-shown))::before,.draft-visual-image-pending::before{position:absolute;top:0;left:0;width:6px;height:6px;background:var(--color-primary);clip-path:polygon(0 0,100% 0,0 100%);content:'';pointer-events:none}
-.draft-visual-image-pending::before{z-index:1;width:18px;height:18px}
+.draft-information-action.is-editing::before,.draft-md-order-quantity::before,.draft-md-unconfirmed::before,.draft-amd-entry:has(input:not(:placeholder-shown))::before,.draft-visual-image-pending::before,.draft-visual-image-temporary::before{position:absolute;top:0;left:0;width:6px;height:6px;background:var(--color-primary);clip-path:polygon(0 0,100% 0,0 100%);content:'';pointer-events:none}
+.draft-visual-image-pending::before,.draft-visual-image-temporary::before{z-index:1;width:18px;height:18px}
+.draft-visual-image-temporary::before{right:0;left:auto;clip-path:polygon(0 0,100% 0,100% 100%)}
 .draft-sheet-brand-actions{display:flex;align-items:center;gap:5px;width:100%;margin-top:5px}
 .draft-sheet-edit{display:inline-flex;align-items:center;gap:4px;padding:3px 0;border:0;background:transparent;font:inherit;font-size:11px;color:var(--color-muted-foreground);white-space:nowrap;cursor:pointer}
 .draft-sheet-edit:hover{text-decoration:underline;color:#b30920}
