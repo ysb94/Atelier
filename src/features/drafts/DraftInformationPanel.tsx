@@ -551,7 +551,7 @@ export function DraftInformationPanel({
 
   const content = (
     <Card className="@container overflow-hidden">
-      <div className="flex items-start gap-4 px-4 py-4">
+      <div className={cn('flex items-start gap-4 px-4 py-4', field === 'html' && 'relative flex-wrap pr-12 @[560px]:flex-nowrap')}>
         <InformationPhoto src={draft.imageUrl} name={draft.nameKo || draft.nameEn || draft.draftNo}
           className="w-20 shrink-0 @[560px]:w-36" />
         <div className="grid min-w-0 max-w-sm flex-1 gap-2">
@@ -566,7 +566,20 @@ export function DraftInformationPanel({
             <Input value={draft.nameEn} readOnly className="h-8 text-foreground" />
           </label>
         </div>
-        <Button type="button" size="icon" variant="ghost" className="ml-auto shrink-0" aria-label="INFORMATION 닫기" onClick={closeAndFocus}>
+        {field === 'html' && (
+          <div className="flex w-full justify-end border-t border-border pt-3 @[560px]:w-auto @[560px]:basis-[28%] @[560px]:self-stretch @[560px]:items-center @[560px]:justify-center @[560px]:border-l @[560px]:border-t-0 @[560px]:pl-4 @[560px]:pt-0">
+            <span title="업체별 Top Buttom 등록 기능은 아직 연결되지 않았습니다.">
+              <Button type="button" variant="secondary" disabled
+                className="h-auto min-h-11 flex-col gap-0 bg-muted-foreground px-4 py-2 text-center text-xs text-background">
+                <span>업체별</span>
+                <span>Top Buttom 등록</span>
+              </Button>
+            </span>
+          </div>
+        )}
+        <Button type="button" size="icon" variant="ghost"
+          className={cn('ml-auto shrink-0', field === 'html' && 'absolute right-3 top-3')}
+          aria-label="INFORMATION 닫기" onClick={closeAndFocus}>
           <X size={16} aria-hidden="true" />
         </Button>
       </div>
