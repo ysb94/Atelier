@@ -7,7 +7,7 @@ import { DRAFT_OPEN_DETAIL_OPTIONS } from '@/lib/types'
 type VendorHtml = { top: string; bottom: string }
 export type DraftVendorHtml = Partial<Record<string, VendorHtml>>
 
-const VENDORS = DRAFT_OPEN_DETAIL_OPTIONS.filter(vendor => vendor !== '전체')
+export const DRAFT_HTML_VENDORS = DRAFT_OPEN_DETAIL_OPTIONS.filter(vendor => vendor !== '전체')
 const EMPTY_HTML: VendorHtml = { top: '', bottom: '' }
 
 export function DraftVendorHtmlDialog({ preferredVendor, value, onSave, onClose }: {
@@ -18,7 +18,7 @@ export function DraftVendorHtmlDialog({ preferredVendor, value, onSave, onClose 
 }) {
   const titleId = useId()
   const dialog = useRef<HTMLDialogElement>(null)
-  const [vendor, setVendor] = useState(() => VENDORS.find(option => option === preferredVendor) ?? VENDORS[0])
+  const [vendor, setVendor] = useState(() => DRAFT_HTML_VENDORS.find(option => option === preferredVendor) ?? DRAFT_HTML_VENDORS[0])
   const [edits, setEdits] = useState(value)
   const html = edits[vendor] ?? EMPTY_HTML
 
@@ -43,10 +43,10 @@ export function DraftVendorHtmlDialog({ preferredVendor, value, onSave, onClose 
         <label className="grid w-full gap-1.5 text-sm font-medium sm:max-w-52">
           업체
           <Select value={vendor} onChange={event => {
-            const next = VENDORS.find(option => option === event.target.value)
+            const next = DRAFT_HTML_VENDORS.find(option => option === event.target.value)
             if (next) setVendor(next)
           }}>
-            {VENDORS.map(option => <option key={option} value={option}>{option}</option>)}
+            {DRAFT_HTML_VENDORS.map(option => <option key={option} value={option}>{option}</option>)}
           </Select>
         </label>
         <div className="grid gap-3 sm:grid-cols-2">

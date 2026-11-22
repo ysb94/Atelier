@@ -1,11 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, FileText, ImagePlus, X } from 'lucide-react'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { Input, Textarea } from '@/components/ui/input'
+import { Input, Select, Textarea } from '@/components/ui/input'
 import { copyText } from '@/lib/clipboard'
 import { resolveDraftVisualPhoto } from '@/lib/drafts/color-photo'
 import {
@@ -18,7 +18,7 @@ import type { DraftColorRow, ProductDraft } from '@/lib/types'
 import { draftInformationTemporaryStore, type DraftInformationTemporary, type DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
 import { cn } from '@/lib/utils'
 import { DRAFT_INFORMATION_PANEL_TAB_GROUPS, type DraftInformationPanelField } from './draft-information-tabs'
-import { DraftVendorHtmlDialog, type DraftVendorHtml } from './DraftVendorHtmlDialog'
+import { DRAFT_HTML_VENDORS, DraftVendorHtmlDialog, type DraftVendorHtml } from './DraftVendorHtmlDialog'
 import { DraftVisualImagePanel } from './DraftVisualImagePanel'
 
 const MEASUREMENT_FIELDS = ['size', 'weight'] as const
@@ -86,7 +86,9 @@ function InformationPhoto({ src, name, className }: { src?: string | null; name:
   )
 }
 
-function InformationCopyButton({ label, text, className }: { label: string; text: string; className?: string }) {
+function InformationCopyButton({ label, text, className, buttonText }: {
+  label: string; text: string; className?: string; buttonText?: string
+}) {
   const [result, setResult] = useState<{ text: string; copied: boolean }>()
   useEffect(() => {
     if (!result) return
@@ -97,11 +99,11 @@ function InformationCopyButton({ label, text, className }: { label: string; text
   const copied = result?.text === text ? result.copied : undefined
   const message = copied === true ? '복사했습니다.' : copied === false ? '복사하지 못했습니다.' : ''
   return <>
-    <Button type="button" variant="ghost" size="icon"
-      className={cn('size-5 rounded-sm bg-foreground text-[10px] font-semibold text-background hover:bg-foreground/85', className)}
+    <Button type="button" variant={buttonText ? 'default' : 'ghost'} size={buttonText ? 'sm' : 'icon'}
+      className={cn(!buttonText && 'size-5 rounded-sm bg-foreground text-[10px] font-semibold text-background hover:bg-foreground/85', className)}
       aria-label={`${label} 복사`} title={message || `${label} 복사`} disabled={!text.trim()}
       onClick={async () => setResult({ text, copied: await copyText(text) })}>
-      {copied === true ? <Check size={12} aria-hidden="true" /> : copied === false ? <X size={12} aria-hidden="true" /> : 'C'}
+      {copied === true ? <Check size={12} aria-hidden="true" /> : copied === false ? <X size={12} aria-hidden="true" /> : buttonText ?? 'C'}
     </Button>
     <span className="sr-only" role="status">{message ? `${label} ${message}` : ''}</span>
   </>
@@ -392,14 +394,43 @@ function SpecDocumentForm({ draft, readOnly, showWriteActions, edits, saved, onE
 
 export type DraftVisualHtml = Readonly<Partial<Record<string, { temporary?: string; saved?: string }>>>
 
-function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, entry, onSave }: {
+function VendorHtmlCode({ id, name, text, templates }: { id: string; name: string; text: string; templates: DraftVendorHtml }) {
+  const [vendor, setVendor] = useState('')
+  const vendors = DRAFT_HTML_VENDORS.filter(option => {
+    const template = templates[option]
+    return template?.top.trim() || template?.bottom.trim()
+  })
+  const template = vendors.some(option => option === vendor) ? templates[vendor] : undefined
+  const code = template && text.trim() ? [template.top, text, template.bottom].filter(part => part.trim()).join('\n') : ''
+
+  return <div id={id} className="col-span-full grid gap-2 rounded-md border border-border bg-muted/35 p-3">
+    {vendors.length ? <>
+      <label className="grid w-full gap-1 text-xs font-medium sm:max-w-52">
+        업체 선택
+        <Select value={template ? vendor : ''} onChange={event => setVendor(event.target.value)}>
+          <option value="">업체를 선택해 주세요</option>
+          {vendors.map(option => <option key={option} value={option}>{option}</option>)}
+        </Select>
+      </label>
+      {template && <>
+        <Textarea aria-label={`${name} 업체별 생성 HTML`} value={code} readOnly rows={5}
+          className="font-mono text-xs" placeholder="컬러 HTML을 입력해 주세요." />
+        <InformationCopyButton label={`${name} 업체별 HTML`} text={code} buttonText="복사" className="justify-self-end" />
+      </>}
+    </> : <p className="text-xs text-muted-foreground">상단 업체별 Top Buttom 등록에서 업체 HTML을 먼저 저장해 주세요.</p>}
+  </div>
+}
+
+function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, entry, vendorHtml, onSave }: {
   color: DraftColorRow; index: number; visualPhoto?: string; colorPhoto?: string; readOnly: boolean
-  entry: DraftVisualHtml[string]; onSave: (text: string, temporary: boolean) => void
+  entry: DraftVisualHtml[string]; vendorHtml: DraftVendorHtml; onSave: (text: string, temporary: boolean) => void
 }) {
   const name = color.name.trim() || `컬러 ${index + 1}`
   const { src: photo, temporary: showingTemporaryPhoto } = resolveDraftVisualPhoto(visualPhoto, colorPhoto)
   const [text, setText] = useState(entry?.temporary ?? entry?.saved ?? '')
   const [preview, setPreview] = useState('')
+  const [codeOpen, setCodeOpen] = useState(false)
+  const codeId = useId()
   const hasContent = Boolean(text.trim())
   const saved = entry?.temporary === undefined && entry?.saved === text
   const temporary = entry?.temporary === text
@@ -448,10 +479,11 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, entry,
         {previewDocument && <iframe title={`${name} HTML 미리보기`} sandbox="" srcDoc={previewDocument}
           tabIndex={-1} className="pointer-events-none size-full" />}
       </div>
-      {!readOnly && <span className="flex justify-end" title="업체별 코드 생성은 아직 연결되지 않았습니다.">
-        <Button type="button" size="sm" variant="outline" className="h-6 px-2" disabled>업체별 코드 자동생성</Button>
-      </span>}
+      {!readOnly && <Button type="button" size="sm" variant="outline" className="h-6 justify-self-end px-2"
+        aria-expanded={codeOpen} aria-controls={codeOpen ? codeId : undefined}
+        onClick={() => setCodeOpen(open => !open)}>업체별 코드 자동생성</Button>}
     </div>
+    {!readOnly && codeOpen && <VendorHtmlCode id={codeId} name={name} text={text} templates={vendorHtml} />}
   </section>
 }
 
@@ -624,7 +656,7 @@ export function DraftInformationPanel({
               {!readOnly && <p className="px-3 pt-2 text-[11px] text-muted-foreground">HTML은 현재 기획안 화면에서만 저장됩니다.</p>}
               {colors.map((color, index) => <VisualHtmlRow key={`${color.id}:${readOnly}`} color={color} index={index}
                 visualPhoto={visualImages[color.id]} colorPhoto={draft.specs.colorPhotoUrls?.[color.id]}
-                readOnly={readOnly} entry={visualHtml[color.id]}
+                readOnly={readOnly} entry={visualHtml[color.id]} vendorHtml={vendorHtml}
                 onSave={(text, temporary) => onSaveVisualHtml(color.id, text, temporary)} />)}
             </> : <p className="px-4 py-3 text-sm text-muted-foreground">등록된 컬러가 없습니다.</p>}
           </div>
