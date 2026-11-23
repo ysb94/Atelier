@@ -126,6 +126,14 @@ if (new URLSearchParams(location.search).has('partner-folders')) {
     { ...target(a, '쿠팡_MFS', 0), folder_id: supply },
     { ...target(b, '29CM_MFS', 1), folder_id: distribution },
     { ...target(uuid(65), '무신사_MFS', 2), folder_id: distribution },
+    {
+      ...target(uuid(66), '롯데면세점 인천공항점', 3),
+      folder_id: distribution,
+      group_id: uuid(67),
+      outbound_partner_groups: { name: '롯데면세점' },
+      site_name: '인천공항점',
+      normalized_site_name: '인천공항점',
+    },
   ]
 }
 if (new URLSearchParams(location.search).has('grouped')) {

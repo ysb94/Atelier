@@ -219,16 +219,19 @@ export function OutboundPartnerCompanyNode({
     </div>
   )
 
-  if (company.mode !== 'branched') {
-    const unit = company.units[0]
-    if (!unit) return null
+  const firstUnit = company.units[0]
+  if (!firstUnit) return null
+  const showBranches = company.mode === 'branched' ||
+    (company.groupId !== null && firstUnit.siteName.trim() !== '')
+
+  if (!showBranches) {
     return (
       <TreeLeaf last={last} root={root}>
         <OutboundPartnerUnitItem
-          target={unit}
-          selected={selectedId === unit.id}
+          target={firstUnit}
+          selected={selectedId === firstUnit.id}
           identityVariant="full"
-          onSelect={() => onSelect(unit.id)}
+          onSelect={() => onSelect(firstUnit.id)}
         />
       </TreeLeaf>
     )
