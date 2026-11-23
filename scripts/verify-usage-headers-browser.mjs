@@ -311,9 +311,28 @@ try {
     ),
     true,
   )
+  await page.goto(origin + '/?partner-folders')
+  const fulfillment = page.locator('p').filter({ hasText: /^풀필먼트$/ })
+  const parentToggle = fulfillment.locator('xpath=ancestor::div[button[@aria-expanded]][1]')
+    .getByRole('button', { name: /^(접기|펼치기)$/ })
+  const supply = page.getByText('쿠팡_MFS', { exact: true })
+  const distribution = page.getByText('29CM_MFS', { exact: true })
+  await supply.waitFor()
+  await distribution.waitFor()
+  assert.equal(await page.getByText('아직 업체가 없습니다.', { exact: true }).count(), 0)
+  assert.equal(await page.getByText('풀필먼트 / 유통', { exact: true }).count(), 0)
+  await parentToggle.click()
+  await supply.waitFor({ state: 'hidden' })
+  await distribution.waitFor({ state: 'hidden' })
+  await parentToggle.click()
+  await distribution.waitFor()
+  assert.equal(await page.locator('p').filter({ hasText: /^사입$/ }).count(), 1)
+  assert.equal(await page.locator('p').filter({ hasText: /^유통$/ }).count(), 1)
+  await page.getByPlaceholder('업체 그룹, 지점, 채널, 별칭, 폴더로 검색').fill('29CM')
+  await page.getByText('온라인 / 풀필먼트 / 유통', { exact: true }).waitFor()
   assert.deepEqual(errors, [])
   console.log(
-    'PASS actual-component offline browser: legacy defaults, managers, rename, private edit, common read-only, hide/unhide retention, multi-SKU quantities, partner isolation, failed-save draft retention, reader/missing-schema fail-closed; no remote requests',
+    'PASS actual-component offline browser: legacy defaults, managers, rename, private edit, common read-only, hide/unhide retention, multi-SKU quantities, partner isolation, failed-save draft retention, reader/missing-schema fail-closed, online folder hierarchy and search; no remote requests',
   )
 } catch (error) {
   console.error({

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import {
   Check,
@@ -16,6 +16,7 @@ import {
   folderMoveOptions,
   folderPath,
   matchesFolderSearch,
+  type OutboundFolderNode,
 } from '@/lib/codes/outbound-folder'
 import {
   ALL_CHILD_TAB_ID,
@@ -135,6 +136,7 @@ function TabButton({
 
 function SectionList({
   sections,
+  folderTree,
   selectedId,
   onSelect,
   onRenamed,
@@ -147,6 +149,7 @@ function SectionList({
   onCancelAdd,
 }: {
   sections: readonly OutboundUnitSection[]
+  folderTree?: OutboundFolderNode | null
   selectedId: string | null
   onSelect: (id: string) => void
   onRenamed?: () => void | Promise<void>
@@ -183,77 +186,89 @@ function SectionList({
     )
   }
 
+  function renderSection(
+    section: OutboundUnitSection,
+    label = section.pathLabel,
+    root = true,
+    last = false,
+    childFolders?: ReactNode,
+  ) {
+    const companies = section.companies.map((company, index) => (
+      <OutboundPartnerCompanyNode
+        key={company.key}
+        company={company}
+        selectedId={selectedId}
+        last={!childFolders && index === section.companies.length - 1}
+        root={!label}
+        onSelect={onSelect}
+        onRenamed={onRenamed}
+        onError={onError}
+      />
+    ))
+
+    return (
+      <div key={section.folderId ?? 'unfiled'}>
+        {label ? (
+          <TreeBranch
+            root={root}
+            last={last}
+            label={
+              <div className="flex min-w-0 items-center gap-1">
+                <p className="min-w-0 flex-1 truncate px-1 text-xs font-semibold text-muted-foreground">
+                  {label}
+                </p>
+                {allowAdd && section.folderId ? (
+                  <button
+                    type="button"
+                    className="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                    aria-label={`${section.pathLabel} 에 업체 추가`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onAddCompany?.(section.folderId!)
+                    }}
+                  >
+                    <Plus className="size-3" />
+                  </button>
+                ) : null}
+              </div>
+            }
+          >
+            {addingFolderId === section.folderId ? (
+              <div className="py-1 pr-1">
+                <CompanyCreateForm
+                  pending={addPending}
+                  onSubmit={(draft) => onSubmitCompany?.(draft)}
+                  onCancel={() => onCancelAdd?.()}
+                />
+              </div>
+            ) : null}
+            {companies.length === 0 && !childFolders ? (
+              <p className="px-1 py-2 text-xs text-muted-foreground">
+                아직 업체가 없습니다.
+              </p>
+            ) : companies}
+            {childFolders}
+          </TreeBranch>
+        ) : <div className="space-y-2">{companies}{childFolders}</div>}
+      </div>
+    )
+  }
+
+  const sectionsById = new Map(sections.map((section) => [section.folderId, section]))
+  function renderFolder(node: OutboundFolderNode, root: boolean, last: boolean): ReactNode {
+    const section = sectionsById.get(node.id)
+    if (!section) return null
+    const children = node.children.filter((child) => sectionsById.has(child.id))
+    const label = section.pathLabel ? node.name : ''
+    const childFolders = children.length > 0
+      ? children.map((child, index) => renderFolder(child, !label, index === children.length - 1))
+      : undefined
+    return renderSection(section, label, root, last, childFolders)
+  }
+
   return (
     <div className="space-y-2">
-      {visible.map((section) => (
-        <div key={section.folderId ?? 'unfiled'}>
-          {section.pathLabel ? (
-            <TreeBranch
-              root
-              label={
-                <div className="flex min-w-0 items-center gap-1">
-                  <p className="min-w-0 flex-1 truncate px-1 text-xs font-semibold text-muted-foreground">
-                    {section.pathLabel}
-                  </p>
-                  {allowAdd && section.folderId ? (
-                    <button
-                      type="button"
-                      className="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                      aria-label={`${section.pathLabel} 에 업체 추가`}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        onAddCompany?.(section.folderId!)
-                      }}
-                    >
-                      <Plus className="size-3" />
-                    </button>
-                  ) : null}
-                </div>
-              }
-            >
-              {addingFolderId === section.folderId ? (
-                <div className="py-1 pr-1">
-                  <CompanyCreateForm
-                    pending={addPending}
-                    onSubmit={(draft) => onSubmitCompany?.(draft)}
-                    onCancel={() => onCancelAdd?.()}
-                  />
-                </div>
-              ) : null}
-              {section.companies.length === 0 ? (
-                <p className="px-1 py-2 text-xs text-muted-foreground">
-                  아직 업체가 없습니다.
-                </p>
-              ) : (
-                section.companies.map((company, index) => (
-                  <OutboundPartnerCompanyNode
-                    key={company.key}
-                    company={company}
-                    selectedId={selectedId}
-                    last={index === section.companies.length - 1}
-                    onSelect={onSelect}
-                    onRenamed={onRenamed}
-                    onError={onError}
-                  />
-                ))
-              )}
-            </TreeBranch>
-          ) : (
-            section.companies.map((company, index) => (
-              <OutboundPartnerCompanyNode
-                key={company.key}
-                company={company}
-                selectedId={selectedId}
-                last={index === section.companies.length - 1}
-                root
-                onSelect={onSelect}
-                onRenamed={onRenamed}
-                onError={onError}
-              />
-            ))
-          )}
-        </div>
-      ))}
+      {folderTree ? renderFolder(folderTree, true, true) : visible.map((section) => renderSection(section))}
     </div>
   )
 }
@@ -571,6 +586,7 @@ export function OutboundPartnerBrowser({
   ) : (
     <SectionList
       sections={sections}
+      folderTree={activeFolder && outboundChannelFromFolderPath(folders, activeFolder.id) === 'online' ? activeFolder : null}
       selectedId={selectedId}
       allowAdd
       addingFolderId={addingFolderId}

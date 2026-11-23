@@ -1,5 +1,6 @@
 // Offline fixture: no remote client or credentials. All mutations are audited.
 import { DEFAULT_USAGE_CODE_COLUMNS } from '../../../src/lib/codes/usage-code-columns'
+import { compactOutboundPartnerKey } from '../../../src/lib/codes/outbound-partner'
 const uuid = (n: number) =>
   `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const brand = uuid(1),
@@ -14,7 +15,7 @@ const target = (id: string, name: string, order: number) => ({
   id,
   brand_id: brand,
   name,
-  normalized_name: name,
+  normalized_name: compactOutboundPartnerKey(name),
   site_name: '',
   normalized_site_name: '',
   active: true,
@@ -110,6 +111,22 @@ const data: Record<string, any[]> = {
   })),
   usage_partner_columns: [],
   usage_partner_values: [],
+}
+if (new URLSearchParams(location.search).has('partner-folders')) {
+  const online = uuid(61), fulfillment = uuid(62), supply = uuid(63), distribution = uuid(64)
+  data.code_usage_target_folders = [
+    { id: online, name: '온라인', parent_id: null },
+    { id: fulfillment, name: '풀필먼트', parent_id: online },
+    { id: supply, name: '사입', parent_id: fulfillment },
+    { id: distribution, name: '유통', parent_id: fulfillment },
+  ].map((folder, order) => ({
+    ...folder, brand_id: brand, normalized_name: folder.name, sort_order: order, created_at: now, updated_at: now,
+  }))
+  data.code_usage_targets = [
+    { ...target(a, '쿠팡_MFS', 0), folder_id: supply },
+    { ...target(b, '29CM_MFS', 1), folder_id: distribution },
+    { ...target(uuid(65), '무신사_MFS', 2), folder_id: distribution },
+  ]
 }
 if (new URLSearchParams(location.search).has('grouped')) {
   data.code_usage_targets.forEach((target, index) =>
