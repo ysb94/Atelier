@@ -1,13 +1,14 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
+import { EmployeeDirectoryColumns } from '@/components/ui/employee-directory-columns'
 import { Input, Select, Textarea } from '@/components/ui/input'
-import { ChatPeoplePicker } from '@/features/chat/ChatPeoplePicker'
 import { chatKeys } from '@/features/chat/use-chat'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { formatChatPerson } from '@/lib/inbox/format'
 import type { ChatDirectoryPerson } from '@/lib/inbox/types'
 import { listChatDirectory, openDirectChat, sendChatMessage } from '@/lib/supabase/chat'
+import { cn } from '@/lib/utils'
 
 export function MyWorkFeedbackDialog({ actorId, settings, cardTitle, recipientIds, onSettings, onSave, onSent, onClose }: {
   actorId?: string
@@ -80,7 +81,8 @@ export function MyWorkFeedbackDialog({ actorId, settings, cardTitle, recipientId
   }
 
   return <dialog ref={dialog} aria-labelledby={titleId}
-    className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg overflow-y-auto rounded-xl border border-border bg-card p-5 text-card-foreground shadow-xl backdrop:bg-black/25"
+    className={cn('m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] overflow-y-auto rounded-xl border border-border bg-card p-5 text-card-foreground shadow-xl backdrop:bg-black/25',
+      settings ? 'max-w-4xl' : 'max-w-lg')}
     onCancel={event => { event.preventDefault(); close() }}
     onClick={event => { if (event.target === event.currentTarget) close() }}>
     <form className="space-y-4" onSubmit={event => {
@@ -99,13 +101,16 @@ export function MyWorkFeedbackDialog({ actorId, settings, cardTitle, recipientId
           <Button type="button" variant="outline" size="sm" onClick={() => void directory.refetch()}>다시 불러오기</Button>
         </div> : settings ? <>
           <Input aria-label="직원 검색" placeholder="이름 또는 부서 검색" value={search} onChange={event => setSearch(event.currentTarget.value)} />
-          <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
-            <ChatPeoplePicker people={filtered} selectedIds={savedSelection} onToggle={id => setSavedSelection(current => {
-              const next = new Set(current)
-              if (next.has(id)) next.delete(id)
-              else next.add(id)
-              return next
-            })} />
+          <div className="rounded-md border border-border bg-card p-2">
+            {filtered.length ? <EmployeeDirectoryColumns
+              people={filtered.map(person => ({ id: person.profileId, name: person.displayName, department: person.departmentName, position: person.position }))}
+              isSelected={id => savedSelection.has(id)} className="max-h-[48dvh] overflow-y-auto"
+              onSelect={id => setSavedSelection(current => {
+                const next = new Set(current)
+                if (next.has(id)) next.delete(id)
+                else next.add(id)
+                return next
+              })} /> : <p className="px-3 py-6 text-center text-sm text-muted-foreground">일치하는 직원이 없습니다.</p>}
           </div>
         </> : <>
           <p className="break-words text-sm font-medium">{cardTitle}</p>

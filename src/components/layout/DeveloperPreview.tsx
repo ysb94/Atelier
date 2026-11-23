@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ChevronDown, RotateCcw, Users } from 'lucide-react'
+import { EmployeeDirectoryColumns } from '@/components/ui/employee-directory-columns'
 import { useAuth } from '@/lib/supabase/auth'
 import { canPreviewProfile } from '@/lib/company/profile-preview'
 import { PagePreviewContext } from '@/lib/company/page-preview-context'
@@ -53,26 +54,6 @@ function ImpersonationChatNotice() {
   return <p className="shrink-0 border-b border-border bg-muted/30 px-4 py-2 text-xs text-warning">{stored.targetName} 계정으로 보는 중</p>
 }
 
-function groupTargets(targets: readonly ImpersonationTarget[]) {
-  const map = new Map<string, ImpersonationTarget[]>()
-  for (const target of targets) {
-    const department = target.department?.trim() || '부서 없음'
-    const people = map.get(department) ?? []
-    people.push(target)
-    map.set(department, people)
-  }
-  return [...map.entries()]
-    .sort(([left], [right]) => {
-      if (left === '부서 없음') return 1
-      if (right === '부서 없음') return -1
-      return left.localeCompare(right, 'ko')
-    })
-    .map(([department, people]) => ({
-      department,
-      people: [...people].sort((left, right) => left.name.localeCompare(right.name, 'ko')),
-    }))
-}
-
 function EmployeeImpersonationBar() {
   const auth = useAuth()
   const sessionUserId = auth.session?.user.id ?? null
@@ -84,7 +65,6 @@ function EmployeeImpersonationBar() {
   const [error, setError] = useState<string | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   const impersonating = Boolean(stored && sessionUserId && stored.operatorId !== sessionUserId && stored.targetId === sessionUserId)
-  const groups = useMemo(() => groupTargets(targets), [targets])
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
@@ -127,21 +107,21 @@ function EmployeeImpersonationBar() {
     }
   }, [allowed, sessionUserId])
 
-  async function choose(person: ImpersonationTarget) {
+  async function choose(id: string) {
     if (pending) return
     setError(null)
-    if (stored && person.id === stored.operatorId) {
+    if (stored && id === stored.operatorId) {
       setPending(true)
       const result = await returnToOperator()
       if (result === 'failed') setPending(false)
       return
     }
-    if (person.id === sessionUserId) return
+    if (id === sessionUserId) return
     setPending(true)
     try {
-      await startImpersonation(person.id, auth.profile?.displayName?.trim() || '내 계정')
+      await startImpersonation(id, auth.profile?.displayName?.trim() || '내 계정')
     } catch (caught) {
-      console.warn('[impersonation] 계정 전환 실패', { targetId: person.id, message: caught instanceof Error ? caught.message : 'unknown' })
+      console.warn('[impersonation] 계정 전환 실패', { targetId: id, message: caught instanceof Error ? caught.message : 'unknown' })
       setError(caught instanceof Error ? caught.message : '계정 전환에 실패했습니다.')
       setStored(readImpersonationState())
       setPending(false)
@@ -162,22 +142,8 @@ function EmployeeImpersonationBar() {
       {impersonating ? <button type="button" disabled={pending} onClick={() => { if (pending) return; setPending(true); void returnToOperator().then((result) => { if (result === 'failed') setPending(false) }) }} className="ml-auto flex items-center gap-1 text-muted-foreground hover:text-foreground disabled:opacity-60"><RotateCcw size={12} />내 계정으로 돌아가기</button> : null}
     </div>
     {open ? <div className="mt-2 rounded-md border border-border bg-card p-2">
-      <div role="group" aria-label="재직 직원" className="flex overflow-x-auto pb-1">
-        {groups.map((group, index) => <div key={group.department} className={`min-w-[8.5rem] shrink-0 px-3 ${index > 0 ? 'border-l border-border' : ''}`}>
-          <p className="mb-1 px-1 py-0.5 text-xs font-medium">{group.department}</p>
-          <ul className="space-y-0.5">
-            {group.people.map((person) => {
-              const current = person.id === sessionUserId
-              return <li key={person.id}>
-                <button type="button" aria-pressed={current} disabled={pending} onClick={() => void choose(person)} className={`flex w-full flex-col rounded px-1.5 py-1 text-left transition-colors disabled:opacity-60 ${current ? 'bg-primary font-medium text-primary-foreground' : 'hover:bg-muted'}`}>
-                  <span className="font-medium">{person.name}</span>
-                  {person.position ? <span className={`text-[10px] ${current ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>{person.position}</span> : null}
-                </button>
-              </li>
-            })}
-          </ul>
-        </div>)}
-      </div>
+      <EmployeeDirectoryColumns people={targets} isSelected={id => id === sessionUserId} disabled={pending}
+        onSelect={id => void choose(id)} />
     </div> : null}
     {error || listError ? <p role="alert" className="pt-2 text-danger">{error ?? listError}</p> : null}
   </section>
