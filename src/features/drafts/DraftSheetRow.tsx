@@ -1023,7 +1023,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
     </tr>
     {information && (
       <DraftInformationPanel key={informationEditorId} id={informationId} anchor={information.anchor}
-        editorId={informationEditorId} temporaryStore={informationTemporaryStore}
+        editorId={informationEditorId} temporaryStore={informationTemporaryStore} teamWork={teamWork}
         edits={informationEdits} onEditsChange={updateInformationEdits}
         draft={draft} field={information.field} colorId={information.colorId} readOnly={readOnly} fromVisual={fromVisual}
         onSave={onSaveSheetValue}

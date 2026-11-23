@@ -16,6 +16,7 @@ import {
 import { formatSizeSpec, parseSizeSpec, type SizeParts } from '@/lib/drafts/spec-format'
 import type { DraftColorRow, ProductDraft } from '@/lib/types'
 import { draftInformationTemporaryStore, type DraftInformationTemporary, type DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
+import type { DraftTeamRecord, DraftTeamValues } from '@/lib/supabase/draft-team-work'
 import {
   draftVisualSaveError, listDraftVisualContent, saveDraftVisualContent,
   type DraftVendorHtml, type DraftVisualChange, type DraftVisualContent, type DraftVisualStatus,
@@ -24,6 +25,7 @@ import { cn } from '@/lib/utils'
 import { DRAFT_INFORMATION_PANEL_TAB_GROUPS, type DraftInformationPanelField } from './draft-information-tabs'
 import { DRAFT_HTML_VENDORS, DraftVendorHtmlDialog } from './DraftVendorHtmlDialog'
 import { draftVisualBoardKey } from './use-draft-visual-board'
+import type { DraftTeamWork } from './use-draft-team-work'
 import { DraftVisualImagePanel } from './DraftVisualImagePanel'
 
 const MEASUREMENT_FIELDS = ['size', 'weight'] as const
@@ -405,9 +407,25 @@ function vendorTemplates(rows: readonly DraftVisualContent[]) {
   return templates
 }
 
-function VendorHtmlCode({ id, name, text, templates, onPreview }: {
+type AmdColorCodes = DraftTeamValues['amd']['colors'][string]
+
+function VendorHtmlCode({ id, name, text, templates, amdReady, amdCodes, onPreview }: {
   id: string; name: string; text: string; templates: DraftVendorHtml; onPreview: (label: string, html: string) => void
+  amdReady: boolean; amdCodes?: AmdColorCodes
 }) {
+  if (!amdReady) {
+    return <p id={id} role="status" className="text-xs text-muted-foreground">AMD 번호를 불러온 뒤 사용할 수 있습니다.</p>
+  }
+  const missing = [
+    !amdCodes?.sabangnet?.trim() && '사방넷 no',
+    !amdCodes?.barcode?.trim() && '바코드 no',
+  ].filter(Boolean)
+  if (missing.length > 0) {
+    return <p id={id} role="alert" className="text-xs text-danger">
+      AMD에서 {name}의 {missing.join(' · ')}를 입력하고 저장한 뒤 사용할 수 있습니다.
+    </p>
+  }
+
   const hasBody = Boolean(text.trim())
   const vendors = DRAFT_HTML_VENDORS.flatMap(option => {
     const template = templates[option]
@@ -528,10 +546,11 @@ async function openHtmlPreview(title: string, html: string) {
   return true
 }
 
-function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSaveTemporary, entry, workingCopy, vendorHtml, onSave }: {
+function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSaveTemporary, entry, workingCopy, vendorHtml, amdReady, amdCodes, onSave }: {
   color: DraftColorRow; index: number; visualPhoto?: string; colorPhoto?: string; readOnly: boolean
   canSaveTemporary: boolean
   entry?: DraftVisualContent; workingCopy?: DraftInformationTemporary; vendorHtml: DraftVendorHtml
+  amdReady: boolean; amdCodes?: AmdColorCodes
   onSave: (text: string, revision: string | null, temporary: boolean, temporaryRevision?: string) => Promise<void>
 }) {
   const name = color.name.trim() || `컬러 ${index + 1}`
@@ -611,7 +630,8 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
       <Button type="button" size="sm" variant="outline" className="order-last h-6 justify-self-end px-2"
         aria-expanded={codeOpen} aria-controls={codeOpen ? codeId : undefined}
         onClick={() => setCodeOpen(open => !open)}>업체별 HTML 생성</Button>
-      {codeOpen && <VendorHtmlCode id={codeId} name={name} text={text} templates={vendorHtml} onPreview={preview} />}
+      {codeOpen && <VendorHtmlCode id={codeId} name={name} text={text} templates={vendorHtml}
+        amdReady={amdReady} amdCodes={amdCodes} onPreview={preview} />}
     </div>}
     {!readOnly && versionChanged ? <div className="col-span-full flex flex-wrap items-center gap-2">
       <p role="alert" className="text-xs text-danger">다른 화면에서 먼저 저장했습니다. 작성 중인 HTML은 복사할 수 있습니다.</p>
@@ -625,13 +645,14 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
 
 export function DraftInformationPanel({
   id, anchor, draft, field, colorId, readOnly, fromVisual, edits, onEditsChange, onFieldChange, onClose, onSave, onSaveSpecDocument,
-  onSharedPhotoChange, editorId, temporaryStore = draftInformationTemporaryStore,
+  onSharedPhotoChange, teamWork, editorId, temporaryStore = draftInformationTemporaryStore,
 }: {
   id: string; anchor: HTMLButtonElement; draft: ProductDraft; field: DraftInformationPanelField; colorId: string | null
   readOnly: boolean; fromVisual: boolean
   onFieldChange: (field: DraftInformationPanelField) => void; onClose: () => void; onSave: SaveColorSpec
   onSaveSpecDocument: (value: string, temporaryRevision?: string) => Promise<void>
   onSharedPhotoChange: (saved?: { colorId: string; photo: string }) => Promise<void>
+  teamWork: Pick<DraftTeamWork, 'ready' | 'records'>
   edits: InformationDrafts; onEditsChange: (key: string, update: UpdateInformationEdits) => void
   editorId?: string; temporaryStore?: DraftInformationTemporaryStore
 }) {
@@ -651,6 +672,7 @@ export function DraftInformationPanel({
   })
   const visualRows = visual.data ?? []
   const templates = vendorTemplates(visualRows)
+  const amd = teamWork.records?.get('amd') as DraftTeamRecord<'amd'> | undefined
   const visualLocked = readOnly || !visual.data
   const temporary = useQuery({
     queryKey,
@@ -858,6 +880,7 @@ export function DraftInformationPanel({
               return <VisualHtmlRow key={`${color.id}:${readOnly}`} color={color} index={index}
                 visualPhoto={typeof photo?.payload === 'string' ? photo.payload : undefined}
                 colorPhoto={draft.specs.colorPhotoUrls?.[color.id]} readOnly={visualLocked || loadingTemporary}
+                amdReady={teamWork.ready} amdCodes={amd?.payload.colors[color.id]}
                 canSaveTemporary={canSaveTemporary} entry={entry} workingCopy={working} vendorHtml={templates}
                 onSave={(payload, revision, asTemporary, temporaryRevision) => asTemporary
                   ? saveTemporary('html', color.id, { html: { source: revision ?? '', text: payload } })
