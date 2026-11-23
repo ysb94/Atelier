@@ -2,10 +2,8 @@ import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import { DraftSheetRow } from '@/features/drafts/DraftSheetRow'
-import { DraftSheetColumnSettings } from '@/features/drafts/DraftSheetColumnSettings'
-import { DraftSheetTable } from '@/features/drafts/DraftSheetTable'
+import { DraftBoardView } from '@/features/drafts/DraftBoardView'
 import { useDraftSheetLayout } from '@/features/drafts/draft-sheet-layout'
-import { DraftMdOptionsProvider } from '@/features/drafts/DraftMdTeamCell'
 import { useDraftTeamWork } from '@/features/drafts/use-draft-team-work'
 import { draftVisualBoardKey, useDraftVisualBoard } from '@/features/drafts/use-draft-visual-board'
 import { resolveReleaseSchedule } from '@/features/drafts/release-schedule-preview'
@@ -107,8 +105,7 @@ function Fixture() {
       ...current, answeredAt: current.round === 1 ? '2026-11-02T10:00:00Z' : '2026-11-02T15:00:30Z',
       amounts: { ivory: 0, black: 14 + current.round },
     })}>단가 회신 반영</button>
-    <DraftSheetColumnSettings key={accountId} accountId={accountId} layout={sheetLayout} />
-    <div className="draft-board-scroll"><DraftSheetTable layout={sheetLayout}><DraftMdOptionsProvider><tbody><DraftSheetRow draft={shown} layout={sheetLayout} readOnly={readOnly} brand={brand} schedule={savedRelease?resolveReleaseSchedule(shown,releaseSeasonMap,[],{}):{group:{id:'group',brandId:'fixture-brand',name:'11월 출시',releaseTiming:''},targetDate:'2026-11-03',certainty:'confirmed',brandId:null,isPreview:false}}
+    <DraftBoardView accountId={accountId} layout={sheetLayout} label="기획안 목록" renderRows={mode => <DraftSheetRow mode={mode} draft={shown} layout={sheetLayout} readOnly={readOnly} brand={brand} schedule={savedRelease?resolveReleaseSchedule(shown,releaseSeasonMap,[],{}):{group:{id:'group',brandId:'fixture-brand',name:'11월 출시',releaseTiming:''},targetDate:'2026-11-03',certainty:'confirmed',brandId:null,isPreview:false}}
       releaseFolders={releaseFolders} onChangeReleaseFolder={async seasonId => { setDraft(await saveDraftReleaseFolder(draft, seasonId)) }}
       informationEditorId="fixture-owner" informationTemporaryStore={temporaryStore} teamWork={teamWork.forDraft(draft.id)} visualBoard={visualBoard.forDraft(draft.id)}
       onSharedPhotoChange={async saved => {
@@ -136,6 +133,6 @@ function Fixture() {
           ...current, specs: { ...current.specs, confirmedPriceRequestId: reply.id },
         })),
       }}
-      onOpen={()=>setOpened(n=>n+1)} onSchedule={()=>{void write()}} onSaveColors={saveColors} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={saveSpec} onSaveSpecDocument={saveDocument} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/></tbody></DraftMdOptionsProvider></DraftSheetTable></div></main>
+      onOpen={()=>setOpened(n=>n+1)} onSchedule={()=>{void write()}} onSaveColors={saveColors} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={saveSpec} onSaveSpecDocument={saveDocument} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/>} /></main>
 }
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={new QueryClient()}><Fixture /></QueryClientProvider>)
