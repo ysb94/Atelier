@@ -26,10 +26,12 @@ assert.equal(releasePersonalPart(staff,'work'),true,'재직 직원은 작업 요
 assert.equal(releaseHref(staff,'/work'),'/work')
 const personalRequest = '/settings/profile?part=work&workOwner=design&requestId=request&mode=edit'
 assert.equal(releaseHref(staff,personalRequest),personalRequest,'내 작업 요청 상세 연결을 유지한다')
-assert.equal(releaseHref(staff,'/settings/profile?part=my-work'),null)
-assert.equal(releasePersonalPart(staff,'my-work'),false)
+const personalBoard = '/settings/profile?part=my-work'
+assert.equal(releaseHref(staff,personalBoard),personalBoard)
+assert.equal(releasePersonalPart(staff,'my-work'),true)
 for (const profile of [null,{...staff,status:'pending'},{...staff,status:'disabled'},{...staff,companyId:'other'}]) {
   assert.equal(releaseHref(profile,personalRequest),null)
+  assert.equal(releaseHref(profile,personalBoard),null)
   assert.equal(releaseHref(profile,'/work'),null)
 }
 for(const part of ['profile','company-notice','department-notice']) assert.equal(releasePersonalPart(staff,part,true),false)
@@ -58,7 +60,7 @@ for(const href of ['https://attacker.invalid/','//attacker.invalid/','javascript
 for(const id of RELEASE_EXCEPTION_IDS) {
   const owner = {...staff,id}
   for(const path of ['/','/data/all','/drafts','/settings/profile?part=work']) assert.equal(releaseHref(owner,path),path)
-  assert.equal(releaseHref(owner,'/settings/profile?part=my-work'),null)
+  assert.equal(releaseHref(owner,personalBoard),personalBoard)
   assert.equal(releaseAccess({...owner,status:'disabled'}).unrestricted,false)
   assert.equal(releaseAccess({...owner,companyId:'other'}).unrestricted,false)
   assert.equal(releaseAccess({...owner,email:'ui-preview@example.invalid'}).unrestricted,false)

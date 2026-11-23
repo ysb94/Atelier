@@ -19,7 +19,8 @@ try{
  async function expectTabs(labels){const ready=await page.waitForFunction(expected=>{const menu=[...document.querySelectorAll('[role="tablist"][aria-label="My home 메뉴"]')].find(element=>element.checkVisibility());if(!menu)return false;const actual=[...menu.querySelectorAll('[role="tab"]')].map(item=>item.textContent);return JSON.stringify(actual)===JSON.stringify(expected)?actual:false},labels);assert.deepEqual(await ready.jsonValue(),labels)}
  const nav=()=>page.locator('aside nav a').evaluateAll(items=>items.map(a=>a.getAttribute('href')))
  async function load(role,href='/settings/profile'){await page.goto(origin+href+(href.includes('?')?'&':'?')+'role='+role);await page.getByRole('tab',{name:'My Schedule',exact:true}).waitFor();await page.waitForFunction(()=>window.__releaseFixture.reads.includes('department_request_approvers'))}
- const staffTabs=['My Schedule','야근','회의','작업 요청']
+ const staffTabs=['My Schedule','내 업무','야근','회의','작업 요청']
+ const fieldStaffTabs=['My Schedule','내 업무','회의','작업 요청']
  const approverTabs=[...staffTabs,'승인할 신청','담당 부서 출근시간']
  await load('staff','/');await page.waitForURL('**/settings/profile');await expectTabs(staffTabs);assert.deepEqual(await nav(),['/settings/profile'])
  const workTab=page.getByRole('tab',{name:'작업 요청',exact:true})
@@ -33,9 +34,25 @@ try{
  await workPanel.getByRole('heading',{name:'보낸 요청 · 0',exact:true}).waitFor()
  await load('staff','/work');await page.waitForURL(url=>url.searchParams.get('part')==='work')
  await workPanel.getByRole('heading',{name:'보낸 요청 · 0',exact:true}).waitFor()
- await load('staff','/settings/profile?part=my-work');await page.waitForURL(url=>!url.searchParams.has('part'))
+ await load('staff','/settings/profile?part=my-work');await page.waitForURL(url=>url.searchParams.get('part')==='my-work')
  await expectTabs(staffTabs)
- await page.getByRole('tab',{name:'My Schedule',exact:true}).click()
+ const boardTab=page.getByRole('tab',{name:'내 업무',exact:true})
+ const scheduleTab=page.getByRole('tab',{name:'My Schedule',exact:true})
+ const board=page.getByRole('tabpanel',{name:'내 업무',exact:true})
+ assert.equal(await boardTab.getAttribute('aria-selected'),'true')
+ assert.deepEqual(await board.getByRole('heading',{level:2}).allTextContents(),['ToDo','ing','feedback','done'])
+ const column=name=>board.getByRole('region',{name,exact:true})
+ await board.screenshot({path:'.tmp/my-work-board.png'})
+ const cardTitle='신규 상품 라벨 이미지 작업'
+ await column('ToDo').getByRole('heading',{name:cardTitle,exact:true}).dragTo(column('ing').getByRole('heading',{name:'ing',exact:true}))
+ await column('ing').getByRole('heading',{name:cardTitle,exact:true}).waitFor()
+ assert.equal(await column('ToDo').getByRole('heading',{name:cardTitle,exact:true}).count(),0)
+ await column('ing').getByRole('combobox',{name:`${cardTitle} 상태`,exact:true}).selectOption('feedback')
+ await column('feedback').getByRole('heading',{name:cardTitle,exact:true}).waitFor()
+ await scheduleTab.click()
+ await boardTab.click()
+ await column('feedback').getByRole('heading',{name:cardTitle,exact:true}).waitFor()
+ await scheduleTab.click()
  await page.getByRole('button',{name:'+추가',exact:true}).click()
  await page.getByRole('menuitem',{name:'월차/연차',exact:true}).click()
  const requestDialog=page.getByRole('dialog',{name:'월차/연차 신청',exact:true})
@@ -98,7 +115,7 @@ try{
  await page.getByRole('tab',{name:'회의',exact:true}).click();await page.getByRole('button',{name:'채팅',exact:true}).click();await page.locator('#workspace-chat-panel').waitFor();await page.keyboard.press('Escape')
  for(const href of ['/data/all','/drafts','/operations-support','/logistics/invoices','/settings/profile?part=profile']){await load('staff',href);await page.waitForURL('**/settings/profile');assert.equal(await page.getByRole('tab',{name:'My Schedule',exact:true}).getAttribute('aria-selected'),'true');assert.equal(await page.evaluate(()=>window.__releaseFixture.reads.includes('styles')),false,'미공개 상품 화면이 조회되지 않음')}
  for(const role of ['approver','substitute']){await load(role);await expectTabs(approverTabs)}
- await load('logistics-approver');await expectTabs(['My Schedule','회의','작업 요청','승인할 신청'])
+ await load('logistics-approver');await expectTabs([...fieldStaffTabs,'승인할 신청'])
  await page.getByRole('tab',{name:'승인할 신청',exact:true}).click();await page.evaluate(()=>window.__releaseFixture.setRole('staff'));await page.waitForURL('**/settings/profile');await expectTabs(staffTabs)
  await page.goto(origin+'/settings/profile?part=approvals&role=approver&approval-error=1');await page.getByText('승인자 지정을 확인하지 못했습니다.',{exact:true}).waitFor();assert.equal(await page.getByRole('tab',{name:'승인할 신청',exact:true}).count(),0)
  await page.evaluate(()=>{window.__releaseFixture.approvalError=false;window.__releaseFixture.refresh()});await expectTabs(approverTabs)
@@ -110,7 +127,7 @@ try{
  await page.getByRole('button',{name:'목록으로',exact:true}).click();await page.waitForURL('**/product-work/logistics?role=logistics')
  await load('logistics');await page.getByRole('button',{name:'물류',exact:true}).click()
  await page.locator('aside a[href="/product-work/logistics"]').click();await page.waitForURL('**/product-work/logistics');await page.evaluate(()=>window.__releaseFixture.setRole('staff'));await page.waitForURL('**/settings/profile');assert.equal(await page.locator('[aria-label="물류 · 상품 정보 탭 닫기"]').count(),0)
- await load('logistics');await page.getByRole('button',{name:'물류',exact:true}).click();await page.locator('aside a[href="/product-work/logistics"]').click();await page.waitForURL('**/product-work/logistics');await page.locator('aside a[href="/settings/profile"]').click();await expectTabs(['My Schedule','회의','작업 요청']);await page.evaluate(()=>window.__releaseFixture.setRole('staff'));await expectTabs(staffTabs);assert.ok(page.url().includes('/settings/profile'),'숨긴 물류 탭이 현재 주소를 바꾸지 않음')
+ await load('logistics');await page.getByRole('button',{name:'물류',exact:true}).click();await page.locator('aside a[href="/product-work/logistics"]').click();await page.waitForURL('**/product-work/logistics');await page.locator('aside a[href="/settings/profile"]').click();await expectTabs(fieldStaffTabs);await page.evaluate(()=>window.__releaseFixture.setRole('staff'));await expectTabs(staffTabs);assert.ok(page.url().includes('/settings/profile'),'숨긴 물류 탭이 현재 주소를 바꾸지 않음')
  await load('operations');await page.getByRole('button',{name:'운영지원',exact:true}).click();hrefs=await nav();for(const href of ['/operations-support/attendance','/operations-support/leave','/operations-support/people','/settings/permissions','/operations-support/settings'])assert.ok(hrefs.includes(href),href);assert.equal(hrefs.includes('/settings/access-ip'),false)
  for(const [role,title,paths] of [
   ['planning','기획',['/drafts','/planning/material-requests','/work-requests/planning']],
@@ -119,7 +136,7 @@ try{
  ]){
   await load(role);await page.locator('aside nav').getByRole('button',{name:title,exact:true}).click()
   assert.deepEqual(await nav(),['/settings/profile',...paths],role+'는 자기 부서 메뉴만 표시')
-  await expectTabs(role==='china'?['My Schedule','회의','작업 요청']:staffTabs)
+  await expectTabs(role==='china'?fieldStaffTabs:staffTabs)
  }
  for(const [role,title] of [['contents','Contents'],['global','Global Online'],['visual','Visual'],['b2b','B2B 사업'],['offline','OFF LINE'],['china-global','CHINA'],['marketing','마케팅'],['executives','운영진']]){
   await load(role);await page.locator('aside nav').getByRole('button',{name:title,exact:true}).click()
@@ -127,7 +144,7 @@ try{
   assert.deepEqual(await nav(),['/settings/profile'])
   assert.deepEqual(await page.locator('aside nav button').allTextContents(),[title])
  }
- for(const role of ['developer','owner','ceo']){await load(role);assert.ok((await tabs()).includes('작업 요청'));assert.ok(!(await tabs()).includes('내업무'));assert.ok((await nav()).includes('/products'))}
+ for(const role of ['developer','owner','ceo']){await load(role);const labels=await tabs();assert.ok(labels.includes('작업 요청'));assert.deepEqual(labels.slice(0,2),['My Schedule','내 업무']);assert.ok((await nav()).includes('/products'))}
  await page.setViewportSize({width:250,height:900});const fullMenu=page.getByRole('tablist',{name:'My home 메뉴'});assert.ok((await tabs()).length>=7);assert.equal(await fullMenu.evaluate(element=>element.scrollWidth>element.clientWidth),true,'예외 계정의 전체 탭은 좁은 화면에서 가로 탐색')
  await load('staff');await page.setViewportSize({width:390,height:844});await page.screenshot({path:'.tmp/release-staff-mobile.png',fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false)
  await page.getByRole('tab',{name:'야근',exact:true}).click()

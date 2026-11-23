@@ -49,8 +49,7 @@ export function releaseAccess(profile: ReleaseProfile | null | undefined) {
   }
 }
 export function releasePersonalPart(profile: ReleaseProfile | null | undefined, part: string | null, approver = false) {
-  if (part === 'my-work') return false
-  if (part === 'work') return profile?.status === 'active' && profile.companyId === RELEASE_COMPANY_ID
+  if (part === 'work' || part === 'my-work') return profile?.status === 'active' && profile.companyId === RELEASE_COMPANY_ID
   if ((part === 'overtime' || part === 'attendance') && !isHeadOfficeMember(profile)) return false
   return releaseAccess(profile).unrestricted || !part || part === 'my-attendance' || part === 'overtime' || part === 'meetings' || ((part === 'approvals' || part === 'attendance') && approver)
 }
