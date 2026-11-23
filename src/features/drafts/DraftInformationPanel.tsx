@@ -453,7 +453,7 @@ function openHtmlPreview(title: string, html: string) {
   frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0'
   frame.srcdoc = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="referrer" content="no-referrer">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">${html}`
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">${html}`
   document.body.append(frame)
   return true
 }

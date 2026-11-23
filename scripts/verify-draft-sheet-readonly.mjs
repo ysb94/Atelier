@@ -7,6 +7,12 @@ import tailwindcss from '@tailwindcss/vite'
 import {chromium} from 'playwright-core'
 const root=process.cwd()
 let server,browser
+const imageFixture='<svg xmlns="http://www.w3.org/2000/svg" width="16" height="12"><rect width="16" height="12" fill="red"/></svg>'
+const absoluteImagePath='/html-preview-absolute.svg'
+const relativeImagePath='/html-preview-relative.svg'
+const previewScriptPath='/html-preview-blocked.js'
+const previewImageRequests=[]
+let previewScriptRequests=0
 const fixtureClient={
  name:'draft-color-fixture-client',
  enforce:'pre',
@@ -40,6 +46,16 @@ try{
  assert.ok(entry&&css)
  const files=new Map(output.map(asset=>['/'+asset.fileName,asset]))
  server=createServer((req,res)=>{
+   if(req.url===absoluteImagePath||req.url===relativeImagePath){
+     previewImageRequests.push({path:req.url,referrer:req.headers.referer??null})
+     res.setHeader('Content-Type','image/svg+xml')
+     return res.end(imageFixture)
+   }
+   if(req.url===previewScriptPath){
+     previewScriptRequests++
+     res.setHeader('Content-Type','application/javascript')
+     return res.end('document.body.dataset.externalScript = "ran"')
+   }
    const asset=files.get(req.url)
    if(asset){
      res.setHeader('Content-Type',asset.type==='chunk'?'text/javascript':asset.fileName.endsWith('.css')?'text/css':'application/octet-stream')
@@ -759,19 +775,35 @@ try{
  assert.equal(await blackHtml.locator('.draft-visual-image-temporary').count(),0)
  assert.equal(await ivoryHtml.getByRole('img').count(),0)
  assert.equal(await ivoryHtml.locator('.draft-visual-image-temporary, .draft-visual-image-pending').count(),0)
- await ivoryInput.fill('<p>아이보리 상세 HTML</p><script>document.body.dataset.previewScript = "ran"</script>')
+ const draftHtml='<p>아이보리 상세 HTML</p><script>document.body.dataset.previewScript = "ran"</script>'
+ const context=page.context()
+ await ivoryInput.fill(`${draftHtml}<img alt="절대 주소 이미지" src="${origin+absoluteImagePath}" onload="document.body.dataset.imageHandler = 'ran'">
+   <img alt="상대 주소 이미지" src="${relativeImagePath}">
+   <img alt="포함된 이미지" src="data:image/svg+xml,${encodeURIComponent(imageFixture)}">
+   <script src="${origin+previewScriptPath}"></script>`)
  assert.equal(await blackInput.inputValue(),'')
- const [previewTab]=await Promise.all([page.context().waitForEvent('page'),
+ const [previewTab]=await Promise.all([context.waitForEvent('page'),
    ivoryHtml.getByRole('button',{name:'미리보기',exact:true}).click()])
  const htmlFrame=previewTab.frameLocator('iframe[title="아이보리 HTML 미리보기"]')
  await htmlFrame.getByText('아이보리 상세 HTML').waitFor()
  assert.equal(await previewTab.title(),'아이보리 HTML 미리보기')
  assert.equal(await previewTab.evaluate(()=>window.opener===null),true)
  assert.equal(await previewTab.locator('iframe').getAttribute('sandbox'),'')
+ for(const name of ['절대 주소 이미지','상대 주소 이미지','포함된 이미지']) {
+   const width=await htmlFrame.getByRole('img',{name}).evaluate(image=>image.decode().then(()=>image.naturalWidth,()=>0))
+   assert.equal(width,16,`${name} renders inside the preview`)
+ }
+ assert.deepEqual(previewImageRequests.sort((a,b)=>a.path.localeCompare(b.path)),[
+   {path:absoluteImagePath,referrer:null},{path:relativeImagePath,referrer:null},
+ ])
+ assert.equal(previewScriptRequests,0)
  assert.equal(await htmlFrame.locator('body').getAttribute('data-preview-script'),null)
+ assert.equal(await htmlFrame.locator('body').getAttribute('data-external-script'),null)
+ assert.equal(await htmlFrame.locator('body').getAttribute('data-image-handler'),null)
  assert.equal(await ivoryHtml.locator('iframe').count(),0,'The editor has no inline preview')
  await previewTab.close()
- await expectCopy(ivoryHtml,'아이보리 HTML','<p>아이보리 상세 HTML</p><script>document.body.dataset.previewScript = "ran"</script>')
+ await ivoryInput.fill(draftHtml)
+ await expectCopy(ivoryHtml,'아이보리 HTML',draftHtml)
  const temporaryHtmlMarker=ivoryHtml.locator('.draft-html-temporary-marker')
  assert.equal(await temporaryHtmlMarker.count(),0)
  await ivoryHtml.getByRole('button',{name:'임시저장',exact:true}).click()
@@ -819,7 +851,7 @@ try{
  await panel.press('Escape')
  await page.setViewportSize({width:390,height:850})
  await visualHtml.click()
- assert.equal(await ivoryInput.inputValue(),'<p>아이보리 상세 HTML</p><script>document.body.dataset.previewScript = "ran"</script>')
+ assert.equal(await ivoryInput.inputValue(),draftHtml)
  await generateVendorCode(ivoryHtml).click()
  await ivoryVendor.selectOption('무신사')
  const [mobileSource,mobileOutput]=await Promise.all([ivoryInput.boundingBox(),ivoryVendorHtml.boundingBox()])
