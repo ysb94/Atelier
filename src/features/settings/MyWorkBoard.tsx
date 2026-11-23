@@ -1,7 +1,6 @@
 import { useState, type DragEvent } from 'react'
 import { CircleCheck, CircleDashed, CircleDot, GripVertical, MessageSquare } from 'lucide-react'
 import { Card } from '@/components/ui/card'
-import { Select } from '@/components/ui/input'
 import { createPreviewWork, type WorkItem, type WorkState } from '@/features/work-requests/my-work-preview-data'
 import { cn } from '@/lib/utils'
 
@@ -47,7 +46,7 @@ export function MyWorkBoard() {
   }
 
   return <section className="space-y-3" aria-label="내 업무 보드">
-    <p className="text-sm text-muted-foreground">예시 카드입니다. 카드를 끌어 놓거나 상태를 선택해 옮겨 보세요.</p>
+    <p className="text-sm text-muted-foreground">예시 카드입니다. 카드를 원하는 열로 끌어 놓아 옮겨 보세요.</p>
     <p className="sr-only" role="status">{announcement}</p>
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {columns.map(({ id, label, icon: Icon, tone }) => {
@@ -85,17 +84,9 @@ export function MyWorkBoard() {
                 event.dataTransfer.setData('text/plain', card.id)
                 setDraggedId(card.id)
               }} onDragEnd={endDrag}>
-              <Card className="space-y-3 p-3">
-                <div className="flex items-start gap-2">
-                  <GripVertical size={16} className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <h3 className="min-w-0 break-words text-sm font-medium leading-5">{card.title}</h3>
-                </div>
-                <div className="flex justify-end">
-                  <Select value={id} aria-label={`${card.title} 상태`} className="h-7 cursor-pointer text-xs"
-                    onChange={event => moveCard(card.id, event.currentTarget.value as WorkState)}>
-                    {columns.map(column => <option key={column.id} value={column.id}>{column.label}</option>)}
-                  </Select>
-                </div>
+              <Card className="flex items-start gap-2 p-3">
+                <GripVertical size={16} className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <h3 className="min-w-0 break-words text-sm font-medium leading-5">{card.title}</h3>
               </Card>
             </li>)}
           </ul> : <p className="rounded-lg border border-dashed border-border bg-card/60 px-3 py-5 text-center text-xs text-muted-foreground">
