@@ -491,7 +491,7 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
         <Textarea aria-label={`${name} HTML 입력`} value={text} readOnly={readOnly || saving} placeholder="직접 입력…"
           spellCheck={false} className="h-[9.5rem] min-h-[9.5rem] resize-none bg-muted/35 pb-8 text-xs text-foreground shadow-none"
           onChange={event => setEdit({ text: event.target.value, revision })} />
-        {temporary && <span aria-hidden="true" className="draft-html-temporary-marker pointer-events-none absolute right-px top-px size-4 rounded-tr-md bg-primary [clip-path:polygon(0_0,100%_0,100%_100%)]" />}
+        {temporary && <span aria-hidden="true" className="draft-html-temporary-marker pointer-events-none absolute left-px top-px size-4 rounded-tl-md bg-primary [clip-path:polygon(0_0,100%_0,0_100%)]" />}
         <InformationCopyButton label={`${name} HTML`} text={text} className="absolute bottom-2 right-2" />
       </div>
       <div className="mt-1 flex flex-wrap items-center justify-end gap-1.5">

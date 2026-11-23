@@ -775,7 +775,7 @@ try{
  const markerBox=await temporaryHtmlMarker.boundingBox()
  const savedEditorBox=await ivoryInput.boundingBox()
  assert.ok(markerBox&&Math.abs(markerBox.y-savedEditorBox.y)<=2&&
-   Math.abs(markerBox.x+markerBox.width-savedEditorBox.x-savedEditorBox.width)<=2,'The HTML marker is at the top right')
+   Math.abs(markerBox.x-savedEditorBox.x)<=2,'The HTML marker is at the top left')
  assert.equal(await blackHtml.locator('.draft-html-temporary-marker').count(),0)
  await panel.getByRole('button',{name:'INFORMATION 닫기'}).click()
  await visualHtml.click()
