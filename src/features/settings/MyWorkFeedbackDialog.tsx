@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { EmployeeDirectoryColumns } from '@/components/ui/employee-directory-columns'
 import { Input, Select, Textarea } from '@/components/ui/input'
@@ -36,6 +37,7 @@ export function MyWorkFeedbackDialog({ actorId, settings, cardTitle, recipientId
   })
   const people = directory.data ?? []
   const available = people.filter(person => recipientIds.includes(person.profileId))
+  const selectedPeople = people.filter(person => savedSelection.has(person.profileId))
   const query = search.trim().toLowerCase()
   const filtered = people.filter(person => [person.displayName, person.departmentName, person.position]
     .some(value => value?.toLowerCase().includes(query)))
@@ -90,7 +92,7 @@ export function MyWorkFeedbackDialog({ actorId, settings, cardTitle, recipientId
       if (!settings) { void requestFeedback(); return }
       if (actorId && directory.isSuccess) {
         if (!cardTitle) dialog.current?.close()
-        onSave(people.filter(person => savedSelection.has(person.profileId)).map(person => person.profileId))
+        onSave(selectedPeople.map(person => person.profileId))
       }
     }}>
       <h2 id={titleId} className="text-lg font-semibold">{settings ? '피드백 담당자 설정' : '피드백 요청'}</h2>
@@ -100,6 +102,14 @@ export function MyWorkFeedbackDialog({ actorId, settings, cardTitle, recipientId
           <p>직원 목록을 불러오지 못했습니다.</p>
           <Button type="button" variant="outline" size="sm" onClick={() => void directory.refetch()}>다시 불러오기</Button>
         </div> : settings ? <>
+          <div role="group" aria-label="선택한 담당자" className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">선택한 담당자 ({selectedPeople.length})</p>
+            {selectedPeople.length ? <ul className="flex flex-wrap gap-2">
+              {selectedPeople.map(person => <li key={person.profileId}>
+                <Badge>{formatChatPerson(person.displayName, person.position)}{person.departmentName ? ` · ${person.departmentName}` : ''}</Badge>
+              </li>)}
+            </ul> : <p className="text-sm text-muted-foreground">선택한 담당자가 없습니다.</p>}
+          </div>
           <Input aria-label="직원 검색" placeholder="이름 또는 부서 검색" value={search} onChange={event => setSearch(event.currentTarget.value)} />
           <div className="rounded-md border border-border bg-card p-2">
             {filtered.length ? <EmployeeDirectoryColumns
