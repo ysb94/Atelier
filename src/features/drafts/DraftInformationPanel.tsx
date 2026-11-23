@@ -432,7 +432,67 @@ function VendorHtmlCode({ id, name, text, templates }: { id: string; name: strin
   </div>
 }
 
-function openHtmlPreview(title: string, html: string) {
+const AUCHEE_PREVIEW_ORIGIN = 'https://cdn2.auchee.com'
+
+function aucheePreviewUrl(source: string | null, directory: string, base: string) {
+  if (!source) return null
+  try {
+    const url = new URL(source, base)
+    return url.origin === AUCHEE_PREVIEW_ORIGIN && url.pathname.startsWith(directory) && !url.username && !url.password ? url : null
+  } catch {
+    return null
+  }
+}
+
+async function prepareHtmlPreview(html: string) {
+  if (!/<iframe\b/i.test(html)) return html
+
+  // Templates let us inspect third-party markup without loading or running it.
+  const preview = document.createElement('template')
+  preview.innerHTML = html
+  const inertDocument = preview.content.ownerDocument
+  await Promise.all(Array.from(preview.content.querySelectorAll('iframe[src]:not([srcdoc])'), async frame => {
+    const embedUrl = aucheePreviewUrl(frame.getAttribute('src'), '/embed/', document.baseURI)
+    if (!embedUrl) return
+
+    try {
+      const response = await fetch(embedUrl, {
+        credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error', signal: AbortSignal.timeout(8000),
+      })
+      if (!response.ok) throw new Error('Could not load video embed')
+      const embed = document.createElement('template')
+      embed.innerHTML = await response.text()
+      const player = embed.content.querySelector('video')
+      const source = player?.getAttribute('src') || player?.querySelector('source[src]')?.getAttribute('src')
+      const videoUrl = aucheePreviewUrl(source ?? null, '/video/', embedUrl.href)
+      if (!player || !videoUrl) throw new Error('Video source is unavailable')
+
+      const video = inertDocument.createElement('video')
+      video.controls = true
+      video.playsInline = true
+      video.preload = 'metadata'
+      video.defaultMuted = player.defaultMuted
+      video.loop = player.loop
+      video.title = frame.getAttribute('title') || '상품 영상'
+      for (const attribute of ['width', 'height', 'style']) {
+        const value = frame.getAttribute(attribute)
+        if (value !== null) video.setAttribute(attribute, value)
+      }
+      video.style.objectFit = 'contain'
+      video.setAttribute('src', videoUrl.href)
+      frame.replaceWith(video)
+    } catch {
+      const status = inertDocument.createElement('p')
+      status.textContent = '영상을 불러오지 못했습니다. 미리보기를 다시 열어 주세요.'
+      status.style.cssText = frame.getAttribute('style') ?? ''
+      Object.assign(status.style, { display: 'grid', placeItems: 'center', margin: '0', textAlign: 'center' })
+      frame.replaceWith(status)
+    }
+  }))
+  return preview.innerHTML
+}
+
+async function openHtmlPreview(title: string, html: string) {
   const tab = window.open('', '_blank')
   if (!tab) return false
 
@@ -444,6 +504,10 @@ function openHtmlPreview(title: string, html: string) {
   viewport.name = 'viewport'
   viewport.content = 'width=device-width,initial-scale=1'
   document.head.append(viewport)
+  document.body.textContent = '미리보기를 준비하는 중…'
+
+  const previewHtml = await prepareHtmlPreview(html)
+  if (tab.closed) return true
 
   // Render editable HTML in an opaque sandbox, including when the preview fills a tab.
   const frame = document.createElement('iframe')
@@ -453,8 +517,13 @@ function openHtmlPreview(title: string, html: string) {
   frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0'
   frame.srcdoc = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="referrer" content="no-referrer">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">${html}`
-  document.body.append(frame)
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; img-src data: https: http:; media-src ${AUCHEE_PREVIEW_ORIGIN}/video/; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+    <style>
+      :where(html, body) { margin: 0; }
+      :where(img) { display: block; max-width: 100%; height: auto; margin-inline: auto; }
+      :where(video) { display: block; max-width: 100%; margin-inline: auto; }
+    </style>${previewHtml}`
+  document.body.replaceChildren(frame)
   return true
 }
 
@@ -522,8 +591,8 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
           {saved ? '저장됨' : temporary ? '임시저장됨' : ''}
         </span>
         <Button type="button" size="sm" variant="outline" className="h-6 px-2" title="새 탭에서 미리보기"
-          disabled={!hasContent} onClick={() => {
-            const opened = openHtmlPreview(`${name} HTML 미리보기`, text)
+          disabled={!hasContent} onClick={async () => {
+            const opened = await openHtmlPreview(`${name} HTML 미리보기`, text)
             setError(opened ? '' : '미리보기를 열려면 브라우저의 팝업 차단을 해제해 주세요.')
           }}>미리보기</Button>
         {!readOnly && <>

@@ -11,8 +11,10 @@ const imageFixture='<svg xmlns="http://www.w3.org/2000/svg" width="16" height="1
 const absoluteImagePath='/html-preview-absolute.svg'
 const relativeImagePath='/html-preview-relative.svg'
 const previewScriptPath='/html-preview-blocked.js'
+const previewFramePath='/html-preview-unapproved-frame.html'
 const previewImageRequests=[]
 let previewScriptRequests=0
+let previewFrameRequests=0
 const fixtureClient={
  name:'draft-color-fixture-client',
  enforce:'pre',
@@ -56,6 +58,11 @@ try{
      res.setHeader('Content-Type','application/javascript')
      return res.end('document.body.dataset.externalScript = "ran"')
    }
+   if(req.url===previewFramePath){
+     previewFrameRequests++
+     res.setHeader('Content-Type','text/html')
+     return res.end('<!doctype html><p>Unapproved frame</p>')
+   }
    const asset=files.get(req.url)
    if(asset){
      res.setHeader('Content-Type',asset.type==='chunk'?'text/javascript':asset.fileName.endsWith('.css')?'text/css':'application/octet-stream')
@@ -67,7 +74,8 @@ try{
  })
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
  const origin='http://127.0.0.1:'+server.address().port
- browser=await chromium.launch({executablePath:process.env.ATELIER_CHROMIUM_BIN||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true})
+ browser=await chromium.launch({executablePath:process.env.ATELIER_CHROMIUM_BIN||'C:/Program Files/Google/Chrome/Application/chrome.exe',
+   headless:true,args:['--host-resolver-rules=MAP cdn2.auchee.com ~NOTFOUND']})
  const page=await browser.newPage({viewport:{width:1800,height:950},timezoneId:'UTC'}),errors=[]
  page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(15000)
  await page.route('**/*',route=>route.request().url().startsWith(origin+'/')||route.request().url().startsWith('data:')?route.continue():route.abort())
@@ -777,10 +785,16 @@ try{
  assert.equal(await ivoryHtml.locator('.draft-visual-image-temporary, .draft-visual-image-pending').count(),0)
  const draftHtml='<p>아이보리 상세 HTML</p><script>document.body.dataset.previewScript = "ran"</script>'
  const context=page.context()
+ const videoHost='https://cdn2.auchee.com'
+ const embedUrl=videoHost+'/embed/atelier-preview-fixture.html'
+ const videoPath='/video/atelier-preview-fixture.mp4'
+ await page.route(embedUrl,route=>route.fulfill({contentType:'text/html',
+   headers:{'access-control-allow-origin':'*'},body:`<video autoplay muted loop><source src="${videoPath}"></video>`}))
  await ivoryInput.fill(`${draftHtml}<img alt="절대 주소 이미지" src="${origin+absoluteImagePath}" onload="document.body.dataset.imageHandler = 'ran'">
    <img alt="상대 주소 이미지" src="${relativeImagePath}">
-   <img alt="포함된 이미지" src="data:image/svg+xml,${encodeURIComponent(imageFixture)}">
-   <script src="${origin+previewScriptPath}"></script>`)
+   <img alt="포함된 이미지" width="3000" src="data:image/svg+xml,${encodeURIComponent(imageFixture)}">
+   <script src="${origin+previewScriptPath}"></script><iframe src="${origin+previewFramePath}"></iframe>
+   <div><iframe src="${embedUrl}" title="검증 영상" width="320" height="180"></iframe></div>`)
  assert.equal(await blackInput.inputValue(),'')
  const [previewTab]=await Promise.all([context.waitForEvent('page'),
    ivoryHtml.getByRole('button',{name:'미리보기',exact:true}).click()])
@@ -796,7 +810,21 @@ try{
  assert.deepEqual(previewImageRequests.sort((a,b)=>a.path.localeCompare(b.path)),[
    {path:absoluteImagePath,referrer:null},{path:relativeImagePath,referrer:null},
  ])
+ const imageLayout=await htmlFrame.locator('img').evaluateAll(images=>images.map(image=>{
+   const {left,right,top,bottom}=image.getBoundingClientRect()
+   return {left,right,top,bottom,viewport:image.ownerDocument.documentElement.clientWidth}
+ }))
+ for(const [index,box] of imageLayout.entries()) {
+   assert.ok(Math.abs(box.left+box.right-box.viewport)<=2&&box.left>=0&&box.right<=box.viewport,
+     'Preview images are centered and fit the viewport')
+   if(index>0) assert.ok(box.top>=imageLayout[index-1].bottom,'Adjacent images stack in the preview')
+ }
+ assert.equal(previewFrameRequests,0)
  assert.equal(previewScriptRequests,0)
+ const previewVideo=htmlFrame.locator('video[controls][title="검증 영상"]')
+ assert.equal(await previewVideo.getAttribute('src'),videoHost+videoPath)
+ assert.equal(await previewVideo.getAttribute('autoplay'),null)
+ assert.equal(await htmlFrame.locator('iframe[title="검증 영상"]').count(),0)
  assert.equal(await htmlFrame.locator('body').getAttribute('data-preview-script'),null)
  assert.equal(await htmlFrame.locator('body').getAttribute('data-external-script'),null)
  assert.equal(await htmlFrame.locator('body').getAttribute('data-image-handler'),null)
