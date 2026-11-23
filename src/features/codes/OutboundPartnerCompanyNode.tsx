@@ -109,6 +109,7 @@ export function OutboundPartnerCompanyNode({
   selectedId,
   last = false,
   root = false,
+  defaultOpen,
   onSelect,
   onRenamed,
   onError,
@@ -117,6 +118,7 @@ export function OutboundPartnerCompanyNode({
   selectedId: string | null
   last?: boolean
   root?: boolean
+  defaultOpen?: boolean
   onSelect: (id: string) => void
   onRenamed?: () => void | Promise<void>
   onError?: (message: string | null) => void
@@ -238,7 +240,7 @@ export function OutboundPartnerCompanyNode({
   }
 
   return (
-    <TreeBranch last={last} root={root} label={header}>
+    <TreeBranch last={last} root={root} label={header} defaultOpen={defaultOpen}>
       {company.units.map((unit, index) => (
         <TreeLeaf
           key={unit.id}

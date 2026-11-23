@@ -137,6 +137,7 @@ function TabButton({
 function SectionList({
   sections,
   folderTree,
+  expandSearchResults = false,
   selectedId,
   onSelect,
   onRenamed,
@@ -150,6 +151,7 @@ function SectionList({
 }: {
   sections: readonly OutboundUnitSection[]
   folderTree?: OutboundFolderNode | null
+  expandSearchResults?: boolean
   selectedId: string | null
   onSelect: (id: string) => void
   onRenamed?: () => void | Promise<void>
@@ -200,6 +202,7 @@ function SectionList({
         selectedId={selectedId}
         last={!childFolders && index === section.companies.length - 1}
         root={!label}
+        defaultOpen={expandSearchResults}
         onSelect={onSelect}
         onRenamed={onRenamed}
         onError={onError}
@@ -212,26 +215,24 @@ function SectionList({
           <TreeBranch
             root={root}
             last={last}
+            defaultOpen={expandSearchResults}
             label={
-              <div className="flex min-w-0 items-center gap-1">
-                <p className="min-w-0 flex-1 truncate px-1">
-                  {label}
-                </p>
-                {allowAdd && section.folderId ? (
+              <p className="truncate px-1">{label}</p>
+            }
+            renderAction={allowAdd && section.folderId
+              ? (expand) => (
                   <button
                     type="button"
                     className="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
                     aria-label={`${section.pathLabel} 에 업체 추가`}
-                    onClick={(event) => {
-                      event.stopPropagation()
+                    onClick={() => {
+                      expand()
                       onAddCompany?.(section.folderId!)
                     }}
                   >
                     <Plus className="size-3" />
                   </button>
-                ) : null}
-              </div>
-            }
+                ) : undefined}
           >
             {addingFolderId === section.folderId ? (
               <div className="py-1 pr-1">
@@ -582,7 +583,9 @@ export function OutboundPartnerBrowser({
       </p>
     ) : (
       <SectionList
+        key="search"
         sections={searchSections}
+        expandSearchResults
         selectedId={selectedId}
         onSelect={(id) => onSelect(id === selectedId ? null : id)}
         onRenamed={onChanged}
@@ -591,6 +594,7 @@ export function OutboundPartnerBrowser({
     )
   ) : (
     <SectionList
+      key="browse"
       sections={sections}
       folderTree={activeFolder && outboundChannelFromFolderPath(folders, activeFolder.id) === 'online' ? activeFolder : null}
       selectedId={selectedId}

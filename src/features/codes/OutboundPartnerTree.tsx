@@ -32,13 +32,15 @@ export function TreeBranch({
   label,
   last = false,
   root = false,
-  defaultOpen = true,
+  defaultOpen = false,
+  renderAction,
   children,
 }: {
   label: ReactNode
   last?: boolean
   root?: boolean
   defaultOpen?: boolean
+  renderAction?: (expand: () => void) => ReactNode
   children: ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -96,6 +98,10 @@ export function TreeBranch({
         >
           {label}
         </div>
+        {renderAction?.(() => {
+          clearToggleTimer()
+          setOpen(true)
+        })}
       </div>
       {open ? (
         <div className="ml-3 border-l border-muted-foreground/35">{children}</div>
