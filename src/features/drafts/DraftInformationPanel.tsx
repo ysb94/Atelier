@@ -407,7 +407,6 @@ function vendorTemplates(rows: readonly DraftVisualContent[]) {
 function VendorHtmlCode({ id, name, text, templates, onPreview }: {
   id: string; name: string; text: string; templates: DraftVendorHtml; onPreview: (label: string, html: string) => void
 }) {
-  const [vendor, setVendor] = useState('')
   const hasBody = Boolean(text.trim())
   const vendors = DRAFT_HTML_VENDORS.flatMap(option => {
     const template = templates[option]
@@ -415,32 +414,22 @@ function VendorHtmlCode({ id, name, text, templates, onPreview }: {
     const code = hasBody ? [template.top, text, template.bottom].filter(part => part.trim()).join('\n') : ''
     return [{ name: option, code }]
   })
-  const selected = vendors.find(option => option.name === vendor)
-  const outputId = `${id}-output`
+  if (!vendors.length) {
+    return <p id={id} className="text-xs text-muted-foreground">상단 업체별 Top Buttom 등록에서 업체 HTML을 먼저 저장해 주세요.</p>
+  }
 
-  return <div id={id} className="grid min-w-0 gap-1.5">
-    {vendors.length ? <>
-      <ul aria-label={`${name} HTML 업체 목록`} className="divide-y divide-border rounded-md border border-border">
-        {vendors.map(option => {
-          const label = `${name} ${option.name}`
-          const expanded = selected === option
-          return <li key={option.name} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1 px-1.5 py-1">
-            <Button type="button" size="sm" variant="ghost" className="h-6 min-w-0 justify-start px-1 text-xs"
-              aria-expanded={expanded} aria-controls={expanded ? outputId : undefined} title={`${option.name} HTML 보기`}
-              onClick={() => setVendor(current => current === option.name ? '' : option.name)}>
-              <span className="truncate">{option.name}</span>
-            </Button>
-            <InformationCopyButton label={`${label} HTML`} text={option.code} buttonText="복사" className="h-6 px-1.5 text-xs" />
-            <Button type="button" size="sm" variant="outline" className="h-6 px-1.5 text-xs"
-              aria-label={`${label} HTML 미리보기`} disabled={!option.code}
-              onClick={() => onPreview(label, option.code)}>미리보기</Button>
-          </li>
-        })}
-      </ul>
-      {selected && <Textarea id={outputId} aria-label={`${name} 업체별 생성 HTML`} value={selected.code} readOnly rows={5}
-        className="block min-h-28 resize-y bg-muted/35 font-mono text-xs" placeholder="컬러 HTML을 입력해 주세요." />}
-    </> : <p className="text-xs text-muted-foreground">상단 업체별 Top Buttom 등록에서 업체 HTML을 먼저 저장해 주세요.</p>}
-  </div>
+  return <ul id={id} aria-label={`${name} HTML 업체 목록`} className="min-w-0 divide-y divide-border rounded-md border border-border">
+    {vendors.map(option => {
+      const label = `${name} ${option.name}`
+      return <li key={option.name} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1 px-1.5 py-1">
+        <span className="truncate px-1 text-xs" title={option.name}>{option.name}</span>
+        <InformationCopyButton label={`${label} HTML`} text={option.code} buttonText="복사" className="h-6 px-1.5 text-xs" />
+        <Button type="button" size="sm" variant="outline" className="h-6 px-1.5 text-xs"
+          aria-label={`${label} HTML 미리보기`} disabled={!option.code}
+          onClick={() => onPreview(label, option.code)}>미리보기</Button>
+      </li>
+    })}
+  </ul>
 }
 
 const AUCHEE_PREVIEW_ORIGIN = 'https://cdn2.auchee.com'
