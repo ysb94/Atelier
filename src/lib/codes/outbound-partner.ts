@@ -146,14 +146,20 @@ function stripOutboundChannelLabel(value: string): string {
   return trimmed;
 }
 
-/** 모든 화면에서 동일하게 쓰는 업체·지점 표시명. 채널은 붙이지 않는다. */
-export function outboundPartnerDisplayName(
+/** 출고 단위의 등록 이름. 자동 연결에도 사용한다. */
+export function outboundPartnerRegisteredName(
   target: Pick<CodeUsageTarget, "name" | "groupName" | "siteName">,
 ): string {
   const groupName = normalizeOutboundPartnerName(target.groupName);
   if (!groupName) return stripOutboundChannelLabel(target.name) || target.name;
   const siteName = normalizeOutboundPartnerName(target.siteName);
   return siteName ? `${groupName} · ${siteName}` : groupName;
+}
+
+export function outboundPartnerDisplayName(
+  target: Pick<CodeUsageTarget, "name" | "groupName" | "siteName" | "displayName">,
+): string {
+  return target.displayName?.trim() || outboundPartnerRegisteredName(target);
 }
 
 /** 업체 노드 아래 지점 행에 쓰는 짧은 이름. 헤더 업체명과 별개다. */
@@ -163,6 +169,12 @@ export function outboundPartnerUnitLabel(
   const name = stripOutboundChannelLabel(target.name) || target.name;
   if (!target.groupId) return name;
   return normalizeOutboundPartnerName(target.siteName) || name;
+}
+
+export function outboundPartnerUnitDisplayName(
+  target: Pick<CodeUsageTarget, "name" | "groupId" | "siteName" | "displayName">,
+): string {
+  return target.displayName?.trim() || outboundPartnerUnitLabel(target);
 }
 
 export function synthesizeOutboundPartnerName(input: {
@@ -434,6 +446,7 @@ export function matchesOutboundPartnerSearch(
     CodeUsageTarget,
     | "name"
     | "normalizedName"
+    | "displayName"
     | "groupName"
     | "siteName"
     | "normalizedSiteName"
@@ -445,6 +458,7 @@ export function matchesOutboundPartnerSearch(
   if (!key) return true;
   const haystack = [
     target.normalizedName || compactOutboundPartnerKey(target.name),
+    compactOutboundPartnerKey(target.displayName ?? ""),
     compactOutboundPartnerKey(target.groupName),
     target.normalizedSiteName || compactOutboundPartnerKey(target.siteName),
     compactOutboundPartnerKey(OUTBOUND_CHANNEL_TYPE_LABEL[target.channelType]),

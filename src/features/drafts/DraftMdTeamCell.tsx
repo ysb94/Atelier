@@ -299,7 +299,7 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork }: 
                     placeholder={partners.placeholder} disabled={listingLocked} confirmed={listingConfirmed} onChange={id => {
                       if (id === releasePartners.value) return
                       const target = partners.options.find(option => option.id === id)
-                      listing.change(current => ({ ...current, partnerId: target?.id ?? null, partner: target?.label ?? '' }))
+                      listing.change(current => ({ ...current, partnerId: target?.id ?? null, partner: target?.registeredName ?? '' }))
                     }} />
                 </MdField>}
               </div>

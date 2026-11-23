@@ -15,6 +15,7 @@ const target = (id: string, name: string, order: number) => ({
   id,
   brand_id: brand,
   name,
+  display_name: null as string | null,
   normalized_name: compactOutboundPartnerKey(name),
   site_name: '',
   normalized_site_name: '',
@@ -203,6 +204,7 @@ export function getSupabase() {
         single = false,
         start = 0,
         end = Infinity
+      let displayNameUpdate: { display_name: string | null } | undefined
       const q: any = {
         select: () => q,
         order: () => q,
@@ -238,8 +240,16 @@ export function getSupabase() {
             `Shared or unaudited table mutation forbidden: ${table}.${method}`,
           )
         }
-      q.then = (resolve: any, reject: any) =>
-        Promise.resolve(
+      if (table === 'code_usage_targets') {
+        q.update = (values: { display_name: string | null }) => {
+          if (Object.keys(values).join() !== 'display_name') throw new Error('Unexpected target update')
+          displayNameUpdate = values
+          return q
+        }
+      }
+      q.then = (resolve: any, reject: any) => {
+        if (displayNameUpdate) rows.forEach((row) => Object.assign(row, displayNameUpdate))
+        return Promise.resolve(
           missing && table.startsWith('usage_partner_')
             ? {
                 data: null,
@@ -251,9 +261,18 @@ export function getSupabase() {
                 error: null,
               },
         ).then(resolve, reject)
+      }
       return q
     },
     async rpc(name: string, args: any) {
+      if (name === 'save_outbound_partner_unit_with_display_name') {
+        const row = data.code_usage_targets.find((item) => item.id === args.p_id && item.brand_id === args.p_brand_id)
+        if (!row) return { data: null, error: { message: 'fixture target not found' } }
+        row.display_name = args.p_display_name
+        row.updated_at = new Date().toISOString()
+        audit.push({ name, args: structuredClone(args) })
+        return { data: row.id, error: null }
+      }
       if (name === 'get_usage_partner_access')
         return missing
           ? {

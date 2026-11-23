@@ -576,6 +576,8 @@ export type CodeUsageTarget = {
   id: string
   brandId: string
   name: string
+  /** 선택한 출고 단위의 화면 표시 이름. 비우면 기존 표시를 사용한다. */
+  displayName?: string | null
   /** 이름 비교용 압축 키. 띄어쓰기만 다른 중복을 막는다. */
   normalizedName: string
   /** 사용 종료해도 기존 바코드 연결 이력은 보존한다. */

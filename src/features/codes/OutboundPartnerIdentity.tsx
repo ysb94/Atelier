@@ -2,7 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   isOutboundPartnerIncomplete,
   outboundPartnerDisplayName,
-  outboundPartnerUnitLabel,
+  outboundPartnerUnitDisplayName,
 } from "@/lib/codes/outbound-partner";
 import type { CodeUsageTarget } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -21,7 +21,7 @@ export function OutboundPartnerIdentity({
   const incomplete = isOutboundPartnerIncomplete(target);
   const label =
     variant === "unit"
-      ? outboundPartnerUnitLabel(target)
+      ? outboundPartnerUnitDisplayName(target)
       : outboundPartnerDisplayName(target);
 
   return (

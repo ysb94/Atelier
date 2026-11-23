@@ -5,7 +5,7 @@ import { getCodeUsageTargetFolders } from '@/lib/api'
 import { descendantFolderIds, folderPath } from '@/lib/codes/outbound-folder'
 import { listCodeUsageTargetOptions } from '@/lib/supabase/code-usage-targets'
 
-export type DraftPartnerOption = { id: string; label: string }
+export type DraftPartnerOption = { id: string; label: string; registeredName?: string }
 
 export function useDraftSabangnetPartners(brandId: string | null, enabled: boolean) {
   const active = useWorkspaceTabActivity()
@@ -34,9 +34,10 @@ export function useDraftSabangnetPartners(brandId: string | null, enabled: boole
       for (const id of descendantFolderIds(folders.data, folder.id)) sabangnetFolders.add(id)
     }
     for (const target of targets.data) {
-      names.set(target.id, target.name)
+      const label = target.display_name?.trim() || target.name
+      names.set(target.id, label)
       if (target.active && target.folder_id && sabangnetFolders.has(target.folder_id)) {
-        options.push({ id: target.id, label: target.name })
+        options.push({ id: target.id, label, registeredName: target.name })
       }
     }
     return { options, names }

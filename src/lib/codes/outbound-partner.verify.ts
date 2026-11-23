@@ -19,6 +19,7 @@ import {
   outboundPartnerDisplayName,
   outboundPartnerStatus,
   outboundPartnerUnitLabel,
+  outboundPartnerUnitDisplayName,
   parseActivateFolderValue,
   parseOutboundPartnerPaste,
   keepsHeadquartersOnFirstBranch,
@@ -238,6 +239,19 @@ assert(
   ) === "제주점",
   "지점 행은 지점명만 보여 준다",
 );
+const customizedSite = target({
+  name: "W컨셉한남점원본",
+  groupId: "wconcept-group",
+  groupName: "W컨셉",
+  siteName: "한남점",
+  displayName: "W컨셉 한남 매장",
+});
+assert(outboundPartnerDisplayName(customizedSite) === "W컨셉 한남 매장", "개별 표시명을 사용한다");
+assert(outboundPartnerUnitDisplayName(customizedSite) === "W컨셉 한남 매장", "지점에도 개별 표시명을 사용한다");
+assert(matchesOutboundPartnerSearch("한남 매장", customizedSite, []), "화면에서 표시명으로도 검색한다");
+const customizedNameIndex = buildOutboundPartnerNameIndex([customizedSite], []);
+assert(customizedNameIndex.get("w컨셉한남점") === customizedSite, "기존 업체·지점 정식명은 그대로 연결된다");
+assert(!customizedNameIndex.has("w컨셉한남매장"), "표시명은 자동 매칭에 추가되지 않는다");
 assert(
   outboundPartnerUnitLabel(
     target({

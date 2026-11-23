@@ -1256,7 +1256,7 @@ export function DraftEditPage() {
                   if (value === openChannel.value) return
                   const target = partners.options.find(option => option.id === value)
                   patch({
-                    openTypeDetail: target?.label ?? (value === 'all' ? '전체' : ''),
+                    openTypeDetail: target?.registeredName ?? (value === 'all' ? '전체' : ''),
                     specs: { ...form.specs, openChannelTargetId: target?.id ?? null },
                   })
                 }}>

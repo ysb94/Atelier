@@ -28,9 +28,10 @@ export function DraftVendorHtmlDialog({ preferredVendor, value, partners, onSave
   }
   const vendor = options.find(option => option.id === selection)?.id
     ?? options.find(option => option.id === preferredVendor)?.id
-    ?? options.find(option => option.label === preferredVendor)?.id
+    ?? options.find(option => option.label === preferredVendor || option.registeredName === preferredVendor)?.id
     ?? options[0]?.id ?? ''
   const html = edits[vendor] ?? EMPTY_HTML
+  const vendorName = options.find(option => option.id === vendor)?.registeredName ?? partners.names.get(vendor)
 
   useEffect(() => { dialog.current?.showModal() }, [])
 
@@ -78,7 +79,7 @@ export function DraftVendorHtmlDialog({ preferredVendor, value, partners, onSave
                   setEdits(current => ({
                     ...current,
                     [vendor]: {
-                      ...(current[vendor] ?? { ...EMPTY_HTML, vendorName: partners.names.get(vendor) }),
+                      ...(current[vendor] ?? { ...EMPTY_HTML, vendorName }),
                       [part]: text,
                     },
                   }))
