@@ -20,7 +20,7 @@ import { readFileAsDataUrl } from '@/lib/images'
 import type { DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
 import type { DraftColorEdit } from '@/lib/supabase/product-drafts'
 import { DRAFT_STATUS_LABEL, type Brand, type DraftColorImageChoice, type DraftColorRow, type DraftSpecs, type ProductDraft, type Season } from '@/lib/types'
-import { formatNumber } from '@/lib/utils'
+import { cn, formatNumber } from '@/lib/utils'
 import { RELEASE_CERTAINTY_LABEL, formatReleaseGroupLabel, formatTargetDate, type ResolvedReleaseSchedule } from './release-schedule-preview'
 import './draft-board.css'
 import { DraftSampleProgress } from './DraftSampleProgress'
@@ -189,6 +189,7 @@ function ColorDocumentButton({
   colors,
   imageChoices,
   photoUrls,
+  savedImages,
   revision,
   onSaveColors,
 }: {
@@ -196,6 +197,7 @@ function ColorDocumentButton({
   colors: DraftColorRow[]
   imageChoices: DraftSpecs['colorImageChoices']
   photoUrls: DraftSpecs['colorPhotoUrls']
+  savedImages?: readonly string[]
   revision: string
   onSaveColors: (colors: DraftColorEdit[], revision: string) => Promise<void>
 }) {
@@ -431,6 +433,7 @@ function ColorDocumentButton({
               const lifted = draggingKey === row.key
               const imageChoice = row.photoChange?.choice ?? (row.id ? imageChoices?.[row.id] : undefined)
               const photoUrl = row.photoChange ? row.photoChange.url : row.id ? photoUrls?.[row.id] : undefined
+              const provisionalPhoto = Boolean(photoUrl && (row.photoChange || !row.id || !savedImages?.includes(row.id)))
               return (
               <div
                 key={row.key}
@@ -480,6 +483,7 @@ function ColorDocumentButton({
                       className="h-7 gap-1 px-2 text-muted-foreground aria-pressed:border-primary/40 aria-pressed:bg-primary/10 aria-pressed:text-primary"
                       title={choice === 'Image' ? (photoUrl ? '사진 교체' : '사진 첨부') : '사진 없이 저장'}
                       aria-pressed={imageChoice === choice}
+                      aria-description={choice === 'Image' && provisionalPhoto ? '임시 이미지' : undefined}
                       aria-busy={choice === 'Image' && preparingPhotoKey === row.key}
                       disabled={locked}
                       onClick={() => {
@@ -491,7 +495,9 @@ function ColorDocumentButton({
                         photoInputRef.current?.click()
                       }}
                     >
-                      {choice === 'Image' && photoUrl ? <img src={photoUrl} alt="" className="size-5 rounded-sm object-contain" /> : null}
+                      {choice === 'Image' && photoUrl ? <span className={cn('relative overflow-hidden rounded-sm', provisionalPhoto && 'draft-visual-image-temporary')}>
+                        <img src={photoUrl} alt="" className="size-5 object-contain" />
+                      </span> : null}
                       {choice}
                     </Button>
                   ))}
@@ -758,7 +764,7 @@ function DraftReleaseFolderSelect({ draft, folders, readOnly, onChange }: {
   </>
 }
 
-export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releaseFolders, onChangeReleaseFolder, price, teamWork, visualBoard, informationEditorId, informationTemporaryStore, onOpen, onNextSample, onSchedule, onSaveColors, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releaseFolders, onChangeReleaseFolder, price, teamWork, visualBoard, informationEditorId, informationTemporaryStore, onOpen, onNextSample, onSchedule, onSaveColors, onSharedPhotoChange, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
   readOnly?: boolean
   draft: ProductDraft; schedule: ResolvedReleaseSchedule | undefined; brand: Brand | undefined
   releaseFolders: Pick<Season, 'id' | 'name' | 'releaseTiming'>[]
@@ -771,6 +777,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
   onSchedule: () => void
   onSaveColors: (colors: DraftColorEdit[], revision: string) => Promise<void>
   onRenameProduct: (field: 'nameKo' | 'nameEn', name: string) => Promise<void>
+  onSharedPhotoChange: (saved?: { colorId: string; photo: string }) => Promise<void>
   onRenameColor: (colorId: string, name: string) => Promise<void>
   onSaveSheetValue: SaveColorSpec
   onSaveSpecDocument: (value: string, temporaryRevision?: string) => Promise<void>
@@ -920,6 +927,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
           colors={draft.colors}
           imageChoices={draft.specs.colorImageChoices}
           photoUrls={draft.specs.colorPhotoUrls}
+          savedImages={visualBoard.status?.saved_images}
           revision={draft.updatedAt}
           onSaveColors={onSaveColors}
         />
@@ -1019,6 +1027,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
         edits={informationEdits} onEditsChange={updateInformationEdits}
         draft={draft} field={information.field} colorId={information.colorId} readOnly={readOnly} fromVisual={fromVisual}
         onSave={onSaveSheetValue}
+        onSharedPhotoChange={onSharedPhotoChange}
         onSaveSpecDocument={onSaveSpecDocument}
         onFieldChange={field => setInformation(current => current && { ...current, field })}
         onClose={closeInformation} />

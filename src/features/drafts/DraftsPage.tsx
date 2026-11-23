@@ -47,7 +47,7 @@ import { DraftMdOptionsProvider } from './DraftMdTeamCell'
 import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
 import { useDraftPriceRequests } from './useDraftPriceRequests'
 import { useDraftTeamWork } from './use-draft-team-work'
-import { useDraftVisualBoard } from './use-draft-visual-board'
+import { draftVisualBoardKey, useDraftVisualBoard } from './use-draft-visual-board'
 import {
   formatReleaseGroupLabel,
   isUnassignedReleaseFolder,
@@ -729,6 +729,18 @@ export function CompanyDraftsPage() {
                     onSaveColors={async (rows, revision) => {
                       await queueDraftSave(draft.id, 'draft_save_colors', (current, context) =>
                         saveDraftColors(current, rows, revision, context))
+                      if (rows.length !== draft.colors.length || rows.some(row => row.photoChange)) {
+                        await Promise.all([
+                          queryClient.invalidateQueries({ queryKey: draftVisualBoardKey(profileId) }),
+                          queryClient.invalidateQueries({ queryKey: ['draft-visual-content', profileId, draft.id] }),
+                        ])
+                      }
+                    }}
+                    onSharedPhotoChange={async () => {
+                      await Promise.all([
+                        queryClient.invalidateQueries({ queryKey: ['product-drafts'] }),
+                        queryClient.invalidateQueries({ queryKey: ['product-draft', draft.id] }),
+                      ])
                     }}
                     onRenameProduct={async (field, name) => {
                       await saveDraftChange(draft.id, (current) => {

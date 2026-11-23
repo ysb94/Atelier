@@ -11,7 +11,7 @@ type Entry =
   | { kind: 'assignees'; payload: string[] }
 
 export type DraftVisualContent = Entry & { entry_key: string; revision: string }
-export type DraftVisualChange = Entry & { entry_key: string; revision: string | null }
+export type DraftVisualChange = Entry & { entry_key: string; revision: string | null; draft_revision?: string }
 
 export type DraftVisualStatus = {
   draft_id: string

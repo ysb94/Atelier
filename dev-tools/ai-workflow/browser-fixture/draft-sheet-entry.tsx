@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import { DraftSheetRow } from '@/features/drafts/DraftSheetRow'
 import { DraftSheetColumns } from '@/features/drafts/DraftSheetColumns'
 import { DraftMdOptionsProvider } from '@/features/drafts/DraftMdTeamCell'
 import { useDraftTeamWork } from '@/features/drafts/use-draft-team-work'
-import { useDraftVisualBoard } from '@/features/drafts/use-draft-visual-board'
+import { draftVisualBoardKey, useDraftVisualBoard } from '@/features/drafts/use-draft-visual-board'
 import { resolveReleaseSchedule } from '@/features/drafts/release-schedule-preview'
 import { emptyDraftInput, newColorRow } from '@/lib/drafts/empty-draft'
 import { normalizeColorSpecs, writeColorSpec, type SaveColorSpec } from '@/lib/drafts/color-spec'
@@ -47,6 +47,7 @@ const temporaryStore: DraftInformationTemporaryStore = {
 }
 
 function Fixture() {
+  const cache = useQueryClient()
   const [priceRequest, setPriceRequest] = useState<DraftPriceRequest>()
   const [previousPriceReply, setPreviousPriceReply] = useState<DraftPriceRequest>()
   const [readOnly,setReadOnly]=useState(false)
@@ -76,6 +77,10 @@ function Fixture() {
   const write=async()=>{setWrites(n=>n+1)}
   const saveColors = async (rows: DraftColorEdit[], revision: string) => {
     setDraft(await saveDraftColors(draft, rows, revision))
+    await Promise.all([
+      cache.invalidateQueries({ queryKey: draftVisualBoardKey('fixture-owner') }),
+      cache.invalidateQueries({ queryKey: ['draft-visual-content', 'fixture-owner', draft.id] }),
+    ])
     await write()
   }
   const saveDocument = async (note: string, revision?: string) => {
@@ -101,6 +106,13 @@ function Fixture() {
     <div className="draft-board-scroll"><table className="draft-board-table"><DraftSheetColumns /><DraftMdOptionsProvider><tbody><DraftSheetRow draft={shown} readOnly={readOnly} brand={brand} schedule={savedRelease?resolveReleaseSchedule(shown,releaseSeasonMap,[],{}):{group:{id:'group',brandId:'fixture-brand',name:'11월 출시',releaseTiming:''},targetDate:'2026-11-03',certainty:'confirmed',brandId:null,isPreview:false}}
       releaseFolders={releaseFolders} onChangeReleaseFolder={async seasonId => { setDraft(await saveDraftReleaseFolder(draft, seasonId)) }}
       informationEditorId="fixture-owner" informationTemporaryStore={temporaryStore} teamWork={teamWork.forDraft(draft.id)} visualBoard={visualBoard.forDraft(draft.id)}
+      onSharedPhotoChange={async saved => {
+        if (!saved) return
+        setDraft(current => ({ ...current, specs: { ...current.specs,
+          colorImageChoices: { ...current.specs.colorImageChoices, [saved.colorId]: 'Image' },
+          colorPhotoUrls: { ...current.specs.colorPhotoUrls, [saved.colorId]: saved.photo },
+        } }))
+      }}
       price={{
         latest: priceRequest, reply: priceRequest?.answeredAt ? priceRequest : previousPriceReply,
         loading: false, error: '', retry: () => {},

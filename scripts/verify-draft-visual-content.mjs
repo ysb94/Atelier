@@ -27,8 +27,10 @@ try {
     'supabase/tests/department_work_fixture.sql',
     'supabase/migrations/20261027044909_department_work_access.sql',
     'supabase/migrations/20261118062623_draft_information_temporary.sql',
+    'supabase/migrations/20261118071459_save_draft_colors.sql',
     'supabase/migrations/20261122161836_draft_visual_html.sql',
     'supabase/migrations/20261123053353_draft_visual_assignments_and_status.sql',
+    'supabase/migrations/20261123054744_draft_shared_color_photos.sql',
   ]) await db.exec(await readFile(file, 'utf8'))
   const otherCompany = crypto.randomUUID()
   await db.query('insert into public.companies(id) values($1),($2)', [company, otherCompany])
@@ -52,6 +54,10 @@ try {
   const list = async () => (await db.query(
     'select kind,entry_key,revision,payload from public.draft_visual_content where draft_id=$1 order by kind,entry_key', [draft])).rows
   const change = (kind, entry_key, payload, revision = null) => ({ kind, entry_key, payload, revision })
+  const readShared = async () => (await db.query(
+    'select updated_at::text revision, specs from public.product_drafts where id=$1', [draft])).rows[0]
+  const saveColors = async (revision, photo) => db.query('select public.save_draft_colors($1,$2,$3)',
+    [draft, revision, JSON.stringify([{ id: black, name: '블랙', imageChoice: photo ? 'Image' : 'None', photoUrl: photo }])])
 
   const temporary = crypto.randomUUID()
   await db.query("insert into public.draft_information_temporary(draft_id,editor_id,field,color_id,revision,edits) values($1,$2,'html',$3,$4,$5)",
@@ -76,6 +82,7 @@ try {
     change('color-html', black, '오래된 편집본'),
   ]), { code: '40001' })
   assert.deepEqual(await list(), [body, photo, vendor], 'A later conflict rolls back the entire request')
+  assert.equal((await readShared()).specs.colorPhotoUrls[ivory], photo.payload)
 
   const existing = (await db.query('select updated_at,specs from public.product_drafts where id=$1', [draft])).rows[0]
   await db.query("select public.save_product_draft($1,null,$2,$3,$4,'[]')",
@@ -130,7 +137,10 @@ try {
   assert.deepEqual((await status()).temporary_images, [], 'Another editor cannot see an image working copy')
   await db.query(imageWorkingCopy, [draft, operator, black, crypto.randomUUID(), { image: { source: '', text: image } }])
   await role(author)
-  await save([change('color-photo', black, image)], imageTemporary)
+  const sharedBeforeFinal = await readShared()
+  const [blackFinal] = await save([{ ...change('color-photo', black, image), draft_revision: sharedBeforeFinal.revision }], imageTemporary)
+  assert.equal((await readShared()).specs.colorPhotoUrls[black], image)
+  assert.equal((await readShared()).specs.colorImageChoices[black], 'Image')
   assert.deepEqual((await status()).temporary_images, [])
   assert.deepEqual((await status()).saved_images, [black])
   await role(operator)
@@ -138,9 +148,32 @@ try {
   await role(other)
   assert.deepEqual((await status()).assignee_ids, [visualOne, visualTwo])
   await assert.rejects(save([change('assignees', 'team', [], group.revision)]), { code: '42501' })
+  await assert.rejects(saveColors((await readShared()).revision, image), { code: '42501' })
+  await assert.rejects(db.query('select app.expire_draft_visual_photos($1,$2)', [draft, [black]]), { code: '42501' })
+  await role(author)
+  const finalRevision = (await readShared()).revision
+  await saveColors(finalRevision, image)
+  assert.deepEqual((await status()).saved_images, [], 'Reuploading identical bytes through COLOR is provisional')
+  assert.equal((await list()).some(row => row.kind === 'color-photo'), false)
+  assert.equal((await readShared()).specs.colorPhotoUrls[black], image)
+  await assert.rejects(save([{ ...change('color-photo', black, image, blackFinal.revision), draft_revision: finalRevision }]), { code: '40001' })
+  const replacement = 'data:image/png;base64,Yg=='
+  const beforeReplacement = (await readShared()).revision
+  await saveColors(beforeReplacement, replacement)
+  await assert.rejects(save([{ ...change('color-photo', black, image), draft_revision: beforeReplacement }]), { code: '40001' })
+  assert.equal((await readShared()).specs.colorPhotoUrls[black], replacement)
+  await save([{ ...change('color-photo', black, replacement), draft_revision: (await readShared()).revision }])
+  assert.deepEqual((await status()).saved_images, [black])
+  await saveColors((await readShared()).revision, null)
+  assert.deepEqual((await status()).saved_images, [])
+  assert.equal((await readShared()).specs.colorPhotoUrls[black], undefined)
+  assert.equal((await readShared()).specs.colorImageChoices[black], 'None')
+  await db.exec('reset role')
+  const retired = (await db.query("select photo_current,payload from public.draft_visual_content where draft_id=$1 and entry_key=$2 and kind='color-photo'", [draft, black])).rows[0]
+  assert.deepEqual(retired, { photo_current: false, payload: replacement }, 'The replaced final file remains in storage')
   await role(outsider)
   assert.equal(await status(), undefined)
-  console.log('Draft Visual DB: access, private Image/HTML drafts, saved status, team-only assignments, revision conflicts and lifecycle passed')
+  console.log('Draft Visual DB: access, private drafts, shared COLOR images, saved status, team assignments and conflicts passed')
 } finally {
   await db.close()
 }

@@ -567,7 +567,7 @@ export async function saveDraftColors(
     if (choice) choices[color.id] = choice
     if (choice === 'Image' && photo) photos[color.id] = photo
     const change = { id: color.id, name: color.name }
-    if (!photoChange || (choice === previousChoice && (photo ?? undefined) === previousPhoto)) return change
+    if (!photoChange) return change
     return { ...change, imageChoice: photoChange.choice, photoUrl: photoChange.url }
   })
 
