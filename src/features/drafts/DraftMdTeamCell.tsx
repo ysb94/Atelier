@@ -130,8 +130,8 @@ function MdPriceInput({ label, value, disabled, onChange }: {
     }} />
 }
 
-export function DraftMdTeamCell({ draft, readOnly, actorId, teamWork }: {
-  draft: ProductDraft; readOnly: boolean; actorId?: string; teamWork: DraftTeamWork
+export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork }: {
+  draft: ProductDraft; readOnly: boolean; hidden: boolean; actorId?: string; teamWork: DraftTeamWork
 }) {
   const catalog = useContext(DraftMdOptionsContext)
   const [editingArrival, setEditingArrival] = useState(false)
@@ -228,7 +228,7 @@ export function DraftMdTeamCell({ draft, readOnly, actorId, teamWork }: {
   }
 
   return (
-    <td className="draft-sheet-md-cell">
+    <td className="draft-sheet-md-cell" hidden={hidden}>
       <div className="draft-md-layout">
         <div className="draft-md-order">
           <div className="draft-color-pad justify-center">

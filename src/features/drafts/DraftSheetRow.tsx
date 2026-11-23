@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEventHandler, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEventHandler, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { FileText, GripVertical, Heart, ImageOff, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
 import { BrandAvatar } from '@/components/brand/BrandAvatar'
@@ -29,7 +29,9 @@ import { DraftPriceRequestButton, type DraftPriceControls } from './DraftPriceRe
 import { DraftInformationPanel } from './DraftInformationPanel'
 import type { DraftInformationPanelField, DraftVisualInformationField } from './draft-information-tabs'
 import { DraftMdTeamCell } from './DraftMdTeamCell'
-import { DraftVisualAmdCells } from './DraftVisualAmdCells'
+import { DraftVisualCell } from './DraftVisualCell'
+import { DraftAmdCell } from './DraftAmdCell'
+import { DEFAULT_DRAFT_SHEET_LAYOUT, type DraftSheetColumnId, type DraftSheetLayout } from './draft-sheet-layout'
 import type { DraftTeamWork } from './use-draft-team-work'
 import type { DraftVisualBoardRow } from './use-draft-visual-board'
 
@@ -764,8 +766,9 @@ function DraftReleaseFolderSelect({ draft, folders, readOnly, onChange }: {
   </>
 }
 
-export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releaseFolders, onChangeReleaseFolder, price, teamWork, visualBoard, informationEditorId, informationTemporaryStore, onOpen, onNextSample, onSchedule, onSaveColors, onSharedPhotoChange, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, layout = DEFAULT_DRAFT_SHEET_LAYOUT, schedule, brand, releaseFolders, onChangeReleaseFolder, price, teamWork, visualBoard, informationEditorId, informationTemporaryStore, onOpen, onNextSample, onSchedule, onSaveColors, onSharedPhotoChange, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
   readOnly?: boolean
+  layout?: DraftSheetLayout
   draft: ProductDraft; schedule: ResolvedReleaseSchedule | undefined; brand: Brand | undefined
   releaseFolders: Pick<Season, 'id' | 'name' | 'releaseTiming'>[]
   onChangeReleaseFolder: (seasonId: string | null) => Promise<void>
@@ -861,8 +864,9 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
     })
   }
 
-  return <><tr className="draft-sheet-row">
-    <td><div className="draft-sheet-image-cell">
+  const hidden = new Set(layout.filter(column => !column.visible).map(column => column.id))
+  const cells: Record<DraftSheetColumnId, ReactNode> = {
+    brand: <td className="draft-sheet-brand-cell" hidden={hidden.has('brand')}><div className="draft-sheet-image-cell">
       <DraftReleaseFolderSelect draft={draft} folders={releaseFolders} readOnly={readOnly} onChange={onChangeReleaseFolder} />
       <DraftPhoto src={draft.imageUrl} name={name === '이름 미정' ? draft.draftNo : name} onOpen={onOpen} />
       <div className="draft-sheet-names">
@@ -900,8 +904,8 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
           {schedule?.group && <div className="draft-sheet-schedule">{formatReleaseGroupLabel(schedule.group)}{schedule.certainty ? ` · ${RELEASE_CERTAINTY_LABEL[schedule.certainty]}` : ''}{schedule.targetDate ? ` · ${formatTargetDate(schedule.targetDate)}` : ''}{schedule.isPreview ? ' · 미리보기' : ''}</div>}
         </details>
       )}
-    </div></td>
-    <td>
+    </div></td>,
+    sample: <td hidden={hidden.has('sample')}>
       {registeredDay ? <p className="draft-sheet-registered">등록일 : {registeredDay}</p> : null}
       {(draft.status !== 'open' || draft.held) && <div className="draft-sheet-status">{draft.status !== 'open' ? DRAFT_STATUS_LABEL[draft.status] : ''}{draft.held ? ' · 보류' : ''}</div>}
       {orders.length > 0 ? (
@@ -915,12 +919,12 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
       ) : (
         <div className="draft-sheet-actions draft-sheet-sample-launch"><SampleWorkOrderButton readOnly={readOnly} onUpload={onUploadSampleWorkOrder} onOpen={onOpen} /></div>
       )}
-    </td>
-    <td className={`draft-sheet-price-cell${priceAmounts && hasColor ? ' has-reply' : ''}`}>
+    </td>,
+    price: <td className={`draft-sheet-price-cell${priceAmounts && hasColor ? ' has-reply' : ''}`} hidden={hidden.has('price')}>
       <DraftPriceRequestButton readOnly={readOnly} hasColors={hasColor} colors={draft.colors} missingColors={missingPriceColors} controls={price}
         confirmedRequestId={draft.specs.confirmedPriceRequestId} />
-    </td>
-    <td>
+    </td>,
+    color: <td hidden={hidden.has('color')}>
       <div className="draft-color-pad draft-sheet-color-tools">
         <ColorDocumentButton
           readOnly={readOnly}
@@ -961,8 +965,8 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
           )
         }) : <ColorLine index={0}><span className="draft-sheet-muted">컬러 미정</span></ColorLine>}
       </div>
-    </td>
-    <td>
+    </td>,
+    information: <td hidden={hidden.has('information')}>
       <div className="draft-color-pad" />
       <div className="draft-sheet-information grid w-fit grid-cols-[max-content_auto]">
         <div className="draft-color-lines">
@@ -1012,16 +1016,21 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
             onClick={event => setInformation(documentOpen ? null : { anchor: event.currentTarget, colorId: null, field: 'specDoc' })} />
         </div>
       </div>
-    </td>
-    <DraftVisualAmdCells key={`${informationEditorId ?? ''}:${readOnly}:visual-amd`} colors={draft.colors} colorPhotos={draft.specs.colorPhotoUrls}
-      readOnly={readOnly} teamWork={teamWork} visualBoard={visualBoard}
+    </td>,
+    visual: <DraftVisualCell key={`${informationEditorId ?? ''}:${readOnly}`} colors={draft.colors} colorPhotos={draft.specs.colorPhotoUrls}
+      hidden={hidden.has('visual')} readOnly={readOnly} visualBoard={visualBoard}
       panelId={informationId} activeTrigger={information?.visualTrigger ? { colorId: information.colorId, field: information.visualTrigger } : null}
       onOpenVisualTab={(anchor, colorId, field) => setInformation(current =>
-        current?.anchor === anchor && current.field === field ? null : { anchor, colorId, field, visualTrigger: field })} />
-    <DraftMdTeamCell key={`${informationEditorId ?? ''}:${readOnly}`} draft={draft} readOnly={readOnly} actorId={informationEditorId} teamWork={teamWork} />
-    <td />
+        current?.anchor === anchor && current.field === field ? null : { anchor, colorId, field, visualTrigger: field })} />,
+    amd: <DraftAmdCell key={`${informationEditorId ?? ''}:${readOnly}`} colors={draft.colors} hidden={hidden.has('amd')} readOnly={readOnly} teamWork={teamWork} />,
+    md: <DraftMdTeamCell key={`${informationEditorId ?? ''}:${readOnly}`} draft={draft} hidden={hidden.has('md')} readOnly={readOnly} actorId={informationEditorId} teamWork={teamWork} />,
+    ect: <td hidden={hidden.has('ect')} />,
+  }
+
+  return <><tr className="draft-sheet-row">
+      {layout.map(({ id }) => <Fragment key={id}>{cells[id]}</Fragment>)}
     </tr>
-    {information && (
+    {information && !hidden.has(fromVisual ? 'visual' : 'information') && (
       <DraftInformationPanel key={informationEditorId} id={informationId} anchor={information.anchor}
         editorId={informationEditorId} temporaryStore={informationTemporaryStore} teamWork={teamWork}
         edits={informationEdits} onEditsChange={updateInformationEdits}

@@ -45,9 +45,10 @@ function AmdNumbers({ name, fields, locked, saving, onSave, onReset }: {
   </>
 }
 
-export function DraftAmdCell({ colors, readOnly, teamWork }: {
+export function DraftAmdCell({ colors, readOnly, hidden, teamWork }: {
   colors: DraftColorRow[]
   readOnly: boolean
+  hidden: boolean
   teamWork: DraftTeamWork
 }) {
   const amd = teamWork.records?.get('amd') as DraftTeamRecord<'amd'> | undefined
@@ -79,7 +80,7 @@ export function DraftAmdCell({ colors, readOnly, teamWork }: {
 
   function clearError() { setError('') }
 
-  return <td className="draft-sheet-amd-cell">
+  return <td className="draft-sheet-amd-cell" hidden={hidden}>
     <div className="draft-color-pad draft-amd-header">
       <AmdNumbers name="모음전 번호" fields={[{ label: '모음전 번호', placeholder: '모음전 no.', value: saved.collection }]}
         locked={locked} saving={saving === 'collection'} onReset={clearError}

@@ -18,15 +18,7 @@
 .draft-folder-editor button[type=submit]{border-color:#b89952;background:#f1dfab;color:#59400e}
 .draft-folder-editor button:disabled{cursor:not-allowed;opacity:.6}
 .draft-folder-editor p{flex-basis:100%;margin:0;font-size:11px;color:#c60920}
-.draft-board-table{width:100%;min-width:2515px;table-layout:fixed;border-collapse:collapse;font-size:12px;line-height:1.6;color:#343a40}
-.draft-board-table col.draft-column-brand{width:210px}
-.draft-board-table col.draft-column-price{width:100px}
-.draft-board-table col.draft-column-color{width:160px}
-.draft-board-table col.draft-column-information{width:300px}
-.draft-board-table col.draft-column-visual{width:290px}
-.draft-board-table col.draft-column-amd{width:255px}
-.draft-board-table col.draft-column-md{width:585px}
-.draft-board-table col.draft-column-ect{width:265px}
+.draft-board-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:12px;line-height:1.6;color:#343a40}
 .draft-board-table th{height:44px;padding:10px 16px;font-size:12px;font-weight:500;letter-spacing:.025em;text-align:left;color:white;background:#c60920}
 .draft-board-table th.draft-column-visual{@apply bg-blue-900/75; padding-inline:38px}
 .draft-board-table th.draft-column-amd{@apply bg-green-800/80; text-align:center}
@@ -34,8 +26,9 @@
 .draft-board-table th.draft-column-ect{text-align:center}
 .draft-sheet-row{--draft-sheet-cell-block-padding:24px;border-bottom:1px solid #d88489}
 .draft-sheet-row>td{padding:var(--draft-sheet-cell-block-padding) 18px;vertical-align:top;background:#fff;overflow-wrap:anywhere}
-.draft-sheet-row>td:first-child{padding:6px 16px 12px}
-.draft-sheet-row>td+td{border-left:1px solid #f0efec}
+.draft-sheet-row>td[hidden]{display:none}
+.draft-sheet-row>td.draft-sheet-brand-cell{padding:6px 16px 12px}
+.draft-sheet-row>td:not([hidden])~td:not([hidden]){border-left:1px solid #f0efec}
 .draft-sheet-row p,.draft-sheet-row dl,.draft-sheet-row dd{margin:0}
 .draft-sheet-muted{color:#8a8e94;font-size:11px}
 .draft-sheet-row p.draft-sheet-registered{margin:0 0 4px;font-size:12px;font-weight:600;line-height:1.4;color:#1f2328;font-variant-numeric:tabular-nums}

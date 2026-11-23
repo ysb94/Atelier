@@ -42,7 +42,9 @@ import { DraftBrandScopeBar, countScheduleRows } from './DraftBrandScopeBar'
 import { DraftFolderBar, DraftFolderHeading } from './DraftFolderBar'
 import { matchesDraftFolder } from './draft-folder-filter'
 import { DraftSheetRow, type DraftConfirmFlag } from './DraftSheetRow'
-import { DRAFT_SHEET_COLUMN_COUNT, DraftSheetColumns } from './DraftSheetColumns'
+import { DraftSheetColumnSettings } from './DraftSheetColumnSettings'
+import { DraftSheetTable } from './DraftSheetTable'
+import { useDraftSheetLayout } from './draft-sheet-layout'
 import { DraftMdOptionsProvider } from './DraftMdTeamCell'
 import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
 import { useDraftPriceRequests } from './useDraftPriceRequests'
@@ -122,6 +124,8 @@ export function CompanyDraftsPage() {
   ) as DraftOwnerScope
   const companyId = profile?.companyId ?? DEFAULT_COMPANY_ID
   const profileId = profile?.id
+  const sheetLayout = useDraftSheetLayout(profileId)
+  const visibleColumnCount = sheetLayout.filter(column => column.visible).length
   const brandIdBySlug = useMemo(
     () => new Map(brands.map((item) => [item.slug, item.id])),
     [brands],
@@ -649,21 +653,22 @@ export function CompanyDraftsPage() {
         <Button type="button" size="sm" variant="outline" disabled={visualBoard.query.isFetching}
           onClick={() => { void visualBoard.query.refetch() }}>Visual 다시 조회</Button>
       </div>}
+      <div className="mb-2 flex justify-end">
+        <DraftSheetColumnSettings key={profileId} accountId={profileId} layout={sheetLayout} />
+      </div>
       <div className="draft-board-scroll" role="region" aria-label={showingCompleted ? '완료된 기획안 목록' : '기획안 목록'} tabIndex={0}>
-        <table className="draft-board-table">
-          <caption className="sr-only">기획안별 샘플, 상품 정보 및 팀별 진행 현황</caption>
-          <DraftSheetColumns />
+        <DraftSheetTable layout={sheetLayout} caption="기획안별 샘플, 상품 정보 및 팀별 진행 현황">
           <DraftMdOptionsProvider key={profile?.id}><tbody>
             {showingCompleted ? (
               <tr>
-                <td colSpan={DRAFT_SHEET_COLUMN_COUNT} className="bg-white px-4 py-10 text-center text-sm text-muted-foreground">
+                <td colSpan={visibleColumnCount} className="bg-white px-4 py-10 text-center text-sm text-muted-foreground">
                   이 폴더에 완료된 기획안이 없습니다.
                 </td>
               </tr>
             ) : loading ? (
               <tr>
                 <td
-                  colSpan={DRAFT_SHEET_COLUMN_COUNT}
+                  colSpan={visibleColumnCount}
                   className="bg-white px-4 py-10 text-center text-sm text-muted-foreground"
                 >
                   불러오는 중...
@@ -672,7 +677,7 @@ export function CompanyDraftsPage() {
             ) : visible.length === 0 ? (
               <tr>
                 <td
-                  colSpan={DRAFT_SHEET_COLUMN_COUNT}
+                  colSpan={visibleColumnCount}
                   className="bg-white px-4 py-10 text-center text-sm text-muted-foreground"
                 >
                   {emptyMessage(
@@ -693,6 +698,7 @@ export function CompanyDraftsPage() {
                 return (
                   <DraftSheetRow
                     key={draft.id}
+                    layout={sheetLayout}
                     draft={draft}
                     teamWork={teamWork.forDraft(draft.id)}
                     visualBoard={visualBoard.forDraft(draft.id)}
@@ -879,7 +885,7 @@ export function CompanyDraftsPage() {
               })
             )}
           </tbody></DraftMdOptionsProvider>
-        </table>
+        </DraftSheetTable>
       </div>
 
       <DraftReleaseScheduleDialog

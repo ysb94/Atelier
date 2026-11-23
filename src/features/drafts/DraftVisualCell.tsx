@@ -2,23 +2,21 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { DraftColorRow } from '@/lib/types'
 import { DRAFT_VISUAL_INFORMATION_TABS, type DraftVisualInformationField } from './draft-information-tabs'
-import { DraftAmdCell } from './DraftAmdCell'
-import type { DraftTeamWork } from './use-draft-team-work'
 import { DraftVisualAssignees } from './DraftVisualAssignees'
 import type { DraftVisualBoardRow } from './use-draft-visual-board'
 
-export function DraftVisualAmdCells({ colors, colorPhotos, readOnly, panelId, activeTrigger, onOpenVisualTab, teamWork, visualBoard }: {
+export function DraftVisualCell({ colors, colorPhotos, readOnly, hidden, panelId, activeTrigger, onOpenVisualTab, visualBoard }: {
   colors: DraftColorRow[]
   colorPhotos?: Readonly<Record<string, string>>
   readOnly: boolean
+  hidden: boolean
   panelId: string
   activeTrigger: { colorId: string | null; field: DraftVisualInformationField } | null
   onOpenVisualTab: (anchor: HTMLButtonElement, colorId: string, field: DraftVisualInformationField) => void
-  teamWork: DraftTeamWork
   visualBoard: DraftVisualBoardRow
 }) {
-  return <>
-    <td className="draft-sheet-visual-cell">
+  return (
+    <td className="draft-sheet-visual-cell" hidden={hidden}>
       <DraftVisualAssignees board={visualBoard} readOnly={readOnly} />
       <div className="draft-color-lines">
         {colors.map((color, index) => {
@@ -44,6 +42,5 @@ export function DraftVisualAmdCells({ colors, colorPhotos, readOnly, panelId, ac
         })}
       </div>
     </td>
-    <DraftAmdCell colors={colors} readOnly={readOnly} teamWork={teamWork} />
-  </>
+  )
 }
