@@ -333,6 +333,21 @@ try {
   const lotteToggle = lotte.locator('xpath=ancestor::div[button[@aria-expanded]][1]')
     .getByRole('button', { name: /^(접기|펼치기)$/ })
   const incheon = page.getByRole('button', { name: '인천공항점', exact: true })
+  const font = (label) => label.evaluate((element) => {
+    const { fontFamily, fontSize, fontWeight } = getComputedStyle(element)
+    return [fontFamily, fontSize, fontWeight]
+  })
+  assert.deepEqual(await font(fulfillment), await font(distribution))
+  assert.deepEqual(await font(lotte), await font(distribution))
+  const companyNameStart = await lotte.evaluate((element) =>
+    element.getBoundingClientRect().left + parseFloat(getComputedStyle(element).paddingLeft))
+  assert.ok(Math.abs(companyNameStart - (await distribution.boundingBox()).x) < 1)
+  const leafMarker = distribution.locator('xpath=ancestor::button[1]/preceding-sibling::span[@aria-hidden="true"]')
+  await leafMarker.locator('span').waitFor()
+  const { x: dotX, width: dotWidth } = await leafMarker.boundingBox()
+  const { x: arrowX, width: arrowWidth } = await lotteToggle.boundingBox()
+  assert.equal(dotX, arrowX)
+  assert.equal(dotWidth, arrowWidth)
   assert.match(await lotte.innerText(), /롯데면세점\s*1곳/)
   await incheon.waitFor()
   await lotteToggle.click()

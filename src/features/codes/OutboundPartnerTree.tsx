@@ -1,6 +1,9 @@
 import { useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 
+const ROW_CLASS = 'flex h-8 min-w-0 items-center text-sm font-medium'
+const MARKER_CLASS = 'inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground'
+
 function TreeItem({
   last,
   children,
@@ -72,12 +75,12 @@ export function TreeBranch({
 
   const body = (
     <>
-      <div className="flex h-8 min-w-0 items-center">
+      <div className={ROW_CLASS}>
         <button
           type="button"
           aria-expanded={open}
           aria-label={open ? '접기' : '펼치기'}
-          className="inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground"
+          className={MARKER_CLASS}
           onClick={toggle}
         >
           {open ? (
@@ -112,6 +115,14 @@ export function TreeLeaf({
   root?: boolean
   children: ReactNode
 }) {
-  if (root) return children
-  return <TreeItem last={last}>{children}</TreeItem>
+  const row = (
+    <div className={ROW_CLASS}>
+      <span aria-hidden className={MARKER_CLASS}>
+        <span className="size-1 rounded-full bg-current" />
+      </span>
+      {children}
+    </div>
+  )
+  if (root) return row
+  return <TreeItem last={last}>{row}</TreeItem>
 }

@@ -185,7 +185,7 @@ export function OutboundPartnerCompanyNode({
     >
       <Input
         autoFocus
-        className="h-7 text-xs font-semibold"
+        className="h-7 font-medium"
         value={draft}
         disabled={renameMutation.isPending}
         aria-label="업체명"
@@ -204,7 +204,7 @@ export function OutboundPartnerCompanyNode({
     </form>
   ) : (
     <div
-      className="w-full truncate px-1 text-xs font-semibold"
+      className="w-full truncate px-1"
       title="클릭해서 접기 · 더블클릭해서 이름 바꾸기"
       onDoubleClick={(event) => {
         event.preventDefault()
@@ -213,7 +213,7 @@ export function OutboundPartnerCompanyNode({
       }}
     >
       {company.groupName}
-      <span className="ml-1 font-normal text-muted-foreground">
+      <span className="ml-1 text-xs font-normal text-muted-foreground">
         {company.units.length}곳
       </span>
     </div>

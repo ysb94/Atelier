@@ -214,7 +214,7 @@ function SectionList({
             last={last}
             label={
               <div className="flex min-w-0 items-center gap-1">
-                <p className="min-w-0 flex-1 truncate px-1 text-xs font-semibold text-muted-foreground">
+                <p className="min-w-0 flex-1 truncate px-1">
                   {label}
                 </p>
                 {allowAdd && section.folderId ? (
