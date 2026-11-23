@@ -40,9 +40,10 @@ export function getSupabase() {
   const base = releaseClient()
   return { ...base, from(table: string) {
     if (table !== 'attendance_clock_ins' && table !== 'company_leave_requests') return base.from(table)
-    const filters: Array<(row: Record<string, unknown>) => boolean> = []; let offset = 0, count = 500
+    const filters: Array<(row: Record<string, unknown>) => boolean> = []; let offset = 0, count = 500, optionalRow = false
     let inserted: Record<string, unknown> | null = null
-    const query = { select() { return query }, order() { return query },
+    const query = { select() { return query }, order() { return query }, abortSignal() { return query },
+      maybeSingle() { optionalRow = true; return query },
       insert(input: Record<string, unknown>) { inserted = input; return query }, single() { return query },
       eq(field: string, value: unknown) { filters.push(row => row[field] === value); return query },
       gte(field: string, value: string) { filters.push(row => String(row[field]) >= value); return query },
@@ -56,7 +57,8 @@ export function getSupabase() {
           return Promise.resolve({ data: row, error: null }).then(resolve)
         }
         const rows = (table === 'attendance_clock_ins' ? state.rows : state.requests) as Record<string, unknown>[]
-        return Promise.resolve({ data: rows.filter(row => filters.every(filter => filter(row))).slice(offset, offset + count), error: null }).then(resolve) },
+        const matching = rows.filter(row => filters.every(filter => filter(row))).slice(offset, offset + count)
+        return Promise.resolve({ data: optionalRow ? matching[0] ?? null : matching, error: null }).then(resolve) },
     }; return query
   }, rpc(name: string, args: Record<string, unknown> = {}) {
     const state = read(), today = koreaDateKey(), actor = fixtureProfile().id
