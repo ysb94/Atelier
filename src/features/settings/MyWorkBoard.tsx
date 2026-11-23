@@ -1,6 +1,8 @@
-import { useState, type DragEvent } from 'react'
-import { CircleCheck, CircleDashed, CircleDot, GripVertical, MessageSquare } from 'lucide-react'
+import { useId, useRef, useState, type DragEvent, type FormEvent } from 'react'
+import { CircleCheck, CircleDashed, CircleDot, GripVertical, MessageSquare, Plus } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { createPreviewWork, type WorkItem, type WorkState } from '@/features/work-requests/my-work-preview-data'
 import { cn } from '@/lib/utils'
 
@@ -27,6 +29,24 @@ export function MyWorkBoard() {
   const [draggedId, setDraggedId] = useState<string | null>(null)
   const [target, setTarget] = useState<DropTarget | null>(null)
   const [announcement, setAnnouncement] = useState('')
+  const [draftTitle, setDraftTitle] = useState<string | null>(null)
+  const addFormId = useId()
+  const addButton = useRef<HTMLButtonElement>(null)
+
+  function closeAddForm() {
+    setDraftTitle(null)
+    addButton.current?.focus()
+  }
+
+  function addCard(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const title = draftTitle?.trim()
+    if (!title) return
+    const card: BoardCard = { id: crypto.randomUUID(), title, status: 'todo' }
+    setCards(current => [card, ...current])
+    setAnnouncement(`${title} · ToDo에 추가`)
+    closeAddForm()
+  }
 
   function moveCard(id: string, status: WorkState, beforeId?: string) {
     const card = cards.find(item => item.id === id)
@@ -46,7 +66,7 @@ export function MyWorkBoard() {
   }
 
   return <section className="space-y-3" aria-label="내 업무 보드">
-    <p className="text-sm text-muted-foreground">예시 카드입니다. 카드를 원하는 열로 끌어 놓아 옮겨 보세요.</p>
+    <p className="text-sm text-muted-foreground">카드를 원하는 열로 끌어 놓으세요. 카드 추가와 이동은 새로고침 전까지 유지됩니다.</p>
     <p className="sr-only" role="status">{announcement}</p>
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {columns.map(({ id, label, icon: Icon, tone }) => {
@@ -74,7 +94,27 @@ export function MyWorkBoard() {
             <span className="ml-auto min-w-6 rounded-full bg-card px-1.5 py-0.5 text-center text-xs tabular-nums text-muted-foreground">
               {items.length}
             </span>
+            {id === 'todo' && <button ref={addButton} type="button" title="업무 카드 추가" aria-label="업무 카드 추가"
+              aria-expanded={draftTitle !== null} aria-controls={draftTitle !== null ? addFormId : undefined}
+              className="grid size-7 shrink-0 place-items-center rounded-md border border-border bg-card text-primary hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              onClick={() => draftTitle === null ? setDraftTitle('') : closeAddForm()}>
+              <Plus size={16} aria-hidden="true" />
+            </button>}
           </header>
+          {id === 'todo' && draftTitle !== null && <form id={addFormId} aria-label="업무 카드 추가" onSubmit={addCard}
+            onKeyDown={event => {
+              if (event.key !== 'Escape') return
+              event.preventDefault()
+              event.stopPropagation()
+              closeAddForm()
+            }} className="mb-2.5 space-y-2 rounded-xl border border-border bg-card p-3 shadow-sm">
+            <Input autoFocus aria-label="업무 제목" placeholder="업무 제목" value={draftTitle} required maxLength={120}
+              className="h-8" onChange={event => setDraftTitle(event.currentTarget.value)} />
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="ghost" size="sm" onClick={closeAddForm}>취소</Button>
+              <Button type="submit" size="sm" disabled={!draftTitle.trim()}>추가</Button>
+            </div>
+          </form>}
           {items.length ? <ul className="space-y-2.5">
             {items.map(card => <li key={card.id} data-my-work-card={card.id} draggable
               className={cn('cursor-grab rounded-xl active:cursor-grabbing', card.id === draggedId && 'opacity-45',
