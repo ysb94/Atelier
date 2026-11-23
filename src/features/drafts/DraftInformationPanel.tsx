@@ -23,7 +23,8 @@ import {
 } from '@/lib/supabase/draft-visual-content'
 import { cn } from '@/lib/utils'
 import { DRAFT_INFORMATION_PANEL_TAB_GROUPS, type DraftInformationPanelField } from './draft-information-tabs'
-import { DRAFT_HTML_VENDORS, DraftVendorHtmlDialog } from './DraftVendorHtmlDialog'
+import { DraftVendorHtmlDialog } from './DraftVendorHtmlDialog'
+import { useDraftSabangnetPartners } from './use-draft-sabangnet-partners'
 import { draftVisualBoardKey } from './use-draft-visual-board'
 import type { DraftTeamWork } from './use-draft-team-work'
 import { DraftVisualImagePanel } from './DraftVisualImagePanel'
@@ -409,8 +410,9 @@ function vendorTemplates(rows: readonly DraftVisualContent[]) {
 
 type AmdColorCodes = DraftTeamValues['amd']['colors'][string]
 
-function VendorHtmlCode({ id, name, text, templates, amdReady, amdCodes, onPreview }: {
+function VendorHtmlCode({ id, name, text, templates, partnerNames, amdReady, amdCodes, onPreview }: {
   id: string; name: string; text: string; templates: DraftVendorHtml; onPreview: (label: string, html: string) => void
+  partnerNames: ReadonlyMap<string, string>
   amdReady: boolean; amdCodes?: AmdColorCodes
 }) {
   if (!amdReady) {
@@ -427,11 +429,10 @@ function VendorHtmlCode({ id, name, text, templates, amdReady, amdCodes, onPrevi
   }
 
   const hasBody = Boolean(text.trim())
-  const vendors = DRAFT_HTML_VENDORS.flatMap(option => {
-    const template = templates[option]
+  const vendors = Object.entries(templates).flatMap(([key, template]) => {
     if (!template || (!template.top.trim() && !template.bottom.trim())) return []
     const code = hasBody ? [template.top, text, template.bottom].filter(part => part.trim()).join('\n') : ''
-    return [{ name: option, code }]
+    return [{ key, name: partnerNames.get(key) || template.vendorName || key, code }]
   })
   if (!vendors.length) {
     return <p id={id} className="text-xs text-muted-foreground">상단 업체별 Top Buttom 등록에서 업체 HTML을 먼저 저장해 주세요.</p>
@@ -440,7 +441,7 @@ function VendorHtmlCode({ id, name, text, templates, amdReady, amdCodes, onPrevi
   return <ul id={id} aria-label={`${name} HTML 업체 목록`} className="min-w-0 divide-y divide-border rounded-md border border-border">
     {vendors.map(option => {
       const label = `${name} ${option.name}`
-      return <li key={option.name} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1 px-1.5 py-1">
+      return <li key={option.key} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1 px-1.5 py-1">
         <span className="truncate px-1 text-xs" title={option.name}>{option.name}</span>
         <InformationCopyButton label={`${label} HTML`} text={option.code} buttonText="복사" className="h-6 px-1.5 text-xs" />
         <Button type="button" size="sm" variant="outline" className="h-6 px-1.5 text-xs"
@@ -546,10 +547,11 @@ async function openHtmlPreview(title: string, html: string) {
   return true
 }
 
-function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSaveTemporary, entry, workingCopy, vendorHtml, amdReady, amdCodes, onSave }: {
+function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSaveTemporary, entry, workingCopy, vendorHtml, partnerNames, amdReady, amdCodes, onSave }: {
   color: DraftColorRow; index: number; visualPhoto?: string; colorPhoto?: string; readOnly: boolean
   canSaveTemporary: boolean
   entry?: DraftVisualContent; workingCopy?: DraftInformationTemporary; vendorHtml: DraftVendorHtml
+  partnerNames: ReadonlyMap<string, string>
   amdReady: boolean; amdCodes?: AmdColorCodes
   onSave: (text: string, revision: string | null, temporary: boolean, temporaryRevision?: string) => Promise<void>
 }) {
@@ -630,7 +632,7 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
       <Button type="button" size="sm" variant="outline" className="order-last h-6 justify-self-end px-2"
         aria-expanded={codeOpen} aria-controls={codeOpen ? codeId : undefined}
         onClick={() => setCodeOpen(open => !open)}>업체별 HTML 생성</Button>
-      {codeOpen && <VendorHtmlCode id={codeId} name={name} text={text} templates={vendorHtml}
+      {codeOpen && <VendorHtmlCode id={codeId} name={name} text={text} templates={vendorHtml} partnerNames={partnerNames}
         amdReady={amdReady} amdCodes={amdCodes} onPreview={preview} />}
     </div>}
     {!readOnly && versionChanged ? <div className="col-span-full flex flex-wrap items-center gap-2">
@@ -662,6 +664,7 @@ export function DraftInformationPanel({
   const queryKey = ['draft-information-temporary', editorId, draft.id] as const
   const locked = readOnly || fromVisual
   const visualTab = field === 'image' || field === 'html'
+  const partners = useDraftSabangnetPartners(draft.brandId, field === 'html')
   const temporaryEnabled = Boolean(editorId && (visualTab ? !readOnly : !locked))
   const visualKey = ['draft-visual-content', editorId, draft.id] as const
   const visual = useQuery({
@@ -832,7 +835,8 @@ export function DraftInformationPanel({
         </Button>
       </div>
       {field === 'html' && vendorHtmlSnapshot && !readOnly &&
-        <DraftVendorHtmlDialog preferredVendor={draft.openTypeDetail} value={vendorTemplates(vendorHtmlSnapshot)}
+        <DraftVendorHtmlDialog preferredVendor={draft.specs.openChannelTargetId ?? draft.openTypeDetail}
+          partners={partners} value={vendorTemplates(vendorHtmlSnapshot)}
           onSave={templates => saveVendorHtml(vendorHtmlSnapshot, templates)}
           onClose={() => setVendorHtmlSnapshot(undefined)} />}
       {visualTab && visual.isPending && <p role="status" className="px-4 pb-2 text-xs text-muted-foreground">비주얼 정보를 불러오는 중…</p>}
@@ -881,7 +885,7 @@ export function DraftInformationPanel({
                 visualPhoto={typeof photo?.payload === 'string' ? photo.payload : undefined}
                 colorPhoto={draft.specs.colorPhotoUrls?.[color.id]} readOnly={visualLocked || loadingTemporary}
                 amdReady={teamWork.ready} amdCodes={amd?.payload.colors[color.id]}
-                canSaveTemporary={canSaveTemporary} entry={entry} workingCopy={working} vendorHtml={templates}
+                canSaveTemporary={canSaveTemporary} entry={entry} workingCopy={working} vendorHtml={templates} partnerNames={partners.names}
                 onSave={(payload, revision, asTemporary, temporaryRevision) => asTemporary
                   ? saveTemporary('html', color.id, { html: { source: revision ?? '', text: payload } })
                   : saveVisual([{ kind: 'color-html', entry_key: color.id, payload, revision }], temporaryRevision)} />

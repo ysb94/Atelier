@@ -326,6 +326,7 @@ export type DraftSpecs = Record<DraftSpecKey, DraftSpec> & {
   colorSpecs: Record<string, DraftColorSpec>
   specDocumentConfirmed?: boolean
   proposer?: { id: string; name: string }
+  openChannelTargetId?: string | null
   confirmedPriceRequestId?: string
   colorImageChoices?: Record<string, DraftColorImageChoice>
   colorPhotoUrls?: Record<string, string>
@@ -472,16 +473,6 @@ export const DRAFT_OPEN_TYPE_OPTIONS = [
   '단독오픈',
   '동시오픈',
   '순차오픈',
-] as const
-
-export const DRAFT_OPEN_DETAIL_OPTIONS = [
-  '카카오선물하기',
-  '자사몰',
-  '무신사',
-  '29CM',
-  '지그재그',
-  '오프라인',
-  '전체',
 ] as const
 
 /** 자사 발급 바코드(88코드)와 거래처 부여 코드를 같은 구조로 다룬다 */

@@ -2,7 +2,7 @@ import { diagnosticOperation } from '@/lib/diagnostics'
 import { tracedQuery } from '@/lib/diagnostics/workflow-trace'
 import { getSupabase } from './client'
 
-export type VendorHtml = { top: string; bottom: string }
+export type VendorHtml = { top: string; bottom: string; vendorName?: string }
 export type DraftVendorHtml = Partial<Record<string, VendorHtml>>
 
 type Entry =

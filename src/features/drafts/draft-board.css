@@ -248,11 +248,9 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-md-layout .draft-md-add{width:23px;height:23px;margin-left:20px;border:1px solid #dedede;border-radius:5px;background:#f1f1f1;color:var(--color-foreground)}
 .draft-md-layout .draft-md-auto{width:41px;height:22px;border:1px solid #e1e1e1;border-radius:6px;padding:0;box-shadow:none;color:#767676;font-size:11px;font-weight:500}
 .draft-md-layout .draft-md-auto[aria-pressed=true]{border-color:var(--color-primary);color:var(--color-primary)}
-.draft-md-layout .draft-md-confirm{position:absolute;right:16px;width:41px;height:27px;border:1px solid #e1e1e1;border-radius:7px;padding:0;box-shadow:none;color:var(--color-primary);font-size:12px;font-weight:500}
-.draft-md-layout .draft-md-confirm.is-confirmed{border-color:var(--color-primary);background:var(--color-primary);color:var(--color-primary-foreground)}
 .draft-md-section.is-confirmed .draft-md-field::before{border-color:var(--color-primary);background:var(--color-primary)}
-.draft-md-listing .draft-md-confirm{top:56px}
 .draft-md-section-actions{position:absolute;right:16px}
+.draft-md-listing .draft-md-section-actions{top:56px}
 .draft-md-pricing .draft-md-section-actions{top:18px}
 .draft-md-product .draft-md-section-actions{top:9px}
 .draft-md-origin{display:grid;grid-template-columns:55px auto;min-height:22px;align-items:center;gap:10px;margin:0 0 9px 24px;font-size:13px;font-weight:500}

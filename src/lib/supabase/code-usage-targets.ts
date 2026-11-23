@@ -143,6 +143,24 @@ export async function listCodeUsageTargets(
     )
 }
 
+export async function listCodeUsageTargetOptions(brandId: string, signal: AbortSignal) {
+  const rows: Pick<TargetRow, 'id' | 'name' | 'active' | 'folder_id' | 'sort_order'>[] = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await getSupabase()
+      .from('code_usage_targets')
+      .select('id,name,active,folder_id,sort_order')
+      .eq('brand_id', brandId)
+      .order('sort_order')
+      .order('id')
+      .range(from, from + PAGE_SIZE - 1)
+      .abortSignal(signal)
+    if (error) throw error
+    rows.push(...(data ?? []))
+    if ((data?.length ?? 0) < PAGE_SIZE) break
+  }
+  return rows.sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'ko'))
+}
+
 export async function listCodeUsageTargetAliases(
   brandId: string,
 ): Promise<CodeUsageTargetAlias[]> {

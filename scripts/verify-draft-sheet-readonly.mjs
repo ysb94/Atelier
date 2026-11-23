@@ -21,7 +21,7 @@ const fixtureClient={
  resolveId(source,importer) {
    const modulePath = importer?.replaceAll('\\','/') ?? ''
    if ((/\/lib\/supabase\/client(?:\.ts)?$/.test(source.replaceAll('\\','/')) &&
-       /\/(product-drafts|profiles)\.ts$/.test(modulePath)) ||
+       /\/(product-drafts|profiles|code-usage-targets|code-usage-target-folders)\.ts$/.test(modulePath)) ||
        (source === './client' && /\/(attendance-exemptions|draft-visual-content|draft-team-work)\.ts$/.test(modulePath))) return '\0draft-color-client'
  },
  load(id) {
@@ -94,6 +94,30 @@ try{
  })
  await page.route('**/rpc/list_company_attendance_exempt', route => route.fulfill({json:{data:['fixture-md'],error:null}}))
  const teamRows=new Map()
+ const musinsaPartner=crypto.randomUUID()
+ const twentyNinePartner=crypto.randomUUID()
+ const kakaoPartner=crypto.randomUUID()
+ const outboundFolder=(id,name,parent_id=null)=>({id,name,parent_id,brand_id:'fixture-brand',normalized_name:name,sort_order:0})
+ await page.route('**/rest/v1/code_usage_target_folders?*',route=>{
+   assert.equal(new URL(route.request().url()).searchParams.get('brand_id'),'eq.fixture-brand')
+   return route.fulfill({json:[
+     outboundFolder('online','온라인'),outboundFolder('direct','직접배송','online'),
+     outboundFolder('sabangnet','사방넷','direct'),outboundFolder('offline','오프라인'),
+     outboundFolder('offline-sabangnet','사방넷','offline'),
+   ]})
+ })
+ const outboundTarget=(id,name,folder_id='sabangnet',active=true)=>({id,name,folder_id,active,brand_id:'fixture-brand',sort_order:0})
+ await page.route('**/rest/v1/code_usage_targets?*',route=>{
+   assert.equal(new URL(route.request().url()).searchParams.get('brand_id'),'eq.fixture-brand')
+   return route.fulfill({json:[
+     {...outboundTarget(musinsaPartner,'무신사'),sort_order:1},
+     {...outboundTarget(twentyNinePartner,'29CM'),sort_order:2},
+     {...outboundTarget(kakaoPartner,'카카오톡'),sort_order:3},
+     outboundTarget('inactive','비활성 업체','sabangnet',false),
+     outboundTarget('other-online','일반 온라인 업체','direct'),
+     outboundTarget('other-root','오프라인 업체','offline-sabangnet'),
+   ]})
+ })
  await page.route('**/rest/v1/draft_team_work?*',route=>{
    assert.equal(new URL(route.request().url()).searchParams.get('draft_id'),'in.(fixture)')
    return route.fulfill({json:[...teamRows.values()]})
@@ -235,7 +259,9 @@ try{
  const openType=mdCell.getByRole('combobox',{name:'오픈유형',exact:true})
  assert.equal(directoryReads,0,'The MD directory is loaded when special release controls open')
  await openType.selectOption({label:'선발매'})
- await mdCell.getByRole('combobox',{name:'진행업체',exact:true}).selectOption({label:'카카오톡'})
+ const releasePartner=mdCell.getByRole('combobox',{name:'진행업체',exact:true})
+ await releasePartner.selectOption(kakaoPartner)
+ assert.deepEqual(await releasePartner.locator('option').allTextContents(),['사방넷 업체 선택','무신사','29CM','카카오톡'])
  await mdCell.getByRole('button',{name:'발매 기간',exact:true}).click()
  await mdCell.getByLabel('시작일',{exact:true}).fill('2026-11-23')
  await mdCell.getByLabel('종료일',{exact:true}).fill('2027-02-21')
@@ -255,6 +281,12 @@ try{
  await mdCell.getByRole('button',{name:'등록 및 오픈 유형 확정',exact:true}).click()
  assert.equal(await assignee.isDisabled(),true)
  const editListing=mdCell.getByRole('button',{name:'등록 및 오픈 유형 수정',exact:true})
+ await editListing.waitFor()
+ assert.equal(teamRows.get('md-listing').payload.partnerId,kakaoPartner)
+ await page.reload({waitUntil:'domcontentloaded'})
+ await editListing.waitFor()
+ await releasePartner.locator('option:checked').filter({hasText:/^카카오톡$/}).waitFor({state:'attached'})
+ assert.equal(await releasePartner.inputValue(),kakaoPartner)
  const confirmedColor=await mdCell.locator('.draft-md-release-notice').evaluate(notice=>getComputedStyle(notice).color)
  assert.notEqual(confirmedColor,emptyDots[0])
  assert.deepEqual(await dotColors(listingDots),Array(3).fill(confirmedColor))
@@ -808,20 +840,21 @@ try{
  const vendorTop=vendorDialog.getByRole('textbox',{name:'Top HTML',exact:true})
  const vendorBottom=vendorDialog.getByRole('textbox',{name:'Buttom HTML',exact:true})
  await vendorTopButtom.click()
- await vendor.selectOption('무신사')
+ await vendor.selectOption(musinsaPartner)
+ assert.deepEqual(await vendor.locator('option').allTextContents(),['무신사','29CM','카카오톡'])
  await vendorTop.fill('<p>무신사 상단</p>')
  await vendorBottom.fill('<p>무신사 하단</p>')
- await vendor.selectOption('29CM')
+ await vendor.selectOption(twentyNinePartner)
  assert.equal(await vendorTop.inputValue(),'')
  assert.equal(await vendorBottom.inputValue(),'')
  await vendorTop.fill('<p>29CM 상단</p>')
  await vendorDialog.getByRole('button',{name:'저장',exact:true}).click()
  await vendorDialog.waitFor({state:'hidden'})
  await vendorTopButtom.click()
- await vendor.selectOption('무신사')
+ await vendor.selectOption(musinsaPartner)
  assert.equal(await vendorTop.inputValue(),'<p>무신사 상단</p>')
  assert.equal(await vendorBottom.inputValue(),'<p>무신사 하단</p>')
- await vendor.selectOption('29CM')
+ await vendor.selectOption(twentyNinePartner)
  assert.equal(await vendorTop.inputValue(),'<p>29CM 상단</p>')
  assert.equal(await vendorBottom.inputValue(),'')
  await vendorTop.fill('취소할 수정')
@@ -977,7 +1010,7 @@ try{
  assert.ok(mobileOutput.y>=mobileSource.y+mobileSource.height,'On mobile, the vendor list is below the editor')
  assert.equal(await panel.evaluate(node=>node.scrollWidth<=node.clientWidth),true)
  await vendorTopButtom.click()
- await vendor.selectOption('29CM')
+ await vendor.selectOption(twentyNinePartner)
  assert.equal(await vendorTop.inputValue(),'<p>29CM 상단</p>')
  const [topBox,bottomBox]=await Promise.all([vendorTop.boundingBox(),vendorBottom.boundingBox()])
  assert.ok(topBox.y<bottomBox.y,'The Top and Buttom fields stack on mobile')

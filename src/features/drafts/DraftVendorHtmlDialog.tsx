@@ -3,23 +3,33 @@ import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, Textarea } from '@/components/ui/input'
 import { draftVisualSaveError, type DraftVendorHtml, type VendorHtml } from '@/lib/supabase/draft-visual-content'
-import { DRAFT_OPEN_DETAIL_OPTIONS } from '@/lib/types'
+import type { DraftPartnerOption } from './use-draft-sabangnet-partners'
 
-export const DRAFT_HTML_VENDORS = DRAFT_OPEN_DETAIL_OPTIONS.filter(vendor => vendor !== '전체')
 const EMPTY_HTML: VendorHtml = { top: '', bottom: '' }
 
-export function DraftVendorHtmlDialog({ preferredVendor, value, onSave, onClose }: {
+export function DraftVendorHtmlDialog({ preferredVendor, value, partners, onSave, onClose }: {
   preferredVendor: string
   value: DraftVendorHtml
+  partners: { options: DraftPartnerOption[]; names: ReadonlyMap<string, string>; placeholder: string }
   onSave: (value: DraftVendorHtml) => Promise<void>
   onClose: () => void
 }) {
   const titleId = useId()
   const dialog = useRef<HTMLDialogElement>(null)
-  const [vendor, setVendor] = useState(() => DRAFT_HTML_VENDORS.find(option => option === preferredVendor) ?? DRAFT_HTML_VENDORS[0])
+  const [selection, setSelection] = useState<string>()
   const [edits, setEdits] = useState(value)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const activeIds = new Set(partners.options.map(option => option.id))
+  const options = [...partners.options]
+  for (const [id, template] of Object.entries(value)) {
+    if (!template || activeIds.has(id)) continue
+    options.push({ id, label: `${partners.names.get(id) || template.vendorName || id} (기존)` })
+  }
+  const vendor = options.find(option => option.id === selection)?.id
+    ?? options.find(option => option.id === preferredVendor)?.id
+    ?? options.find(option => option.label === preferredVendor)?.id
+    ?? options[0]?.id ?? ''
   const html = edits[vendor] ?? EMPTY_HTML
 
   useEffect(() => { dialog.current?.showModal() }, [])
@@ -52,24 +62,25 @@ export function DraftVendorHtmlDialog({ preferredVendor, value, onSave, onClose 
         </div>
         <label className="grid w-full gap-1.5 text-sm font-medium sm:max-w-52">
           업체
-          <Select value={vendor} disabled={saving} onChange={event => {
-            const next = DRAFT_HTML_VENDORS.find(option => option === event.target.value)
-            if (next) setVendor(next)
-          }}>
-            {DRAFT_HTML_VENDORS.map(option => <option key={option} value={option}>{option}</option>)}
+          <Select value={vendor} disabled={saving || !options.length} onChange={event => setSelection(event.currentTarget.value)}>
+            {!options.length && <option value="">{partners.placeholder}</option>}
+            {options.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
           </Select>
         </label>
         <div className="grid gap-3 sm:grid-cols-2">
           {(['top', 'bottom'] as const).map(part => (
             <label key={part} className="grid min-w-0 gap-1.5 text-sm font-medium">
               {part === 'top' ? 'Top HTML' : 'Buttom HTML'}
-              <Textarea value={html[part]} rows={7} spellCheck={false} readOnly={saving}
+              <Textarea value={html[part]} rows={7} spellCheck={false} readOnly={saving || !vendor}
                 placeholder="HTML 입력" className="min-h-28 resize-y bg-muted/35 font-mono text-xs shadow-none"
                 onChange={event => {
                   const text = event.target.value
                   setEdits(current => ({
                     ...current,
-                    [vendor]: { ...(current[vendor] ?? EMPTY_HTML), [part]: text },
+                    [vendor]: {
+                      ...(current[vendor] ?? { ...EMPTY_HTML, vendorName: partners.names.get(vendor) }),
+                      [part]: text,
+                    },
                   }))
                 }} />
             </label>

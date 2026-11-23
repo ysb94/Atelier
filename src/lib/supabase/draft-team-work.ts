@@ -7,6 +7,10 @@ export type DraftTeamValues = {
   'md-quantity': { quantities: Record<string, string>; arrival: string }
   'md-price': { retail: string; discount: string; extraDiscount: string; auto: boolean }
   'md-options': { type: { id: string; label: string } | null; entries: { id: string; name: string; price: string }[] }
+  'md-listing': {
+    registerType: string; registerLabel: string; openType: string; openLabel: string
+    partnerId: string | null; partner: string; from: string; to: string; assignee: string
+  }
 }
 
 export type DraftTeamSection = keyof DraftTeamValues
@@ -22,7 +26,7 @@ const TEAM_COLUMNS = 'draft_id,section,payload,confirmed,revision'
 
 export async function listDraftTeamWork(draftIds: string[], signal: AbortSignal) {
   const rows: DraftTeamRecord[] = []
-  // At most four sections per draft. Limit the URL and stay under the API row cap.
+  // At most five sections per draft. Limit the URL and stay under the API row cap.
   for (let index = 0; index < draftIds.length; index += 80) {
     const { data, error } = await getSupabase().from('draft_team_work').select(TEAM_COLUMNS)
       .in('draft_id', draftIds.slice(index, index + 80)).abortSignal(signal)
