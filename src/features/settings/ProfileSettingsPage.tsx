@@ -1,6 +1,7 @@
 import { PageHeader } from '@/components/layout/PageHeader'
 import { HomeAttendanceSummary } from '@/features/home/HomeAttendanceSummary'
 import { LateArrivalHeaderButton } from '@/features/home/LateArrivalClockIn'
+import { AttendanceClockInReminder } from '@/features/home/AttendanceEntryGate'
 import { LateStatementApprovalList, LateStatementNoticeDialog } from '@/features/home/LateStatementReview'
 import { LateArrivalAppealNoticeDialog } from '@/features/home/LateArrivalAppeal'
 import {
@@ -110,7 +111,10 @@ function ProfileSettingsContent() {
     <div>
       <div className="mb-6 grid grid-cols-1 items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:[&>div]:mb-0">
         <PageHeader title="My home" />
-        <div className="flex flex-wrap justify-center gap-2"><RequiredInformationButton /><LateArrivalHeaderButton /></div>
+        <div className="flex min-w-0 flex-col items-center gap-2">
+          {active && <AttendanceClockInReminder />}
+          <div className="flex flex-wrap justify-center gap-2"><RequiredInformationButton /><LateArrivalHeaderButton /></div>
+        </div>
         <div className="sm:justify-self-end"><HomeAttendanceSummary /></div>
       </div>
 

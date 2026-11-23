@@ -9,9 +9,15 @@ const key = 'atelier:attendance-entry-fixture:' + scenario
 function seed(): State {
   const today = koreaDateKey(), previous = scenario === 'weekend' ? '2026-10-30' : '2026-10-26'
   const row = (date: string, out: string | null = null): Clock => ({ employee_id: 'fixture-user', work_date: date, clock_in: '09:00:00', clock_out_at: out, clock_out_reported_at: null })
-  const rows = scenario === 'no-previous' ? [] : [row(previous, scenario === 'complete' || scenario.startsWith('offsite') ? previous + 'T09:00:00Z' : null)]
-  if (scenario !== 'missing' && scenario !== 'weekend' && scenario !== 'no-previous') rows.push(row(today, scenario === 'offsite-closed' ? today + 'T09:00:00Z' : null))
+  const browsing = scenario.startsWith('browse')
+  const rows = scenario === 'no-previous' ? [] : [row(previous, scenario === 'complete' || scenario.startsWith('offsite') || (browsing && scenario !== 'browse-missing') ? previous + 'T09:00:00Z' : null)]
+  if (scenario !== 'missing' && scenario !== 'weekend' && scenario !== 'no-previous' && !browsing) rows.push(row(today, scenario === 'offsite-closed' ? today + 'T09:00:00Z' : null))
   const requests: Record<string, unknown>[] = []
+  if (scenario === 'browse-half' || scenario === 'browse-annual') requests.push({
+    id: 'browsing-leave', employee_id: 'fixture-user', employee_name: '검증 직원', kind: scenario === 'browse-half' ? 'half' : 'annual',
+    from_date: today, to_date: today, start_time: '09:00:00', end_time: scenario === 'browse-half' ? '14:00:00' : '18:00:00',
+    status: 'approved', created_at: new Date().toISOString(),
+  })
   if (scenario === 'pending-correction' || scenario === 'approved-correction' || scenario === 'overtime') requests.push({ id: 'request-1', employee_id: 'fixture-user', employee_name: '검증 직원', department_id: 'other-department', department_name: '일반팀', kind: scenario === 'overtime' ? 'overtime' : 'correction', from_date: previous, to_date: previous, start_time: scenario === 'overtime' ? '18:00:00' : '09:00:00', end_time: scenario === 'overtime' ? '21:00:00' : '18:00:00', note: '검증', place: '', status: scenario === 'pending-correction' ? 'pending' : 'approved', created_at: previous + 'T00:00:00Z', decided_at: null, decided_by_name: null, decision_note: '' })
   if (scenario.startsWith('offsite')) requests.push({ id: 'offsite-1', employee_id: 'fixture-user', employee_name: '검증 직원', department_id: 'other-department', department_name: '일반팀', kind: 'offsite', from_date: today, to_date: today, start_time: '09:00:00', end_time: '18:00:00', note: '검증', place: '거래처', status: 'approved', created_at: previous + 'T00:00:00Z', decided_at: null, decided_by_name: null, decision_note: '' })
   if (scenario === 'completed-overtime-early') {
@@ -44,8 +50,9 @@ export function getSupabase() {
       range(start: number, end: number) { offset = start; count = end - start + 1; return query }, limit(value: number) { count = value; return query },
       then(resolve: (value: unknown) => unknown) { const state = read(); if (table === 'attendance_clock_ins' && state.readError) return Promise.resolve({ data: null, error: { message: '검증용 기록 조회 실패' } }).then(resolve)
         if (inserted && table === 'company_leave_requests') {
-          const row = { end_next_day: false, ...inserted, id: crypto.randomUUID(), status: 'pending', created_at: new Date().toISOString(), decided_at: null, decided_by_name: null, decision_note: '' }
-          state.requests.push(row); state.writes.push('submit_correction'); write(state)
+          const isHalf = inserted.kind === 'half'
+          const row = { end_next_day: false, ...inserted, id: crypto.randomUUID(), status: isHalf ? 'approved' : 'pending', created_at: new Date().toISOString(), decided_at: null, decided_by_name: null, decision_note: '' }
+          state.requests.push(row); state.writes.push(isHalf ? 'submit_half' : 'submit_correction'); write(state)
           return Promise.resolve({ data: row, error: null }).then(resolve)
         }
         const rows = (table === 'attendance_clock_ins' ? state.rows : state.requests) as Record<string, unknown>[]
@@ -54,6 +61,9 @@ export function getSupabase() {
   }, rpc(name: string, args: Record<string, unknown> = {}) {
     const state = read(), today = koreaDateKey(), actor = fixtureProfile().id
     if (name === 'list_my_department_absences') return { range: async () => ({ data: [], error: null }) }
+    if (name === 'employee_leave_advances' && scenario === 'browse-apply-half') return Promise.resolve({
+      data: { ready: true, employees: [{ employeeId: actor, remainingBalance: 3, outstanding: 0 }], events: [] }, error: null,
+    })
     if (name === 'list_effective_attendance_clocks') {
       // 서버 미적용 환경과 동일하게 PostgREST 오류를 돌려 기존 출퇴근 조회 경로를 검증한다.
       const result = { data: null, error: { code: 'PGRST202', message: '유효 출퇴근 RPC 연결 대기' } }
