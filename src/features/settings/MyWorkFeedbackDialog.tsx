@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { EmployeeDirectoryColumns } from '@/components/ui/employee-directory-columns'
@@ -22,6 +23,7 @@ export function MyWorkFeedbackDialog({ actorId, settings, cardTitle, recipientId
   onClose: () => void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
+  const searchInput = useRef<HTMLInputElement>(null)
   const titleId = useId()
   const [savedSelection, setSavedSelection] = useState(() => new Set(recipientIds))
   const [search, setSearch] = useState('')
@@ -52,6 +54,15 @@ export function MyWorkFeedbackDialog({ actorId, settings, cardTitle, recipientId
     if (inFlight.current) return
     dialog.current?.close()
     onClose()
+  }
+
+  function changeSelection(id: string, selected?: boolean) {
+    setSavedSelection(current => {
+      const next = new Set(current)
+      if (selected ?? !current.has(id)) next.add(id)
+      else next.delete(id)
+      return next
+    })
   }
 
   async function requestFeedback() {
@@ -105,22 +116,30 @@ export function MyWorkFeedbackDialog({ actorId, settings, cardTitle, recipientId
           <div role="group" aria-label="선택한 담당자" className="space-y-2">
             <p className="text-xs font-medium text-muted-foreground">선택한 담당자 ({selectedPeople.length})</p>
             {selectedPeople.length ? <ul className="flex flex-wrap gap-2">
-              {selectedPeople.map(person => <li key={person.profileId}>
-                <Badge>{formatChatPerson(person.displayName, person.position)}{person.departmentName ? ` · ${person.departmentName}` : ''}</Badge>
-              </li>)}
+              {selectedPeople.map(person => {
+                const name = formatChatPerson(person.displayName, person.position)
+                const label = person.departmentName ? `${name} · ${person.departmentName}` : name
+                return <li key={person.profileId}>
+                  <Badge className="gap-1 pr-1">
+                    {label}
+                    <Button type="button" variant="ghost" size="icon" className="size-6 shrink-0 rounded-full text-current hover:bg-primary/15"
+                      aria-label={`${label} 선택 해제`} onClick={() => {
+                        changeSelection(person.profileId, false)
+                        searchInput.current?.focus()
+                      }}>
+                      <X size={14} aria-hidden="true" />
+                    </Button>
+                  </Badge>
+                </li>
+              })}
             </ul> : <p className="text-sm text-muted-foreground">선택한 담당자가 없습니다.</p>}
           </div>
-          <Input aria-label="직원 검색" placeholder="이름 또는 부서 검색" value={search} onChange={event => setSearch(event.currentTarget.value)} />
+          <Input ref={searchInput} aria-label="직원 검색" placeholder="이름 또는 부서 검색" value={search} onChange={event => setSearch(event.currentTarget.value)} />
           <div className="rounded-md border border-border bg-card p-2">
             {filtered.length ? <EmployeeDirectoryColumns
               people={filtered.map(person => ({ id: person.profileId, name: person.displayName, department: person.departmentName, position: person.position }))}
               isSelected={id => savedSelection.has(id)} className="max-h-[48dvh] overflow-y-auto"
-              onSelect={id => setSavedSelection(current => {
-                const next = new Set(current)
-                if (next.has(id)) next.delete(id)
-                else next.add(id)
-                return next
-              })} /> : <p className="px-3 py-6 text-center text-sm text-muted-foreground">일치하는 직원이 없습니다.</p>}
+              onSelect={changeSelection} /> : <p className="px-3 py-6 text-center text-sm text-muted-foreground">일치하는 직원이 없습니다.</p>}
           </div>
         </> : <>
           <p className="break-words text-sm font-medium">{cardTitle}</p>
