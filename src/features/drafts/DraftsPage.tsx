@@ -42,8 +42,12 @@ import { DraftBrandScopeBar, countScheduleRows } from './DraftBrandScopeBar'
 import { DraftFolderBar, DraftFolderHeading } from './DraftFolderBar'
 import { matchesDraftFolder } from './draft-folder-filter'
 import { DraftSheetRow, type DraftConfirmFlag } from './DraftSheetRow'
+import { DraftBoardView } from './DraftBoardView'
+import { useDraftSheetLayout } from './draft-sheet-layout'
 import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
 import { useDraftPriceRequests } from './useDraftPriceRequests'
+import { useDraftTeamWork } from './use-draft-team-work'
+import { draftVisualBoardKey, useDraftVisualBoard } from './use-draft-visual-board'
 import {
   formatReleaseGroupLabel,
   isUnassignedReleaseFolder,
@@ -118,6 +122,7 @@ export function CompanyDraftsPage() {
   ) as DraftOwnerScope
   const companyId = profile?.companyId ?? DEFAULT_COMPANY_ID
   const profileId = profile?.id
+  const sheetLayout = useDraftSheetLayout(profileId)
   const brandIdBySlug = useMemo(
     () => new Map(brands.map((item) => [item.slug, item.id])),
     [brands],
@@ -382,6 +387,8 @@ export function CompanyDraftsPage() {
       return true
     })
   }, [boardFilter, folderDrafts, scheduleByDraft])
+  const teamWork = useDraftTeamWork(profileId, visible, !showingCompleted)
+  const visualBoard = useDraftVisualBoard(profileId, visible, !showingCompleted)
 
   const scheduleDraft = scheduleDraftId
     ? (ownerDrafts.find((draft) => draft.id === scheduleDraftId) ??
@@ -471,6 +478,10 @@ export function CompanyDraftsPage() {
       ...draftToInput(current),
       brandId: value.brandId,
       seasonId,
+      specs: {
+        ...current.specs,
+        releaseSchedule: { seasonId, targetDate: value.targetDate, certainty: value.certainty },
+      },
     }))
     setTempGroups((prev) => prev.filter((group) => group.id !== value.group.id))
     setAssignments((prev) => {
@@ -486,6 +497,7 @@ export function CompanyDraftsPage() {
     await saveDraftChange(draftId, (current) => ({
       ...draftToInput(current),
       seasonId: null,
+      specs: { ...current.specs, releaseSchedule: undefined },
     }))
     setAssignments((prev) => {
       if (!prev[draftId]) return prev
@@ -627,70 +639,40 @@ export function CompanyDraftsPage() {
         </div>
       ) : null}
 
-      <div className="draft-board-scroll" role="region" aria-label={showingCompleted ? '완료된 기획안 목록' : '기획안 목록'} tabIndex={0}>
-        <table className="draft-board-table">
-          <caption className="sr-only">기획안별 샘플, 상품 정보 및 MD 진행 현황</caption>
-          <colgroup>{Array.from({ length: 6 }, (_, index) => <col key={index} />)}</colgroup>
-          <thead>
-            <tr>
-              {(['BRAND', 'SAMPLE', 'PRICE', 'COLOR', 'INFORMATION'] as const).map(
-                (label) => (
-                  <th
-                    key={label}
-                    scope="col"
-                  >
-                    {label}
-                  </th>
-                ),
-              )}
-              <th
-                scope="col"
-              >
-                MD TEAM
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {showingCompleted ? (
-              <tr>
-                <td colSpan={6} className="bg-white px-4 py-10 text-center text-sm text-muted-foreground">
-                  이 폴더에 완료된 기획안이 없습니다.
-                </td>
-              </tr>
-            ) : loading ? (
-              <tr>
-                <td
-                  colSpan={6}
-                  className="bg-white px-4 py-10 text-center text-sm text-muted-foreground"
-                >
-                  불러오는 중...
-                </td>
-              </tr>
-            ) : visible.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={6}
-                  className="bg-white px-4 py-10 text-center text-sm text-muted-foreground"
-                >
-                  {emptyMessage(
-                    folderDrafts.length > 0,
-                    myOnly,
-                    folderFilter,
-                    boardFilter,
-                    brandScope,
-                    ownerScope,
-                  )}
-                </td>
-              </tr>
-            ) : (
-              visible.map((draft) => {
+      <DraftBoardView
+        key={profileId}
+        accountId={profileId}
+        layout={sheetLayout}
+        label={showingCompleted ? '완료된 기획안 목록' : '기획안 목록'}
+        emptyMessage={showingCompleted ? '이 폴더에 완료된 기획안이 없습니다.'
+          : loading ? '불러오는 중...'
+          : visible.length === 0 ? emptyMessage(folderDrafts.length > 0, myOnly, folderFilter, boardFilter, brandScope, ownerScope)
+          : undefined}
+        tableNotice={!showingCompleted && <>
+          {teamWork.query.isError && <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+            <p role="status" className="text-muted-foreground">{teamWork.missingSchema
+              ? 'AMD·MD 저장 기능은 공유 DB 적용 후 사용할 수 있습니다.' : 'AMD·MD 저장 정보를 불러오지 못했습니다.'}</p>
+            <Button type="button" size="sm" variant="outline" disabled={teamWork.query.isFetching}
+              onClick={() => { void teamWork.query.refetch() }}>AMD·MD 다시 조회</Button>
+          </div>}
+          {visualBoard.query.isError && <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+            <p role="status" className="text-muted-foreground">Visual 팀 저장 상태와 담당자를 불러오지 못했습니다.</p>
+            <Button type="button" size="sm" variant="outline" disabled={visualBoard.query.isFetching}
+              onClick={() => { void visualBoard.query.refetch() }}>Visual 다시 조회</Button>
+          </div>}
+        </>}
+        renderRows={mode => visible.map(draft => {
                 const schedule = scheduleByDraft.get(draft.id)
                 const brand = draft.brandId ? brandById.get(draft.brandId) : undefined
                 const price = priceByDraft.get(draft.id)
                 return (
                   <DraftSheetRow
                     key={draft.id}
+                    mode={mode}
+                    layout={sheetLayout}
                     draft={draft}
+                    teamWork={teamWork.forDraft(draft.id)}
+                    visualBoard={visualBoard.forDraft(draft.id)}
                     readOnly={!canWriteDraft(workAccess.access,draft)}
                     informationEditorId={profile?.id}
                     schedule={schedule}
@@ -724,6 +706,18 @@ export function CompanyDraftsPage() {
                     onSaveColors={async (rows, revision) => {
                       await queueDraftSave(draft.id, 'draft_save_colors', (current, context) =>
                         saveDraftColors(current, rows, revision, context))
+                      if (rows.length !== draft.colors.length || rows.some(row => row.photoChange)) {
+                        await Promise.all([
+                          queryClient.invalidateQueries({ queryKey: draftVisualBoardKey(profileId) }),
+                          queryClient.invalidateQueries({ queryKey: ['draft-visual-content', profileId, draft.id] }),
+                        ])
+                      }
+                    }}
+                    onSharedPhotoChange={async () => {
+                      await Promise.all([
+                        queryClient.invalidateQueries({ queryKey: ['product-drafts'] }),
+                        queryClient.invalidateQueries({ queryKey: ['product-draft', draft.id] }),
+                      ])
                     }}
                     onRenameProduct={async (field, name) => {
                       await saveDraftChange(draft.id, (current) => {
@@ -859,11 +853,8 @@ export function CompanyDraftsPage() {
                     }}
                   />
                 )
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+        })}
+      />
 
       <DraftReleaseScheduleDialog
         open={Boolean(scheduleDraft)}

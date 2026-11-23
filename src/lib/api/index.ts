@@ -2126,24 +2126,7 @@ export async function deleteCodeUsageTarget(id: string): Promise<void> {
 
 export async function updateCodeUsageTarget(
   id: string,
-  patch: Partial<
-    Pick<
-      CodeUsageTarget,
-      | 'name'
-      | 'active'
-      | 'isOneTime'
-      | 'channelType'
-      | 'shippingMethod'
-      | 'note'
-      | 'folderId'
-      | 'groupId'
-      | 'siteName'
-      | 'contactName'
-      | 'contactPhone'
-      | 'contactEmail'
-      | 'address'
-    >
-  > & { aliases?: readonly string[]; groupName?: string },
+  patch: Parameters<typeof codeUsageTargetStore.updateCodeUsageTarget>[1],
 ): Promise<CodeUsageTarget> {
   await delay()
   return codeUsageTargetStore.updateCodeUsageTarget(id, patch)

@@ -326,9 +326,11 @@ export type DraftSpecs = Record<DraftSpecKey, DraftSpec> & {
   colorSpecs: Record<string, DraftColorSpec>
   specDocumentConfirmed?: boolean
   proposer?: { id: string; name: string }
+  openChannelTargetId?: string | null
   confirmedPriceRequestId?: string
   colorImageChoices?: Record<string, DraftColorImageChoice>
   colorPhotoUrls?: Record<string, string>
+  releaseSchedule?: { seasonId: string; targetDate: string | null; certainty: 'tentative' | 'confirmed' }
   /** 상품명 최종 확정. 출시 전에도 이름은 고칠 수 있다. */
   nameConfirmed?: boolean
   /** 컬러 종류 확정. 컬러 샘플 작업지시서를 보내는 조건이다. */
@@ -473,16 +475,6 @@ export const DRAFT_OPEN_TYPE_OPTIONS = [
   '순차오픈',
 ] as const
 
-export const DRAFT_OPEN_DETAIL_OPTIONS = [
-  '카카오선물하기',
-  '자사몰',
-  '무신사',
-  '29CM',
-  '지그재그',
-  '오프라인',
-  '전체',
-] as const
-
 /** 자사 발급 바코드(88코드)와 거래처 부여 코드를 같은 구조로 다룬다 */
 export type ProductCodeKind = 'own' | 'partner'
 
@@ -584,6 +576,8 @@ export type CodeUsageTarget = {
   id: string
   brandId: string
   name: string
+  /** 선택한 출고 단위의 화면 표시 이름. 비우면 기존 표시를 사용한다. */
+  displayName?: string | null
   /** 이름 비교용 압축 키. 띄어쓰기만 다른 중복을 막는다. */
   normalizedName: string
   /** 사용 종료해도 기존 바코드 연결 이력은 보존한다. */

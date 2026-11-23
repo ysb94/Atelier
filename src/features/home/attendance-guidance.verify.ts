@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { continuingOffsiteClock, fitPreviousClockOut, workdayGuidance, previousMissingClock, validatePreviousClockOut, workInstant } from './attendance-guidance.ts'
+import { clockInReminderFor, continuingOffsiteClock, fitPreviousClockOut, workdayGuidance, previousMissingClock, validatePreviousClockOut, workInstant } from './attendance-guidance.ts'
 import { clockOutLabel } from '../settings/my-attendance.ts'
 import type { PersonalRequest } from '../settings/personal-requests.ts'
 const date='2026-10-26', today='2026-10-27'
@@ -25,6 +25,17 @@ assert.equal(end([request('offsite','09:00','16:00')]),workInstant(date,'18:00')
 assert.equal(end([request('annual','09:00','18:00')]),null)
 assert.equal(workdayGuidance(date,basis,[request('official','09:00','18:00')]).fullLeave,true)
 assert.equal(workdayGuidance(date,null,[]).end,null)
+const reminder=(at:string, requests:PersonalRequest[]=[])=>clockInReminderFor(date,new Date(`${date}T${at}:00+09:00`),basis,requests)
+assert.deepEqual(reminder('08:59'),{expected:'09:00',due:false,morningHalf:false})
+assert.equal(reminder('09:00')?.due,true)
+const morningHalf=request('half','09:00','14:00')
+assert.deepEqual(reminder('10:00',[morningHalf]),{expected:'14:00',due:false,morningHalf:true})
+assert.equal(reminder('14:00',[morningHalf])?.due,true)
+assert.equal(reminder('10:00',[{...morningHalf,status:'cancelled'}])?.expected,'09:00')
+assert.equal(reminder('10:00',[request('half','14:00','18:00')])?.expected,'09:00')
+assert.equal(reminder('10:00',[request('annual','09:00','18:00')]),null)
+for(const holiday of ['2026-10-31','2026-10-09'])assert.equal(clockInReminderFor(holiday,new Date(`${holiday}T10:00:00+09:00`),basis,[]),null)
+assert.deepEqual(clockInReminderFor(date,new Date(`${date}T10:00:00+09:00`),{...basis,start:null,configured:false},[]),{expected:null,due:false,morningHalf:false})
 const previous={date,clockIn:'09:00',clockOutAt:null}
 const current={date:today,clockIn:'09:03',clockOutAt:null}
 assert.equal(previousMissingClock([current,previous],[],today),previous)

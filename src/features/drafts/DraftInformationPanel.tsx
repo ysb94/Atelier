@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, FileText, ImagePlus, X } from 'lucide-react'
@@ -7,17 +7,28 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Textarea } from '@/components/ui/input'
 import { copyText } from '@/lib/clipboard'
+import { resolveDraftVisualPhoto } from '@/lib/drafts/color-photo'
 import {
   DRAFT_INFORMATION_LABELS, colorInformationEditKey, documentEditKey, informationEditText, isColorInformationConfirmed,
   isSpecDocumentConfirmed, resolveColorSpec, type ColorInformationField, type ColorSpecField, type ColorSpecValues,
-  type DraftInformationField, type InformationDrafts, type InformationEdits, type ResolvedDraftColorSpec, type SaveColorSpec, type UpdateInformationEdits,
+  type InformationDrafts, type InformationEdits, type ResolvedDraftColorSpec, type SaveColorSpec, type UpdateInformationEdits,
 } from '@/lib/drafts/color-spec'
 import { formatSizeSpec, parseSizeSpec, type SizeParts } from '@/lib/drafts/spec-format'
 import type { DraftColorRow, ProductDraft } from '@/lib/types'
 import { draftInformationTemporaryStore, type DraftInformationTemporary, type DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
+import type { DraftTeamRecord, DraftTeamValues } from '@/lib/supabase/draft-team-work'
+import {
+  draftVisualSaveError, listDraftVisualContent, saveDraftVisualContent,
+  type DraftVendorHtml, type DraftVisualChange, type DraftVisualContent, type DraftVisualStatus,
+} from '@/lib/supabase/draft-visual-content'
 import { cn } from '@/lib/utils'
+import { DRAFT_INFORMATION_PANEL_TAB_GROUPS, type DraftInformationPanelField } from './draft-information-tabs'
+import { DraftVendorHtmlDialog } from './DraftVendorHtmlDialog'
+import { useDraftSabangnetPartners } from './use-draft-sabangnet-partners'
+import { draftVisualBoardKey } from './use-draft-visual-board'
+import type { DraftTeamWork } from './use-draft-team-work'
+import { DraftVisualImagePanel } from './DraftVisualImagePanel'
 
-const FIELDS: readonly DraftInformationField[] = ['size', 'fabric', 'specDoc']
 const MEASUREMENT_FIELDS = ['size', 'weight'] as const
 const SIZE_FIELDS = [...MEASUREMENT_FIELDS, 'sizeNote'] as const
 const FABRIC_FIELDS = ['fabric', 'coating'] as const
@@ -38,7 +49,8 @@ function informationPanelPosition(anchor: HTMLButtonElement): CSSProperties | nu
   if (!anchor.isConnected || trigger.bottom <= 0 || trigger.top >= height ||
     trigger.right <= Math.max(0, board?.left ?? 0) || trigger.left >= Math.min(width, board?.right ?? width)) return null
 
-  const lines = anchor.closest('.draft-sheet-information')?.getBoundingClientRect()
+  const lines = (anchor.closest('.draft-sheet-information') ??
+    anchor.closest('.draft-sheet-visual-cell .draft-color-lines'))?.getBoundingClientRect()
   const column = lines ? {
     left: Math.min(lines.left, trigger.left), right: Math.max(lines.right, trigger.right),
     top: Math.min(lines.top, trigger.top), bottom: Math.max(lines.bottom, trigger.bottom),
@@ -57,7 +69,7 @@ function informationPanelPosition(anchor: HTMLButtonElement): CSSProperties | nu
     }
   }
 
-  const line = anchor.closest('.draft-sheet-info')?.getBoundingClientRect() ?? trigger
+  const line = anchor.closest('.draft-sheet-info, .draft-color-line')?.getBoundingClientRect() ?? trigger
   // 좁은 화면에서도 선택한 컬러의 버튼 줄을 피하고, 컬러가 많을 때는 입력창 내부를 스크롤한다.
   const columnFits = Math.max(column.top, height - column.bottom) >= 240
   const keepVisible = columnFits ? column : line
@@ -82,7 +94,9 @@ function InformationPhoto({ src, name, className }: { src?: string | null; name:
   )
 }
 
-function InformationCopyButton({ label, text, className }: { label: string; text: string; className?: string }) {
+function InformationCopyButton({ label, text, className, buttonText }: {
+  label: string; text: string; className?: string; buttonText?: string
+}) {
   const [result, setResult] = useState<{ text: string; copied: boolean }>()
   useEffect(() => {
     if (!result) return
@@ -93,11 +107,11 @@ function InformationCopyButton({ label, text, className }: { label: string; text
   const copied = result?.text === text ? result.copied : undefined
   const message = copied === true ? '복사했습니다.' : copied === false ? '복사하지 못했습니다.' : ''
   return <>
-    <Button type="button" variant="ghost" size="icon"
-      className={cn('size-5 rounded-sm bg-foreground text-[10px] font-semibold text-background hover:bg-foreground/85', className)}
+    <Button type="button" variant={buttonText ? 'default' : 'ghost'} size={buttonText ? 'sm' : 'icon'}
+      className={cn(!buttonText && 'size-5 rounded-sm bg-foreground text-[10px] font-semibold text-background hover:bg-foreground/85', className)}
       aria-label={`${label} 복사`} title={message || `${label} 복사`} disabled={!text.trim()}
       onClick={async () => setResult({ text, copied: await copyText(text) })}>
-      {copied === true ? <Check size={12} aria-hidden="true" /> : copied === false ? <X size={12} aria-hidden="true" /> : 'C'}
+      {copied === true ? <Check size={12} aria-hidden="true" /> : copied === false ? <X size={12} aria-hidden="true" /> : buttonText ?? 'C'}
     </Button>
     <span className="sr-only" role="status">{message ? `${label} ${message}` : ''}</span>
   </>
@@ -156,9 +170,9 @@ function SizeFields({ text, weight, note, locked, onChange }: {
   )
 }
 
-function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, highlighted, canApplyBelow, edits, saved, onEditsChange, onSave, onSaveTemporary }: {
+function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, showWriteActions, highlighted, canApplyBelow, edits, saved, onEditsChange, onSave, onSaveTemporary }: {
   color: DraftColorRow; photo?: string | null; field: ColorInformationField; spec: ResolvedDraftColorSpec; confirmed: boolean
-  readOnly: boolean; highlighted: boolean; canApplyBelow: boolean; onSave: SaveColorSpec
+  readOnly: boolean; showWriteActions: boolean; highlighted: boolean; canApplyBelow: boolean; onSave: SaveColorSpec
   edits?: InformationEdits; onEditsChange: (update: UpdateInformationEdits) => void
   saved?: DraftInformationTemporary; onSaveTemporary?: SaveTemporaryInformation
 }) {
@@ -272,7 +286,7 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2 @[720px]:flex-col @[720px]:items-end">
-        {canApplyBelow && (
+        {showWriteActions && canApplyBelow && (
           <Button size="sm" type="button" variant="outline" disabled={locked || !hasCopyValues}
             onClick={event => {
               if (event.currentTarget.form?.reportValidity()) void save(true)
@@ -285,20 +299,20 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
           {isConfirmed ? '확정 완료' : hasChanges && !temporaryChanged ? '임시 저장됨' : hasValue || hasChanges ? '기입 중' : '미입력'}
           <span aria-hidden="true" className={cn('size-3 rounded-sm border border-border', isConfirmed && 'border-primary bg-primary')} />
         </span>
-        {showModify
+        {showWriteActions && (showModify
           ? <Button size="sm" type="button" variant="outline" disabled={locked} onClick={() => setEditing(true)}>수정</Button>
           : <div className="flex flex-wrap justify-end gap-2">
             <Button size="sm" type="button" variant="outline" disabled={locked || !onSaveTemporary || !temporaryChanged} onClick={() => void saveTemporary()}>임시 저장</Button>
             <Button size="sm" type="submit" disabled={locked || !canConfirm}>{busy ? '저장 중…' : '확정'}</Button>
-          </div>}
+          </div>)}
       </div>
       {error && <p className="text-xs text-danger @[720px]:col-span-3" role="alert">{error}</p>}
     </form>
   )
 }
 
-function SpecDocumentForm({ draft, readOnly, edits, saved, onEditChange, onSave, onSaveTemporary }: {
-  draft: ProductDraft; readOnly: boolean; edits: InformationEdits | undefined
+function SpecDocumentForm({ draft, readOnly, showWriteActions, edits, saved, onEditChange, onSave, onSaveTemporary }: {
+  draft: ProductDraft; readOnly: boolean; showWriteActions: boolean; edits: InformationEdits | undefined
   onEditChange: (update: UpdateInformationEdits) => void; onSave: (value: string, temporaryRevision?: string) => Promise<void>
   saved?: DraftInformationTemporary; onSaveTemporary?: SaveTemporaryInformation
 }) {
@@ -374,32 +388,295 @@ function SpecDocumentForm({ draft, readOnly, edits, saved, onEditChange, onSave,
         <span className="text-xs text-muted-foreground">
           {hasChanges && !temporaryChanged ? '임시 저장됨' : canConfirm ? '기입 중' : text.trim() ? '확정 완료' : '미입력'}
         </span>
-        {showModify
+        {showWriteActions && (showModify
           ? <Button size="sm" type="button" variant="outline" disabled={locked} onClick={() => setEditing(true)}>수정</Button>
           : <>
             <Button size="sm" type="button" variant="outline" disabled={locked || !onSaveTemporary || !temporaryChanged} onClick={() => void saveTemporary()}>임시 저장</Button>
             <Button size="sm" type="submit" disabled={locked || !canConfirm}>{busy ? '저장 중…' : '확정'}</Button>
-          </>}
+          </>)}
       </div>
       {error && <p className="text-xs text-danger" role="alert">{error}</p>}
     </form>
   )
 }
 
+function vendorTemplates(rows: readonly DraftVisualContent[]) {
+  const templates: DraftVendorHtml = {}
+  for (const row of rows) {
+    if (row.kind === 'vendor-html') templates[row.entry_key] = row.payload
+  }
+  return templates
+}
+
+type AmdColorCodes = DraftTeamValues['amd']['colors'][string]
+
+function VendorHtmlCode({ id, name, text, templates, partnerNames, amdReady, amdCodes, onPreview }: {
+  id: string; name: string; text: string; templates: DraftVendorHtml; onPreview: (label: string, html: string) => void
+  partnerNames: ReadonlyMap<string, string>
+  amdReady: boolean; amdCodes?: AmdColorCodes
+}) {
+  if (!amdReady) {
+    return <p id={id} role="status" className="text-xs text-muted-foreground">AMD 번호를 불러온 뒤 사용할 수 있습니다.</p>
+  }
+  const missing = [
+    !amdCodes?.sabangnet?.trim() && '사방넷 no',
+    !amdCodes?.barcode?.trim() && '바코드 no',
+  ].filter(Boolean)
+  if (missing.length > 0) {
+    return <p id={id} role="alert" className="text-xs text-danger">
+      AMD에서 {name}의 {missing.join(' · ')}를 입력하고 저장한 뒤 사용할 수 있습니다.
+    </p>
+  }
+
+  const hasBody = Boolean(text.trim())
+  const vendors = Object.entries(templates).flatMap(([key, template]) => {
+    if (!template || (!template.top.trim() && !template.bottom.trim())) return []
+    const code = hasBody ? [template.top, text, template.bottom].filter(part => part.trim()).join('\n') : ''
+    return [{ key, name: partnerNames.get(key) || template.vendorName || key, code }]
+  })
+  if (!vendors.length) {
+    return <p id={id} className="text-xs text-muted-foreground">상단 업체별 Top Buttom 등록에서 업체 HTML을 먼저 저장해 주세요.</p>
+  }
+
+  return <ul id={id} aria-label={`${name} HTML 업체 목록`} className="min-w-0 divide-y divide-border rounded-md border border-border">
+    {vendors.map(option => {
+      const label = `${name} ${option.name}`
+      return <li key={option.key} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1 px-1.5 py-1">
+        <span className="truncate px-1 text-xs" title={option.name}>{option.name}</span>
+        <InformationCopyButton label={`${label} HTML`} text={option.code} buttonText="복사" className="h-6 px-1.5 text-xs" />
+        <Button type="button" size="sm" variant="outline" className="h-6 px-1.5 text-xs"
+          aria-label={`${label} HTML 미리보기`} disabled={!option.code}
+          onClick={() => onPreview(label, option.code)}>미리보기</Button>
+      </li>
+    })}
+  </ul>
+}
+
+const AUCHEE_PREVIEW_ORIGIN = 'https://cdn2.auchee.com'
+
+function aucheePreviewUrl(source: string | null, directory: string, base: string) {
+  if (!source) return null
+  try {
+    const url = new URL(source, base)
+    return url.origin === AUCHEE_PREVIEW_ORIGIN && url.pathname.startsWith(directory) && !url.username && !url.password ? url : null
+  } catch {
+    return null
+  }
+}
+
+async function prepareHtmlPreview(html: string) {
+  if (!/<iframe\b/i.test(html)) return html
+
+  // Templates let us inspect third-party markup without loading or running it.
+  const preview = document.createElement('template')
+  preview.innerHTML = html
+  const inertDocument = preview.content.ownerDocument
+  await Promise.all(Array.from(preview.content.querySelectorAll('iframe[src]:not([srcdoc])'), async frame => {
+    const embedUrl = aucheePreviewUrl(frame.getAttribute('src'), '/embed/', document.baseURI)
+    if (!embedUrl) return
+
+    try {
+      const response = await fetch(embedUrl, {
+        credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error', signal: AbortSignal.timeout(8000),
+      })
+      if (!response.ok) throw new Error('Could not load video embed')
+      const embed = document.createElement('template')
+      embed.innerHTML = await response.text()
+      const player = embed.content.querySelector('video')
+      const source = player?.getAttribute('src') || player?.querySelector('source[src]')?.getAttribute('src')
+      const videoUrl = aucheePreviewUrl(source ?? null, '/video/', embedUrl.href)
+      if (!player || !videoUrl) throw new Error('Video source is unavailable')
+
+      const video = inertDocument.createElement('video')
+      video.controls = true
+      video.playsInline = true
+      video.preload = 'metadata'
+      video.defaultMuted = player.defaultMuted
+      video.loop = player.loop
+      video.title = frame.getAttribute('title') || '상품 영상'
+      for (const attribute of ['width', 'height', 'style']) {
+        const value = frame.getAttribute(attribute)
+        if (value !== null) video.setAttribute(attribute, value)
+      }
+      video.style.objectFit = 'contain'
+      video.setAttribute('src', videoUrl.href)
+      frame.replaceWith(video)
+    } catch {
+      const status = inertDocument.createElement('p')
+      status.textContent = '영상을 불러오지 못했습니다. 미리보기를 다시 열어 주세요.'
+      status.style.cssText = frame.getAttribute('style') ?? ''
+      Object.assign(status.style, { display: 'grid', placeItems: 'center', margin: '0', textAlign: 'center' })
+      frame.replaceWith(status)
+    }
+  }))
+  return preview.innerHTML
+}
+
+async function openHtmlPreview(title: string, html: string) {
+  const tab = window.open('', '_blank')
+  if (!tab) return false
+
+  tab.opener = null
+  const document = tab.document
+  document.documentElement.lang = 'ko'
+  document.title = title
+  const viewport = document.createElement('meta')
+  viewport.name = 'viewport'
+  viewport.content = 'width=device-width,initial-scale=1'
+  document.head.append(viewport)
+  document.body.textContent = '미리보기를 준비하는 중…'
+
+  const previewHtml = await prepareHtmlPreview(html)
+  if (tab.closed) return true
+
+  // Render editable HTML in an opaque sandbox, including when the preview fills a tab.
+  const frame = document.createElement('iframe')
+  frame.title = title
+  frame.setAttribute('sandbox', '')
+  frame.referrerPolicy = 'no-referrer'
+  frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0'
+  frame.srcdoc = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; img-src data: https: http:; media-src ${AUCHEE_PREVIEW_ORIGIN}/video/; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+    <style>
+      :where(html, body) { margin: 0; }
+      :where(img) { display: block; max-width: 100%; height: auto; margin-inline: auto; }
+      :where(video) { display: block; max-width: 100%; margin-inline: auto; }
+    </style>${previewHtml}`
+  document.body.replaceChildren(frame)
+  return true
+}
+
+function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSaveTemporary, entry, workingCopy, vendorHtml, partnerNames, amdReady, amdCodes, onSave }: {
+  color: DraftColorRow; index: number; visualPhoto?: string; colorPhoto?: string; readOnly: boolean
+  canSaveTemporary: boolean
+  entry?: DraftVisualContent; workingCopy?: DraftInformationTemporary; vendorHtml: DraftVendorHtml
+  partnerNames: ReadonlyMap<string, string>
+  amdReady: boolean; amdCodes?: AmdColorCodes
+  onSave: (text: string, revision: string | null, temporary: boolean, temporaryRevision?: string) => Promise<void>
+}) {
+  const name = color.name.trim() || `컬러 ${index + 1}`
+  const { src: photo, temporary: showingTemporaryPhoto } = resolveDraftVisualPhoto(visualPhoto, colorPhoto)
+  const [edit, setEdit] = useState<{ text: string; revision: string | null }>()
+  const [codeOpen, setCodeOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const codeId = useId()
+  const stored = typeof entry?.payload === 'string' ? entry.payload : ''
+  const working = readOnly ? undefined : workingCopy?.edits.html
+  const text = edit?.text ?? working?.text ?? stored
+  const revision = edit ? edit.revision : working ? working.source || null : entry?.revision ?? null
+  const versionChanged = revision !== (entry?.revision ?? null)
+  const hasContent = Boolean(text.trim())
+  const saved = Boolean(entry) && !working && stored === text
+  const temporary = working?.text === text
+
+  async function save(asTemporary: boolean) {
+    if (readOnly || saving) return
+    setSaving(true)
+    setError('')
+    try {
+      await onSave(text, revision, asTemporary, workingCopy?.revision)
+      setEdit(undefined)
+    } catch (error) {
+      setError(draftVisualSaveError(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function preview(label: string, html: string) {
+    const opened = await openHtmlPreview(`${label} HTML 미리보기`, html)
+    setError(opened ? '' : '미리보기를 열려면 브라우저의 팝업 차단을 해제해 주세요.')
+  }
+
+  return <section aria-label={`${name} HTML`}
+    className={cn('grid min-w-0 grid-cols-[3.5rem_minmax(0,1fr)] items-start gap-x-3 gap-y-2 border-b border-primary/45 p-3 @[560px]:gap-x-4',
+      readOnly ? '@[560px]:grid-cols-[minmax(5rem,0.9fr)_minmax(0,3.8fr)]'
+        : '@[560px]:grid-cols-[minmax(5rem,0.9fr)_minmax(0,2.5fr)_minmax(11rem,1.45fr)]')}>
+    <div className="self-center text-center">
+      <div className={cn('relative grid aspect-square w-full place-items-center overflow-hidden rounded-xl border border-border bg-muted/35 font-semibold',
+        showingTemporaryPhoto && 'draft-visual-image-temporary')}>
+        {photo
+          ? <img src={photo} alt={`${name} 컬러 이미지`} loading="lazy" className="size-full object-contain"
+            aria-description={showingTemporaryPhoto ? '컬러에 등록된 임시 이미지' : undefined} />
+          : <span aria-hidden="true" className="text-2xl @[560px]:text-5xl">{name[0]}</span>}
+      </div>
+      <p className="mt-1 break-words text-xs font-medium @[560px]:text-sm">{name}</p>
+    </div>
+    <div className="min-w-0">
+      <p className="text-xs text-muted-foreground">HTML</p>
+      <div className="relative mt-0.5">
+        <Textarea aria-label={`${name} HTML 입력`} value={text} readOnly={readOnly || saving} placeholder="직접 입력…"
+          spellCheck={false} className="h-[9.5rem] min-h-[9.5rem] resize-none bg-muted/35 pb-8 text-xs text-foreground shadow-none"
+          onChange={event => setEdit({ text: event.target.value, revision })} />
+        {temporary && <span aria-hidden="true" className="draft-html-temporary-marker pointer-events-none absolute left-px top-px size-4 rounded-tl-md bg-primary [clip-path:polygon(0_0,100%_0,0_100%)]" />}
+        <InformationCopyButton label={`${name} HTML`} text={text} className="absolute bottom-2 right-2" />
+      </div>
+      <div className="mt-1 flex flex-wrap items-center justify-end gap-1.5">
+        <span className="mr-auto text-[10px] text-muted-foreground" role="status">
+          {saved ? '저장됨' : temporary ? '임시저장됨' : ''}
+        </span>
+        <Button type="button" size="sm" variant="outline" className="h-6 px-2" title="새 탭에서 미리보기"
+          disabled={!hasContent} onClick={() => void preview(name, text)}>미리보기</Button>
+        {!readOnly && <>
+          <Button type="button" size="sm" variant="secondary" className="h-6 px-2"
+            disabled={!canSaveTemporary || !hasContent || saved || temporary || saving || versionChanged} onClick={() => void save(true)}>임시저장</Button>
+          <Button type="button" size="sm" className="h-6 px-3"
+            disabled={(!hasContent && !working && !stored) || saved || saving || versionChanged}
+            onClick={() => void save(false)}>{saving ? '저장 중…' : '저장'}</Button>
+        </>}
+      </div>
+    </div>
+    {!readOnly && <div className="col-start-2 grid min-w-0 content-end gap-1.5 self-stretch @[560px]:col-start-3">
+      <Button type="button" size="sm" variant="outline" className="order-last h-6 justify-self-end px-2"
+        aria-expanded={codeOpen} aria-controls={codeOpen ? codeId : undefined}
+        onClick={() => setCodeOpen(open => !open)}>업체별 HTML 생성</Button>
+      {codeOpen && <VendorHtmlCode id={codeId} name={name} text={text} templates={vendorHtml} partnerNames={partnerNames}
+        amdReady={amdReady} amdCodes={amdCodes} onPreview={preview} />}
+    </div>}
+    {!readOnly && versionChanged ? <div className="col-span-full flex flex-wrap items-center gap-2">
+      <p role="alert" className="text-xs text-danger">다른 화면에서 먼저 저장했습니다. 작성 중인 HTML은 복사할 수 있습니다.</p>
+      <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => {
+        setEdit({ text: stored, revision: entry?.revision ?? null })
+        setError('')
+      }}>최신 저장본 불러오기</Button>
+    </div> : error && <p role="alert" className="col-span-full text-xs text-danger">{error}</p>}
+  </section>
+}
+
 export function DraftInformationPanel({
-  id, anchor, draft, field, colorId, readOnly, edits, onEditsChange, onFieldChange, onClose, onSave, onSaveSpecDocument,
-  editorId, temporaryStore = draftInformationTemporaryStore,
+  id, anchor, draft, field, colorId, readOnly, fromVisual, edits, onEditsChange, onFieldChange, onClose, onSave, onSaveSpecDocument,
+  onSharedPhotoChange, teamWork, editorId, temporaryStore = draftInformationTemporaryStore,
 }: {
-  id: string; anchor: HTMLButtonElement; draft: ProductDraft; field: DraftInformationField; colorId: string | null; readOnly: boolean
-  onFieldChange: (field: DraftInformationField) => void; onClose: () => void; onSave: SaveColorSpec
+  id: string; anchor: HTMLButtonElement; draft: ProductDraft; field: DraftInformationPanelField; colorId: string | null
+  readOnly: boolean; fromVisual: boolean
+  onFieldChange: (field: DraftInformationPanelField) => void; onClose: () => void; onSave: SaveColorSpec
   onSaveSpecDocument: (value: string, temporaryRevision?: string) => Promise<void>
+  onSharedPhotoChange: (saved?: { colorId: string; photo: string }) => Promise<void>
+  teamWork: Pick<DraftTeamWork, 'ready' | 'records'>
   edits: InformationDrafts; onEditsChange: (key: string, update: UpdateInformationEdits) => void
   editorId?: string; temporaryStore?: DraftInformationTemporaryStore
 }) {
   const active = useWorkspaceTabActivity()
+  const [vendorHtmlSnapshot, setVendorHtmlSnapshot] = useState<readonly DraftVisualContent[]>()
   const cache = useQueryClient()
   const queryKey = ['draft-information-temporary', editorId, draft.id] as const
-  const temporaryEnabled = Boolean(editorId && !readOnly)
+  const locked = readOnly || fromVisual
+  const visualTab = field === 'image' || field === 'html'
+  const partners = useDraftSabangnetPartners(draft.brandId, field === 'html')
+  const temporaryEnabled = Boolean(editorId && (visualTab ? !readOnly : !locked))
+  const visualKey = ['draft-visual-content', editorId, draft.id] as const
+  const visual = useQuery({
+    queryKey: visualKey,
+    queryFn: ({ signal }) => listDraftVisualContent(draft.id, signal),
+    enabled: active && visualTab,
+    retry: false,
+  })
+  const visualRows = visual.data ?? []
+  const templates = vendorTemplates(visualRows)
+  const amd = teamWork.records?.get('amd') as DraftTeamRecord<'amd'> | undefined
+  const visualLocked = readOnly || !visual.data
   const temporary = useQuery({
     queryKey,
     queryFn: ({ signal }) => temporaryStore.list(draft.id, editorId!, signal),
@@ -412,13 +689,60 @@ export function DraftInformationPanel({
   const missingTemporary = temporaryErrorCode === 'PGRST205' || temporaryErrorCode === '42P01'
   const savedDocument = temporaryEnabled ? temporary.data?.find(row => row.field === 'specDoc') : undefined
 
-  async function saveTemporary(field: DraftInformationField, colorId: string | null, edits: InformationEdits) {
-    if (!editorId || readOnly) return
+  async function saveTemporary(field: DraftInformationTemporary['field'], colorId: string | null, edits: DraftInformationTemporary['edits']) {
+    const visualField = field === 'html' || field === 'image'
+    if (!editorId || (visualField ? readOnly : locked)) return
     const copy = { field, color_id: colorId, edits, revision: crypto.randomUUID() }
     await temporaryStore.save(draft.id, editorId, copy)
     await cache.cancelQueries({ queryKey, exact: true })
     cache.setQueryData<DraftInformationTemporary[]>(queryKey, current =>
       [...(current ?? []).filter(row => row.field !== field || row.color_id !== colorId), copy])
+    if (visualField && colorId) {
+      const boardQuery = { queryKey: draftVisualBoardKey(editorId) }
+      const temporaryColors = field === 'image' ? 'temporary_images' : 'temporary_html'
+      await cache.cancelQueries(boardQuery)
+      cache.setQueriesData<DraftVisualStatus[]>(boardQuery, rows => rows?.map(row =>
+        row.draft_id === draft.id && !row[temporaryColors].includes(colorId)
+          ? { ...row, [temporaryColors]: [...row[temporaryColors], colorId] }
+          : row))
+      void cache.invalidateQueries(boardQuery)
+    }
+  }
+
+  async function saveVisual(changes: DraftVisualChange[], temporaryRevision?: string) {
+    const savingPhoto = changes.some(change => change.kind === 'color-photo')
+    const saved = await saveDraftVisualContent(draft.id, changes, temporaryRevision).catch(error => {
+      if ((error as { code?: string } | null)?.code === '40001') {
+        void cache.invalidateQueries({ queryKey: visualKey, exact: true })
+        if (savingPhoto) {
+          void cache.invalidateQueries({ queryKey: draftVisualBoardKey(editorId) })
+          void onSharedPhotoChange()
+        }
+      }
+      throw error
+    })
+    await cache.cancelQueries({ queryKey: visualKey, exact: true })
+    cache.setQueryData<DraftVisualContent[]>(visualKey, current => [
+      ...(current ?? []).filter(row => !saved.some(next => row.kind === next.kind && row.entry_key === next.entry_key)),
+      ...saved,
+    ])
+    removeConfirmedTemporary(temporaryRevision)
+    const photo = saved.find(row => row.kind === 'color-photo')
+    if (photo?.kind === 'color-photo') await onSharedPhotoChange({ colorId: photo.entry_key, photo: photo.payload })
+    if (changes.some(change => change.kind === 'color-html' || change.kind === 'color-photo')) {
+      void cache.invalidateQueries({ queryKey: draftVisualBoardKey(editorId) })
+    }
+  }
+
+  async function saveVendorHtml(rows: readonly DraftVisualContent[], templates: DraftVendorHtml) {
+    const changes: DraftVisualChange[] = []
+    for (const [entry_key, payload] of Object.entries(templates)) {
+      if (!payload) continue
+      const current = rows.find(row => row.kind === 'vendor-html' && row.entry_key === entry_key)
+      if (current?.kind === 'vendor-html' && current.payload.top === payload.top && current.payload.bottom === payload.bottom) continue
+      changes.push({ kind: 'vendor-html', entry_key, payload, revision: current?.revision ?? null })
+    }
+    if (changes.length) await saveVisual(changes)
   }
 
   function removeConfirmedTemporary(revision: string | undefined) {
@@ -479,7 +803,7 @@ export function DraftInformationPanel({
 
   const content = (
     <Card className="@container overflow-hidden">
-      <div className="flex items-start gap-4 px-4 py-4">
+      <div className={cn('flex items-start gap-4 px-4 py-4', field === 'html' && 'relative flex-wrap pr-12 @[560px]:flex-nowrap')}>
         <InformationPhoto src={draft.imageUrl} name={draft.nameKo || draft.nameEn || draft.draftNo}
           className="w-20 shrink-0 @[560px]:w-36" />
         <div className="grid min-w-0 max-w-sm flex-1 gap-2">
@@ -494,10 +818,33 @@ export function DraftInformationPanel({
             <Input value={draft.nameEn} readOnly className="h-8 text-foreground" />
           </label>
         </div>
-        <Button type="button" size="icon" variant="ghost" className="ml-auto shrink-0" aria-label="INFORMATION 닫기" onClick={closeAndFocus}>
+        {field === 'html' && (
+          <div className="flex w-full justify-end border-t border-border pt-3 @[560px]:w-auto @[560px]:basis-[28%] @[560px]:self-stretch @[560px]:items-center @[560px]:justify-center @[560px]:border-l @[560px]:border-t-0 @[560px]:pl-4 @[560px]:pt-0">
+            <Button type="button" variant="secondary" disabled={visualLocked} aria-haspopup="dialog"
+              className="h-auto min-h-11 flex-col gap-0 bg-muted-foreground px-4 py-2 text-center text-xs text-background hover:bg-muted-foreground/85"
+              onClick={() => setVendorHtmlSnapshot(visualRows)}>
+              <span>업체별</span>
+              <span>Top Buttom 등록</span>
+            </Button>
+          </div>
+        )}
+        <Button type="button" size="icon" variant="ghost"
+          className={cn('ml-auto shrink-0', field === 'html' && 'absolute right-3 top-3')}
+          aria-label="INFORMATION 닫기" onClick={closeAndFocus}>
           <X size={16} aria-hidden="true" />
         </Button>
       </div>
+      {field === 'html' && vendorHtmlSnapshot && !readOnly &&
+        <DraftVendorHtmlDialog preferredVendor={draft.specs.openChannelTargetId ?? draft.openTypeDetail}
+          partners={partners} value={vendorTemplates(vendorHtmlSnapshot)}
+          onSave={templates => saveVendorHtml(vendorHtmlSnapshot, templates)}
+          onClose={() => setVendorHtmlSnapshot(undefined)} />}
+      {visualTab && visual.isPending && <p role="status" className="px-4 pb-2 text-xs text-muted-foreground">비주얼 정보를 불러오는 중…</p>}
+      {visualTab && visual.isError && <div className="flex items-center gap-2 px-4 pb-2 text-xs text-muted-foreground">
+        <p role="status">{['PGRST205', '42P01'].includes((visual.error as { code?: string }).code ?? '')
+          ? '비주얼 저장 서버 연결 대기' : '비주얼 정보를 불러오지 못했습니다.'}</p>
+        <Button type="button" variant="outline" size="sm" onClick={() => void visual.refetch()}>비주얼 다시 조회</Button>
+      </div>}
       {loadingTemporary && <p role="status" className="px-4 pb-2 text-xs text-muted-foreground">임시 저장 내용을 불러오는 중…</p>}
       {temporaryEnabled && temporary.isError && <div className="flex items-center gap-2 px-4 pb-2 text-xs text-muted-foreground">
         <p role="status">{missingTemporary ? '임시 저장 서버 연결 대기' : '임시 저장 내용을 불러오지 못했습니다.'}</p>
@@ -506,19 +853,46 @@ export function DraftInformationPanel({
       <div className="mx-4 mb-4 overflow-hidden rounded-xl border border-border">
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
           {field === 'specDoc' ? <span className="text-sm font-semibold">공통 스펙 문서</span>
-            : <span className="text-sm font-semibold">컬러 <span className="ml-1.5 font-normal text-muted-foreground">{colors.length}개</span></span>}
-          <div role="group" aria-label="INFORMATION 입력 항목" className="flex flex-wrap gap-2">
-            {FIELDS.map(option => (
-              <Button key={option} type="button" size="sm" variant={field === option ? 'default' : 'outline'}
-                aria-pressed={field === option} onClick={() => onFieldChange(option)}>
-                {option === 'specDoc' && <FileText size={14} aria-hidden="true" />}
-                {DRAFT_INFORMATION_LABELS[option]}
-              </Button>
+            : <span className="text-sm font-semibold">컬러 <span className="ml-1.5 font-normal text-muted-foreground">
+              {field === 'image' || field === 'html' ? `${colors.length}color` : `${colors.length}개`}
+            </span></span>}
+          <div role="group" aria-label="INFORMATION 입력 항목" className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            {DRAFT_INFORMATION_PANEL_TAB_GROUPS.map((tabs, index) => (
+              <div key={tabs[0].field} className={cn('flex flex-wrap gap-2', index > 0 && 'border-l border-border pl-3')}>
+                {tabs.map(({ field: option, label }) => (
+                  <Button key={option} type="button" size="sm" variant={field === option ? 'default' : 'outline'}
+                    aria-pressed={field === option} onClick={() => onFieldChange(option)}>
+                    {option === 'specDoc' && <FileText size={14} aria-hidden="true" />}
+                    {label}
+                  </Button>
+                ))}
+              </div>
             ))}
           </div>
         </div>
-        {field === 'specDoc' ? (
-          <SpecDocumentForm key={String(readOnly)} draft={draft} readOnly={readOnly || loadingTemporary} saved={savedDocument}
+        {field === 'image' ? <DraftVisualImagePanel key={`${editorId ?? ''}:${readOnly}`} colors={colors} draftRevision={draft.updatedAt}
+          colorPhotos={draft.specs.colorPhotoUrls} visualPhotos={visualRows} readOnly={visualLocked || loadingTemporary}
+          workingCopies={temporaryEnabled ? temporary.data : undefined} canSaveTemporary={canSaveTemporary}
+          onSave={(entry_key, { photo, revision, draftRevision }, asTemporary, temporaryRevision) => asTemporary
+            ? saveTemporary('image', entry_key, { image: { source: revision ?? '', text: photo, draftRevision } })
+            : saveVisual([{ kind: 'color-photo', entry_key, payload: photo, revision, draft_revision: draftRevision }], temporaryRevision)} /> : field === 'html' ? (
+          <div className="border-t border-border">
+            {colors.length ? colors.map((color, index) => {
+              const photo = visualRows.find(row => row.kind === 'color-photo' && row.entry_key === color.id)
+              const entry = visualRows.find(row => row.kind === 'color-html' && row.entry_key === color.id)
+              const working = temporaryEnabled ? temporary.data?.find(row => row.field === 'html' && row.color_id === color.id) : undefined
+              return <VisualHtmlRow key={`${color.id}:${readOnly}`} color={color} index={index}
+                visualPhoto={typeof photo?.payload === 'string' ? photo.payload : undefined}
+                colorPhoto={draft.specs.colorPhotoUrls?.[color.id]} readOnly={visualLocked || loadingTemporary}
+                amdReady={teamWork.ready} amdCodes={amd?.payload.colors[color.id]}
+                canSaveTemporary={canSaveTemporary} entry={entry} workingCopy={working} vendorHtml={templates} partnerNames={partners.names}
+                onSave={(payload, revision, asTemporary, temporaryRevision) => asTemporary
+                  ? saveTemporary('html', color.id, { html: { source: revision ?? '', text: payload } })
+                  : saveVisual([{ kind: 'color-html', entry_key: color.id, payload, revision }], temporaryRevision)} />
+            }) : <p className="px-4 py-3 text-sm text-muted-foreground">등록된 컬러가 없습니다.</p>}
+          </div>
+        ) : field === 'specDoc' ? (
+          <SpecDocumentForm key={String(locked)} draft={draft} readOnly={locked || loadingTemporary} showWriteActions={!fromVisual} saved={savedDocument}
             onSave={async (value, revision) => {
               await onSaveSpecDocument(value, revision)
               removeConfirmedTemporary(revision)
@@ -531,12 +905,13 @@ export function DraftInformationPanel({
           const spec = resolveColorSpec(draft.specs, color.id)
           const editKey = colorInformationEditKey(color.id, field)
           const saved = temporaryEnabled ? temporary.data?.find(row => row.field === field && row.color_id === color.id) : undefined
-          return <ColorInformationForm key={`${color.id}:${field}:${readOnly}`} color={color} field={field}
+          return <ColorInformationForm key={`${color.id}:${field}:${locked}`} color={color} field={field}
             photo={draft.specs.colorPhotoUrls?.[color.id]} spec={spec} confirmed={isColorInformationConfirmed(draft.specs, spec, field)}
             edits={edits[editKey] ?? saved?.edits} saved={saved}
             onEditsChange={next => onEditsChange(editKey, current => next(current ?? saved?.edits))}
             onSaveTemporary={canSaveTemporary ? next => saveTemporary(field, color.id, next) : undefined}
-            highlighted={color.id === colorId} readOnly={readOnly || loadingTemporary} canApplyBelow={index === 0 && colors.length > 1} onSave={saveColor} />
+            highlighted={color.id === colorId} readOnly={locked || loadingTemporary} showWriteActions={!fromVisual}
+            canApplyBelow={index === 0 && colors.length > 1} onSave={saveColor} />
         }) : <p className="border-t border-border px-4 py-3 text-sm text-muted-foreground">등록된 컬러가 없습니다.</p>}
       </div>
     </Card>

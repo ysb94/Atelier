@@ -420,8 +420,8 @@ export function LateArrivalHeaderButton() {
   }
   return <>
     <div className="flex flex-col items-center gap-1">
+      <span className="text-xl font-semibold text-danger">오늘 {minutes}분 지각</span>
       <Button type="button" className="h-11 px-7 text-base font-semibold shadow-md" onClick={() => { if (!savedId) { setPrior(''); setReason(''); setDetail(''); setPrevention(''); setFiles([]); setUploaded({}) } setError(''); setOpen(true) }}>{filed && !savedId ? '지각 사유서 확인' : '지각 사유서 작성'}</Button>
-      <span className="text-xs font-medium text-danger">오늘 {minutes}분 지각</span>
       {submitted && <span role="status" className="max-w-72 text-center text-xs text-success">{submitted}</span>}
     </div>
     {open && <div className="fixed inset-0 z-[70] grid place-items-center bg-background/75 p-4" role="dialog" aria-label="지각 사유서">

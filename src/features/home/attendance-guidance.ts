@@ -1,6 +1,8 @@
 import { clockOutLabel, koreaDateKey, type AttendanceClock } from '../settings/my-attendance.ts'
-import { minuteOf, type PersonalRequest } from '../settings/personal-requests.ts'
+import { isAllDayRequest, minuteOf, type PersonalRequest } from '../settings/personal-requests.ts'
 import type { WorkdayBasis } from '../../lib/supabase/attendance-entry.ts'
+import { attendanceArrivalStart, isMorningHalf } from '../operations-support/attendance-arrival.ts'
+import { isWorkday } from '../operations-support/monthly-attendance.ts'
 import { offsiteWorkdayStart } from '../operations-support/offsite-workday-start.ts'
 
 export const ATTENDANCE_GUIDANCE_START = '2026-10-26'
@@ -46,6 +48,17 @@ export function workdayGuidance(date: string, basis: WorkdayBasis | null | undef
   })
   const all = [...work, ...overtime]
   return all.length ? { start: Math.min(...all.map(r => r[0])), end: Math.max(...all.map(r => r[1])), fullLeave: false } : { ...empty, fullLeave: true }
+}
+
+export function clockInReminderFor(date: string, now: Date, basis: WorkdayBasis, requests: readonly PersonalRequest[]) {
+  if (!isWorkday(date, {}) || requests.some(r => r.status === 'approved' && r.from <= date && r.to >= date && isAllDayRequest(r.kind))) return null
+  const lunch = { start: basis.lunchStart, end: basis.lunchEnd }
+  const start = offsiteWorkdayStart(requests, date) ?? (basis.configured ? basis.start : null)
+  // 출근 전에는 승인된 당일 신청으로 기준을 계산해 반차 등록 직후에도 안내 시각을 맞춘다.
+  const expected = start ? attendanceArrivalStart(start, requests, date, lunch).slice(0, 5) : null
+  const instant = expected ? workInstant(date, expected) : null
+  const morningHalf = requests.some(r => r.kind === 'half' && r.status === 'approved' && r.from <= date && r.to >= date && isMorningHalf(r.start, lunch))
+  return { expected, due: instant !== null && now.getTime() >= instant, morningHalf }
 }
 
 export function previousClock(rows: readonly AttendanceClock[], today: string): AttendanceClock | null {

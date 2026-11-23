@@ -12,14 +12,24 @@ export function useLeaveRequests(){const {requests,setRequests}=useContext(C);re
 export const useMyClockIn=()=>({rows:EMPTY,todayClock:'09:00',todayClockOut:'',exempt:false,loading:false,needsClockIn:false,needsClockOut:false});export const useAttendanceEntry=()=>null;
 export const useDepartmentApprovers=()=>({loading:false,error:null,settings:EMPTY});export const useOpsDirectory=()=>({members:EMPTY,departments:EMPTY,departmentName:()=>'',loading:false,error:null});
 export const useLeaveAdvances=()=>({data:{ready:true,employees:EMPTY,events:EMPTY},isPending:false,isError:false});export const useScheduleTodos=()=>({data:EMPTY,isSuccess:true,busy:false});export const useMyScheduleMeetings=()=>({events:EMPTY});export const useReadMyHomeNotification=()=>({error:null,retry(){}});
-export const listMyAttendanceClocks=async()=>window.testNightClock?[{date:'2026-11-04',clockIn:'09:00',clockOutAt:window.hookState==='clocked_out'?'2026-11-05T03:00:00+09:00':null}]:EMPTY;export const clockOutToday=async()=>'';export const undoClockOutToday=async()=>{};export const getMyAttendanceExemption=async()=>false;export const listCompanyNotices=async()=>EMPTY;
-export const offsiteAction=async()=>({continuousSupported:window.continuousReady!==false,overnightSupported:window.nightReady!==false,state:window.hookState??'inactive',workDate:'2026-11-04',serverNow:'2026-11-04T09:00:00+09:00'});
-export const listOffsiteSettlements=async()=>({ready:true,rows:EMPTY});
+export const listMyAttendanceClocks=async()=>window.testNightClock?[{date:'2026-11-04',clockIn:'09:00',clockOutAt:window.hookState==='clocked_out'?'2026-11-05T03:00:00+09:00':null}]:window.testReturn?[{date:'2026-11-04',clockIn:'09:00',clockOutAt:window.testCheckout??null}]:EMPTY;export const clockOutToday=async()=>'';export const undoClockOutToday=async()=>{};export const getMyAttendanceExemption=async()=>false;export const listCompanyNotices=async()=>EMPTY;
+export const readMyOffsiteClockTimes=async(userId,date)=>{if(userId!=='self'||date!=='2026-11-04')throw Error('Unexpected offsite clock query');return {offsite_returned_at:window.testReturnedAt??null,clock_out_at:window.testCheckout??null,auto_closed_at:null}};
+export const offsiteAction=async action=>{
+  if(action==='return_from_offsite'){
+    window.returnCalls=(window.returnCalls??0)+1;
+    if(window.failReturn)throw Error('복귀 저장 실패');
+    window.hookState='returned';window.testReturnedAt='2026-11-04T18:03:50+09:00';window.testCheckout=null;
+  }
+  return {continuousSupported:window.continuousReady!==false,overnightSupported:window.nightReady!==false,state:window.hookState??'inactive',workDate:window.testWorkDate??'2026-11-04',serverNow:window.testReturn?'2026-11-04T18:03:50+09:00':'2026-11-04T09:00:00+09:00',scheduledEndAt:'2026-11-04T20:00:00+09:00'};
+};
+export const listLeaveRequests=async()=>EMPTY;export const uploadLeaveFile=async()=>{};
+export const listOffsiteSettlements=async()=>({ready:true,rows:EMPTY});export const offsiteSettlementPreview=async()=>null;
+export const useMyHomeNotifications=()=>({items:EMPTY,work:EMPTY});export const confirmPreviousClockOut=async()=>{};
 export const getSupabase=()=>({rpc:async()=>({data:[],error:null})});`)
 await writeFile(path.join(dir,'entry.tsx'),`import React from'react';import{createRoot}from'react-dom/client';import{QueryClient,QueryClientProvider,useQueryClient}from'@tanstack/react-query';import{MemoryRouter}from'react-router-dom';import{Provider}from'./stubs';import{MyAttendancePanel}from'${root.replaceAll('\\','/')}/src/features/settings/MyAttendancePanel';import{useMyClockIn as useRealClock}from'${root.replaceAll('\\','/')}/src/features/home/use-my-clock-in';function Probe(){const c=useRealClock();const cache=useQueryClient();return <><output>{JSON.stringify({needsClockIn:c.needsClockIn,needsClockOut:c.needsClockOut,ongoing:c.ongoingOffsiteRecord?.date??null})}</output><button onClick={()=>{window.hookState='returned';cache.invalidateQueries({queryKey:['my-offsite-attendance']})}}>복귀 상태</button><button onClick={()=>{window.hookState='clocked_out';cache.invalidateQueries({queryKey:['attendance-clock-ins']});cache.invalidateQueries({queryKey:['my-offsite-attendance']})}}>퇴근 상태</button></>};window.testNightClock=location.search==='?hook';if(window.testNightClock)window.hookState='offsite';createRoot(document.getElementById('root')).render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><MemoryRouter><Provider>{window.testNightClock?<Probe/>:<MyAttendancePanel/>}</Provider></MemoryRouter></QueryClientProvider>);`)
-const names=['offsite-settlements','auth','use-leave-requests','use-my-clock-in','attendance-entry-context','use-department-approvers','ops-directory','use-leave-advances','use-schedule-todos','use-my-schedule-meetings','use-my-home-notifications','attendance-clocks','company-notices','offsite-attendance','attendance-exemptions','attendance-entry','client']
+const names=['offsite-settlements','leave-requests','auth','use-leave-requests','use-my-clock-in','attendance-entry-context','use-department-approvers','ops-directory','use-leave-advances','use-schedule-todos','use-my-schedule-meetings','use-my-home-notifications','attendance-clocks','company-notices','offsite-attendance','attendance-exemptions','attendance-entry','client']
 await build({entryPoints:[path.join(dir,'entry.tsx')],outfile:path.join(dir,'app.js'),bundle:true,format:'esm',jsx:'automatic',define:{'import.meta.env':'{"DEV":false}'},plugins:[{name:'isolated',setup(b){b.onResolve({filter:/.*/},args=>{if(args.importer.includes(dir)||args.path==='@/lib/company/company-notices')return;const name=args.path.split('/').at(-1).replace(/\.tsx?$/,'');if(names.includes(name)&&(args.path.startsWith('.')||args.path.startsWith('@/')))return{path:path.join(dir,'stubs.tsx')}})}}],alias:{'@':path.join(root,'src')},logLevel:'silent'})
-const css=(await readdir('dist/assets')).find(name=>/^index-.*\.css$/.test(name));const server=createServer(async(req,res)=>{if(req.url==='/app.js'){res.setHeader('Content-Type','text/javascript');res.end(await readFile(path.join(dir,'app.js')))}else if(req.url==='/app.css'){res.setHeader('Content-Type','text/css');res.end(await readFile(path.join('dist/assets',css)))}else{res.setHeader('Content-Type','text/html');res.end('<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/app.css"><div id="root"></div><script type="module" src="/app.js"></script>')}})
+const css=(await readdir('dist/assets')).find(name=>/^index-.*\.css$/.test(name));const cssContent=await readFile(path.join('dist/assets',css));const server=createServer(async(req,res)=>{if(req.url==='/app.js'){res.setHeader('Content-Type','text/javascript');res.end(await readFile(path.join(dir,'app.js')))}else if(req.url==='/app.css'){res.setHeader('Content-Type','text/css');res.end(cssContent)}else{res.setHeader('Content-Type','text/html');res.end('<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/app.css"><div id="root"></div><script type="module" src="/app.js"></script>')}})
 let browser
 try{
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});const page=await browser.newPage({viewport:{width:1440,height:1100}});await page.clock.install({time:new Date('2026-11-04T10:00:00+09:00')});const errors=[];page.on('pageerror',e=>errors.push(e.message));const origin=`http://127.0.0.1:${server.address().port}`;await page.route('**/*',route=>route.request().url().startsWith(origin)?route.continue():route.abort());await page.goto(origin);await page.waitForTimeout(300);assert.deepEqual(errors,[])
@@ -41,6 +51,36 @@ await dialog.getByLabel('시작 시각 시',{exact:true}).selectOption('16');awa
 await page.evaluate(()=>window.shiftReady=false);await dialog.getByRole('button',{name:'신청하기',exact:true}).click();await dialog.getByRole('alert').filter({hasText:'당일 출근 기준 변경은 서버 적용 대기 중입니다.'}).waitFor();assert.equal(await page.evaluate(()=>window.lastSaved),undefined);
 await page.evaluate(()=>window.shiftReady=true);await dialog.getByRole('button',{name:'신청하기',exact:true}).click();await page.getByText('외근을 등록했습니다. 승인 없이 달력에 반영됩니다.',{exact:true}).waitFor();const shifted=await page.evaluate(()=>window.lastSaved);assert.equal(shifted.start,'16:00');assert.equal(shifted.end,'20:00');assert.equal(shifted.offsiteWorkStart,'10:00');assert.equal(shifted.endNextDay,false);
 await page.getByRole('button',{name:'외근',exact:true}).first().click();await page.getByText('10:00 · 외근 시작일에만 적용',{exact:true}).waitFor();
+const detail = page.getByRole('dialog', {name:'외근',exact:true})
+const returnButton = detail.getByRole('button', {name:'사무실 복귀',exact:true})
+await detail.getByText('외근 예정시간',{exact:true}).waitFor()
+await detail.getByText('16:00–20:00',{exact:true}).waitFor()
+assert.equal(await returnButton.count(),0)
+await detail.getByRole('button',{name:'닫기',exact:true}).click()
+await page.clock.setSystemTime(new Date('2026-11-04T18:04:00+09:00'))
+await page.evaluate(()=>{window.testReturn=true;window.hookState='offsite';window.testWorkDate='2026-11-03'})
+await page.getByRole('button',{name:'외근',exact:true}).first().click()
+await detail.getByText('사무실 복귀시간',{exact:true}).waitFor()
+assert.equal(await returnButton.count(),0)
+await page.evaluate(()=>{window.testWorkDate='2026-11-04';window.failReturn=true})
+await page.clock.fastForward(31_000)
+await returnButton.click()
+await detail.getByRole('alert').filter({hasText:'복귀 저장 실패'}).waitFor()
+await page.evaluate(()=>{window.failReturn=false})
+await returnButton.click()
+await detail.getByText('18:03',{exact:true}).waitFor()
+await returnButton.waitFor({state:'hidden'})
+assert.equal(await page.evaluate(()=>window.returnCalls),2)
+assert.equal(await detail.getByText('미기록',{exact:true}).count(),1)
+await detail.getByRole('button',{name:'닫기',exact:true}).click()
+await page.evaluate(()=>{window.testCheckout='2026-11-04T19:00:00+09:00'})
+await page.clock.fastForward(31_000)
+await page.getByRole('button',{name:'외근',exact:true}).first().click()
+await detail.getByText('16:00–20:00',{exact:true}).waitFor()
+await detail.getByText('18:03',{exact:true}).waitFor()
+await detail.getByText('19:00',{exact:true}).waitFor()
+assert.equal(await returnButton.count(),0)
 await page.clock.setSystemTime(new Date('2026-11-05T00:30:00+09:00'));await page.goto(origin+'?hook');await page.getByText('{"needsClockIn":false,"needsClockOut":true,"ongoing":"2026-11-04"}',{exact:true}).waitFor();await page.getByRole('button',{name:'복귀 상태',exact:true}).click();await page.getByText('{"needsClockIn":false,"needsClockOut":true,"ongoing":"2026-11-04"}',{exact:true}).waitFor();await page.getByRole('button',{name:'퇴근 상태',exact:true}).click();await page.getByText('{"needsClockIn":true,"needsClockOut":false,"ongoing":null}',{exact:true}).waitFor();assert.deepEqual(errors,[])
+console.info('Offsite detail browser: planned, returned and final checkout times shown separately; other workday blocked, failed return retried, saved return and later checkout shown')
 console.info('Overnight browser: actual My Schedule form, explicit start/end dates without next-day checkbox, invalid reversed range blocked, 09:00→next 03:00 preview, start-day payload, unapplied DB blocks save; real clock hook continues overnight/returned work and enables new clock-in only after checkout passed')
 }finally{await browser?.close();await new Promise(resolve=>server.close(resolve))}

@@ -212,6 +212,7 @@ function normalizeSpecs(raw: ProductDraft['specs'] | null | undefined, colors: D
     base.proposer = { id: raw.proposer.id, name: raw.proposer.name.trim() }
   }
   if (typeof raw?.confirmedPriceRequestId === 'string') base.confirmedPriceRequestId = raw.confirmedPriceRequestId
+  if (typeof raw?.openChannelTargetId === 'string') base.openChannelTargetId = raw.openChannelTargetId
   const colorImageChoices: Record<string, DraftColorImageChoice> = {}
   for (const { id } of colors) {
     const choice = raw?.colorImageChoices?.[id]
@@ -220,6 +221,16 @@ function normalizeSpecs(raw: ProductDraft['specs'] | null | undefined, colors: D
   if (Object.keys(colorImageChoices).length) base.colorImageChoices = colorImageChoices
   const colorPhotoUrls = normalizeColorPhotoUrls(raw, colors)
   if (colorPhotoUrls) base.colorPhotoUrls = colorPhotoUrls
+  const releaseSchedule = raw?.releaseSchedule
+  if (typeof releaseSchedule?.seasonId === 'string' &&
+      (releaseSchedule.certainty === 'tentative' || releaseSchedule.certainty === 'confirmed')) {
+    base.releaseSchedule = {
+      seasonId: releaseSchedule.seasonId,
+      certainty: releaseSchedule.certainty,
+      targetDate: typeof releaseSchedule.targetDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(releaseSchedule.targetDate)
+        ? releaseSchedule.targetDate : null,
+    }
+  }
   base.nameConfirmed = Boolean(raw?.nameConfirmed)
   base.colorsConfirmed = Boolean(raw?.colorsConfirmed)
   base.colorNamesConfirmed = Boolean(raw?.colorNamesConfirmed)
@@ -557,7 +568,7 @@ export async function saveDraftColors(
     if (choice) choices[color.id] = choice
     if (choice === 'Image' && photo) photos[color.id] = photo
     const change = { id: color.id, name: color.name }
-    if (!photoChange || (choice === previousChoice && (photo ?? undefined) === previousPhoto)) return change
+    if (!photoChange) return change
     return { ...change, imageChoice: photoChange.choice, photoUrl: photoChange.url }
   })
 
@@ -605,7 +616,9 @@ export async function saveDraftReleaseFolder(
   if (!data) {
     throw new ProductDraftStoreError('기획안이 변경되었습니다. 새로고침한 뒤 다시 선택해 주세요.', 'invalid')
   }
-  return { ...draft, seasonId: data.season_id, updatedAt: data.updated_at }
+  const specs = draft.specs.releaseSchedule?.seasonId === data.season_id
+    ? draft.specs : { ...draft.specs, releaseSchedule: undefined }
+  return { ...draft, specs, seasonId: data.season_id, updatedAt: data.updated_at }
 }
 
 export async function updateProductDraft(

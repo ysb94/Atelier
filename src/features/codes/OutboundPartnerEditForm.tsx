@@ -7,6 +7,7 @@ import { outboundChannelFromFolderPath } from "@/lib/codes/outbound-partner-brow
 import {
   compactOutboundPartnerKey,
   normalizeOutboundPartnerName,
+  outboundPartnerRegisteredName,
   type OutboundCompanyMode,
 } from "@/lib/codes/outbound-partner";
 import {
@@ -136,13 +137,8 @@ export function OutboundPartnerEditForm({
   onClose: () => void;
   onChanged: () => void | Promise<void>;
 }) {
-  const [name, setName] = useState(target.name);
-  const [groupName, setGroupName] = useState(
-    companyMode === "branched" &&
-      !normalizeOutboundPartnerName(target.siteName)
-      ? target.name
-      : target.groupName || target.name,
-  );
+  const [displayName, setDisplayName] = useState(target.displayName ?? null);
+  const [groupName, setGroupName] = useState(target.groupName || target.name);
   const [siteName, setSiteName] = useState(target.siteName);
   const [contactName, setContactName] = useState(target.contactName);
   const [contactPhone, setContactPhone] = useState(target.contactPhone);
@@ -163,8 +159,15 @@ export function OutboundPartnerEditForm({
   const namedBranch = Boolean(
     target.groupId && normalizeOutboundPartnerName(target.siteName),
   );
-  const branched = companyMode === "branched";
-  const editGroupName = !legacy && !branched;
+  const editGroupName = !legacy && !namedBranch && companyMode !== "branched";
+  const canEditCompany = legacy || editGroupName;
+  const canEditDisplayName = target.displayName !== undefined;
+  const name = legacy ? groupName : target.name;
+  const defaultDisplayName = outboundPartnerRegisteredName({
+    name,
+    groupName: legacy ? "" : groupName,
+    siteName,
+  });
 
   const aliasWarning = useMemo(() => {
     const value = normalizeOutboundPartnerName(aliasInput);
@@ -198,9 +201,22 @@ export function OutboundPartnerEditForm({
       const savedAliases = draftAlias && !alreadyIncluded
         ? [...aliasList, draftAlias]
         : aliasList;
+      const nextDisplayName = normalizeOutboundPartnerName(displayName ?? "") || null;
+      const displayNameChange = canEditDisplayName && nextDisplayName !== target.displayName
+        ? nextDisplayName : undefined;
+      const onlyDisplayNameChanged = displayNameChange !== undefined &&
+        name === target.name && groupName === (target.groupName || target.name) &&
+        siteName === target.siteName && contactName === target.contactName &&
+        contactPhone === target.contactPhone && contactEmail === target.contactEmail &&
+        address === target.address && note === target.note &&
+        savedAliases.length === aliases.length && savedAliases.every((alias, index) => alias === aliases[index]);
+      if (onlyDisplayNameChanged) {
+        return updateCodeUsageTarget(target.id, { displayName: displayNameChange });
+      }
       return updateCodeUsageTarget(target.id, {
-        groupName: editGroupName ? groupName : undefined,
-        name: legacy || (branched && !namedBranch) ? groupName : name,
+        groupName: editGroupName && groupName !== target.groupName ? groupName : undefined,
+        name,
+        displayName: displayNameChange,
         folderId: target.folderId,
         channelType: outboundChannelFromFolderPath(folders, target.folderId),
         isOneTime: target.isOneTime,
@@ -289,6 +305,37 @@ export function OutboundPartnerEditForm({
 
   return (
     <div className="mt-3 space-y-4 rounded-lg border border-border bg-muted/30 p-3">
+      <label className="block space-y-1">
+        <span className="text-xs font-medium text-muted-foreground">표시명</span>
+        <Input
+          value={displayName ?? defaultDisplayName}
+          maxLength={120}
+          placeholder={canEditDisplayName ? "기존 표시명 사용" : undefined}
+          disabled={pending || !canEditDisplayName}
+          onChange={(event) => setDisplayName(event.target.value)}
+        />
+        {!canEditDisplayName && (
+          <span className="block text-xs text-muted-foreground">표시명 저장 설정 적용 후 수정할 수 있습니다.</span>
+        )}
+      </label>
+      <label className="block space-y-1">
+        <span className="text-xs font-medium text-muted-foreground">업체명</span>
+        <Input
+          value={groupName}
+          disabled={pending || !canEditCompany}
+          onChange={(event) => setGroupName(event.target.value)}
+        />
+      </label>
+      <label className="block space-y-1">
+        <span className="text-xs font-medium text-muted-foreground">지점명</span>
+        <Input
+          value={siteName}
+          placeholder={namedBranch ? undefined : "해당 없음"}
+          disabled={pending || !namedBranch}
+          onChange={(event) => setSiteName(event.target.value)}
+        />
+      </label>
+
       {legacy ? (
         <div className="space-y-3 rounded-lg border border-border bg-card p-3">
           <div>
@@ -391,34 +438,6 @@ export function OutboundPartnerEditForm({
           ) : null}
         </div>
       ) : null}
-
-      {namedBranch ? (
-        <label className="block space-y-1">
-          <span className="text-xs font-medium text-muted-foreground">
-            지점명
-          </span>
-          <Input
-            value={siteName}
-            disabled={pending}
-            onChange={(event) => setSiteName(event.target.value)}
-          />
-        </label>
-      ) : (
-        <label className="block space-y-1">
-          <span className="text-xs font-medium text-muted-foreground">
-            {branched ? "이름" : "업체명"}
-          </span>
-          <Input
-            value={groupName}
-            disabled={pending}
-            onChange={(event) => {
-              const value = event.target.value;
-              setGroupName(value);
-              if (legacy || branched) setName(value);
-            }}
-          />
-        </label>
-      )}
 
       <OutboundPartnerContactFields
         contactName={contactName}

@@ -4,6 +4,7 @@ import type { InvoiceSiteSummaryDraft } from '@/lib/invoice/mall-resolution'
 import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage } from '@/lib/supabase/map-error'
+import { readOutboundPartnerDisplayName } from '@/lib/supabase/outbound-partner-display-name'
 
 const RUN_COLUMNS =
   'id, brand_id, file_fingerprint, source_file_name, completed_by, worker_label, completed_at, source_row_count, source_order_count, exported_row_count, review_row_count, created_at, updated_at'
@@ -139,13 +140,13 @@ export async function listInvoiceWorkRuns(
   const names = new Map<string, string>()
 
   if (targetIds.length > 0) {
-    const { data: targetData, error: targetError } = await getSupabase()
+    const { data: targetData, error: targetError } = await readOutboundPartnerDisplayName((column) => getSupabase()
       .from('code_usage_targets')
       .select(
-        'id, name, channel_type, site_name, outbound_partner_groups(name)',
+        'id, name, channel_type, site_name, outbound_partner_groups(name)' + column,
       )
       .eq('brand_id', brandId)
-      .in('id', targetIds)
+      .in('id', targetIds))
 
     if (targetError) {
       throw new InvoiceWorkHistoryStoreError(
@@ -157,6 +158,7 @@ export async function listInvoiceWorkRuns(
       (targetData as unknown as Array<{
         id: string
         name: string
+        display_name?: string | null
         channel_type: 'unset' | 'online' | 'offline'
         site_name: string
         outbound_partner_groups:
@@ -172,6 +174,7 @@ export async function listInvoiceWorkRuns(
         row.id,
         outboundPartnerDisplayName({
           name: row.name,
+          displayName: row.display_name,
           groupName: group?.name ?? '',
           siteName: row.site_name,
         }),

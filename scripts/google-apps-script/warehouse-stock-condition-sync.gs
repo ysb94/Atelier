@@ -23,7 +23,50 @@ function _atelierStockConditionCall(action, confirmed) {
   return result;
 }
 
-function _writeAtelierStockCondition(sheet, entry) {
+// Include auxiliary cells, WPS snapshots and the Finder move log (AL:AS).
+// Only an explicitly identified retry may use its own AA value or AA claim note.
+function _atelierVacantStockRowsInRange(sheet, start, height, reservedId = '', reservedNote = '') {
+  const width = sheet.getMaxColumns();
+  if (width < 27) throw new Error('AA_COLUMN_MISSING');
+  const range = sheet.getRange(start, 1, height, width);
+  const values = range.getValues();
+  const candidates = [];
+  for (let i = 0; i < height; i++) {
+    if (values[i].every((value, col) => value === (col === 26 ? reservedId : ''))) candidates.push(i);
+  }
+  if (!candidates.length) return [];
+  const formulas = range.getFormulas();
+  const notes = range.getNotes();
+  return candidates.filter(i => formulas[i].every((formula, col) => !formula || col === 23) &&
+    notes[i].every((note, col) => note === (col === 26 ? reservedNote : ''))).map(i => start + i);
+}
+
+// The cache is scoped to one script-lock acquisition, and only provides
+// candidates. Callers read them again just before writing.
+function _atelierFindVacantStockRows(sheet, count, cache = {}) {
+  const end = Math.min(sheet.getMaxRows(), ATELIER_WAREHOUSE_SNAPSHOT_LAST_ROW);
+  if (!cache.free) { cache.free = []; cache.next = 3; }
+  while (cache.free.length < count && cache.next <= end) {
+    const height = Math.min(512, end - cache.next + 1);
+    cache.free.push(..._atelierVacantStockRowsInRange(sheet, cache.next, height));
+    cache.next += height;
+  }
+  return cache.free.splice(0, count);
+}
+
+function _atelierCheckVacantStockRows(sheet, rows) {
+  // Rows from the allocator are already ordered. Adjacent writes can share
+  // the same values/formulas/notes read even when there are holes in the block.
+  for (let i = 0; i < rows.length;) {
+    const start = rows[i];
+    let end = i + 1;
+    while (end < rows.length && rows[end] < start + 512) end++;
+    const free = new Set(_atelierVacantStockRowsInRange(sheet, start, rows[end - 1] - start + 1));
+    for (; i < end; i++) if (!free.has(rows[i])) throw new Error('ROW_OCCUPIED');
+  }
+}
+
+function _writeAtelierStockCondition(sheet, entry, vacancyCache) {
   const first = 3;
   const limit = ATELIER_WAREHOUSE_SNAPSHOT_LAST_ROW;
   const last = Math.min(Math.max(first, sheet.getLastRow()), sheet.getMaxRows());
@@ -85,36 +128,15 @@ function _writeAtelierStockCondition(sheet, entry) {
     }
   } else {
     if (!row) {
-      // Append after the last warehouse input, including rows carrying an AA alone.
-      const maxRows = sheet.getMaxRows();
-      const end = Math.min(limit, maxRows);
-      const height = end - first + 1;
-      const identifiers = height > 0 ? sheet.getRange(first, 27, height, 1).getDisplayValues() : [];
-      const products = height > 0 ? sheet.getRange(first, 2, height, 3).getDisplayValues() : [];
-      let last = height - 1;
-      while (last >= 0 && !norm(identifiers[last][0]) && !products[last].some(norm)) last--;
-      const start = first + last + 1;
-      const inputColumns = [0, 1, 2, 3, 4, 5, 6, 17, 25];
-      row = Math.max(start, end + 1);
-      for (let cursor = start; cursor <= end; cursor += 64) {
-        const block = sheet.getRange(cursor, 2, Math.min(64, end - cursor + 1), 26);
-        const visible = block.getDisplayValues();
-        const formulas = block.getFormulas();
-        const notes = block.getNotes();
-        const free = visible.findIndex((cells, i) => inputColumns.every(col =>
-          !norm(cells[col]) && !formulas[i][col] && !notes[i][col]));
-        if (free < 0) continue;
-        row = cursor + free;
-        break;
+      [row] = _atelierFindVacantStockRows(sheet, 1, vacancyCache);
+      if (!row) {
+        const maxRows = sheet.getMaxRows();
+        if (maxRows >= limit) throw new Error('OUTSIDE_SNAPSHOT_RANGE');
+        row = Math.max(first, maxRows + 1);
+        sheet.insertRowsAfter(maxRows, row - maxRows);
+        if (vacancyCache) vacancyCache.next = row + 1;
       }
-      if (row > limit) throw new Error('OUTSIDE_SNAPSHOT_RANGE');
-      if (row > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), row - sheet.getMaxRows());
-      const range = sheet.getRange(row, 2, 1, 26);
-      const writes = [0, 1, 2, 3, 4, 5, 6, 25];
-      const display = range.getDisplayValues()[0];
-      const formulas = range.getFormulas()[0];
-      if (writes.some((i) => norm(display[i]) || formulas[i]) ||
-          sheet.getRange(row, 27).getNote()) throw new Error('ROW_OCCUPIED');
+      _atelierCheckVacantStockRows(sheet, [row]);
       // Claim AA before writing any row data so a retry uses this same row.
       sheet.getRange(row, 27).setValue(entry.rowId);
       SpreadsheetApp.flush();
@@ -127,6 +149,7 @@ function _writeAtelierStockCondition(sheet, entry) {
       ? norm(value) !== '' && Number(String(value).replace(/,/g, '')) === Number(expected[i])
       : norm(value) === norm(expected[i]);
     if (cells.every((value) => !norm(value)) && range.getFormulas()[0].every((value) => !value)) {
+      if (!_atelierVacantStockRowsInRange(sheet, row, 1, entry.rowId).length) throw new Error('ROW_OCCUPIED');
       sheet.getRange(row, 4).setNumberFormat('@');
       range.setValues([[literal(expected[0]), literal(expected[1]), literal(expected[2]),
         "'" + expected[3], Number(expected[4]), Number(expected[5]), literal(expected[6])]]);
@@ -170,10 +193,12 @@ function syncAtelierStockConditions() {
     const sheet = spreadsheet?.getSheetByName('창고입력');
     if (!sheet) throw new Error('창고입력 시트를 찾지 못했습니다.');
     const confirmations = [];
+    let vacancyCache = {};
     for (const entry of entries) {
       try {
-        confirmations.push(_writeAtelierStockCondition(sheet, entry));
+        confirmations.push(_writeAtelierStockCondition(sheet, entry, vacancyCache));
       } catch (error) {
+        vacancyCache = {};
         console.warn('창고 재고 상태 반영 대기: ' + entry.rowId + ' ' + error.message);
       }
     }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import {
   Check,
@@ -16,6 +16,7 @@ import {
   folderMoveOptions,
   folderPath,
   matchesFolderSearch,
+  type OutboundFolderNode,
 } from '@/lib/codes/outbound-folder'
 import {
   ALL_CHILD_TAB_ID,
@@ -135,6 +136,8 @@ function TabButton({
 
 function SectionList({
   sections,
+  folderTree,
+  expandSearchResults = false,
   selectedId,
   onSelect,
   onRenamed,
@@ -147,6 +150,8 @@ function SectionList({
   onCancelAdd,
 }: {
   sections: readonly OutboundUnitSection[]
+  folderTree?: OutboundFolderNode | null
+  expandSearchResults?: boolean
   selectedId: string | null
   onSelect: (id: string) => void
   onRenamed?: () => void | Promise<void>
@@ -183,77 +188,88 @@ function SectionList({
     )
   }
 
+  function renderSection(
+    section: OutboundUnitSection,
+    label = section.pathLabel,
+    root = true,
+    last = false,
+    childFolders?: ReactNode,
+  ) {
+    const companies = section.companies.map((company, index) => (
+      <OutboundPartnerCompanyNode
+        key={company.key}
+        company={company}
+        selectedId={selectedId}
+        last={!childFolders && index === section.companies.length - 1}
+        root={!label}
+        defaultOpen={expandSearchResults}
+        onSelect={onSelect}
+        onRenamed={onRenamed}
+        onError={onError}
+      />
+    ))
+
+    return (
+      <div key={section.folderId ?? 'unfiled'}>
+        {label ? (
+          <TreeBranch
+            root={root}
+            last={last}
+            defaultOpen={expandSearchResults}
+            label={
+              <p className="truncate px-1">{label}</p>
+            }
+            renderAction={allowAdd && section.folderId
+              ? (expand) => (
+                  <button
+                    type="button"
+                    className="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                    aria-label={`${section.pathLabel} 에 업체 추가`}
+                    onClick={() => {
+                      expand()
+                      onAddCompany?.(section.folderId!)
+                    }}
+                  >
+                    <Plus className="size-3" />
+                  </button>
+                ) : undefined}
+          >
+            {addingFolderId === section.folderId ? (
+              <div className="py-1 pr-1">
+                <CompanyCreateForm
+                  pending={addPending}
+                  onSubmit={(draft) => onSubmitCompany?.(draft)}
+                  onCancel={() => onCancelAdd?.()}
+                />
+              </div>
+            ) : null}
+            {companies.length === 0 && !childFolders ? (
+              <p className="px-1 py-2 text-xs text-muted-foreground">
+                아직 업체가 없습니다.
+              </p>
+            ) : companies}
+            {childFolders}
+          </TreeBranch>
+        ) : <div className="space-y-2">{companies}{childFolders}</div>}
+      </div>
+    )
+  }
+
+  const sectionsById = new Map(sections.map((section) => [section.folderId, section]))
+  function renderFolder(node: OutboundFolderNode, root: boolean, last: boolean): ReactNode {
+    const section = sectionsById.get(node.id)
+    if (!section) return null
+    const children = node.children.filter((child) => sectionsById.has(child.id))
+    const label = section.pathLabel ? node.name : ''
+    const childFolders = children.length > 0
+      ? children.map((child, index) => renderFolder(child, !label, index === children.length - 1))
+      : undefined
+    return renderSection(section, label, root, last, childFolders)
+  }
+
   return (
     <div className="space-y-2">
-      {visible.map((section) => (
-        <div key={section.folderId ?? 'unfiled'}>
-          {section.pathLabel ? (
-            <TreeBranch
-              root
-              label={
-                <div className="flex min-w-0 items-center gap-1">
-                  <p className="min-w-0 flex-1 truncate px-1 text-xs font-semibold text-muted-foreground">
-                    {section.pathLabel}
-                  </p>
-                  {allowAdd && section.folderId ? (
-                    <button
-                      type="button"
-                      className="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                      aria-label={`${section.pathLabel} 에 업체 추가`}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        onAddCompany?.(section.folderId!)
-                      }}
-                    >
-                      <Plus className="size-3" />
-                    </button>
-                  ) : null}
-                </div>
-              }
-            >
-              {addingFolderId === section.folderId ? (
-                <div className="py-1 pr-1">
-                  <CompanyCreateForm
-                    pending={addPending}
-                    onSubmit={(draft) => onSubmitCompany?.(draft)}
-                    onCancel={() => onCancelAdd?.()}
-                  />
-                </div>
-              ) : null}
-              {section.companies.length === 0 ? (
-                <p className="px-1 py-2 text-xs text-muted-foreground">
-                  아직 업체가 없습니다.
-                </p>
-              ) : (
-                section.companies.map((company, index) => (
-                  <OutboundPartnerCompanyNode
-                    key={company.key}
-                    company={company}
-                    selectedId={selectedId}
-                    last={index === section.companies.length - 1}
-                    onSelect={onSelect}
-                    onRenamed={onRenamed}
-                    onError={onError}
-                  />
-                ))
-              )}
-            </TreeBranch>
-          ) : (
-            section.companies.map((company, index) => (
-              <OutboundPartnerCompanyNode
-                key={company.key}
-                company={company}
-                selectedId={selectedId}
-                last={index === section.companies.length - 1}
-                root
-                onSelect={onSelect}
-                onRenamed={onRenamed}
-                onError={onError}
-              />
-            ))
-          )}
-        </div>
-      ))}
+      {folderTree ? renderFolder(folderTree, true, true) : visible.map((section) => renderSection(section))}
     </div>
   )
 }
@@ -262,6 +278,7 @@ export function OutboundPartnerBrowser({
   layout,
   brandId,
   targets,
+  hiddenTargetId,
   folders,
   groups,
   keyword,
@@ -275,6 +292,7 @@ export function OutboundPartnerBrowser({
   layout: 'wide' | 'compact'
   brandId: string
   targets: CodeUsageTarget[]
+  hiddenTargetId?: string
   folders: CodeUsageTargetFolder[]
   groups: OutboundPartnerGroup[]
   keyword: string
@@ -302,16 +320,20 @@ export function OutboundPartnerBrowser({
 
   const searching = Boolean(keyword.trim())
   const forest = useMemo(() => buildFolderForest(folders), [folders])
+  const listTargets = useMemo(
+    () => hiddenTargetId ? targets.filter((target) => target.id !== hiddenTargetId) : targets,
+    [hiddenTargetId, targets],
+  )
   const cardsIn = useMemo(() => {
     const map = new Map<string | null, CodeUsageTarget[]>()
-    targets.forEach((target) => {
+    listTargets.forEach((target) => {
       const key = target.folderId
       const list = map.get(key)
       if (list) list.push(target)
       else map.set(key, [target])
     })
     return (folderId: string | null) => map.get(folderId) ?? []
-  }, [targets])
+  }, [listTargets])
 
   const unfiled = cardsIn(null)
   const rootTabs = useMemo(
@@ -373,7 +395,7 @@ export function OutboundPartnerBrowser({
 
   const searchHits = useMemo(() => {
     if (!searching) return []
-    return targets.filter((target) => {
+    return listTargets.filter((target) => {
       const aliasesHere = aliasesByTarget.get(target.id) ?? EMPTY_ALIASES
       if (matchesOutboundPartnerSearch(keyword, target, aliasesHere)) {
         return true
@@ -382,7 +404,7 @@ export function OutboundPartnerBrowser({
         matchesFolderSearch(keyword, folder),
       )
     })
-  }, [aliasesByTarget, folders, keyword, searching, targets])
+  }, [aliasesByTarget, folders, keyword, listTargets, searching])
 
   const searchSections = useMemo<OutboundUnitSection[]>(() => {
     if (!searching) return []
@@ -561,7 +583,9 @@ export function OutboundPartnerBrowser({
       </p>
     ) : (
       <SectionList
+        key="search"
         sections={searchSections}
+        expandSearchResults
         selectedId={selectedId}
         onSelect={(id) => onSelect(id === selectedId ? null : id)}
         onRenamed={onChanged}
@@ -570,7 +594,9 @@ export function OutboundPartnerBrowser({
     )
   ) : (
     <SectionList
+      key="browse"
       sections={sections}
+      folderTree={activeFolder && outboundChannelFromFolderPath(folders, activeFolder.id) === 'online' ? activeFolder : null}
       selectedId={selectedId}
       allowAdd
       addingFolderId={addingFolderId}

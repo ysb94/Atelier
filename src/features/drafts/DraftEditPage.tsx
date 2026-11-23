@@ -33,12 +33,12 @@ import { SampleWorkOrderRegistration } from './SampleWorkOrderRegistration'
 import { RegisteredSampleCard } from './RegisteredSampleCard'
 import { RegisteredColorSampleCards } from './RegisteredColorSampleCards'
 import { DraftProposerPicker } from './DraftProposerPicker'
+import { useDraftSabangnetPartners, withSavedDraftPartner } from './use-draft-sabangnet-partners'
 import { SampleDestinationSelect } from './SampleDestinationSelect'
 import { resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
 import { registerDraftSampleStage, updateDraftColorSample } from '@/lib/drafts/sample-registration'
 import {
   COST_CURRENCY_LABEL,
-  DRAFT_OPEN_DETAIL_OPTIONS,
   DRAFT_OPEN_TYPE_OPTIONS,
   DRAFT_REGISTER_TYPE_OPTIONS,
   DRAFT_SPEC_LABEL,
@@ -313,6 +313,14 @@ export function DraftEditPage() {
   const [seasonPrefillDone, setSeasonPrefillDone] = useState(false)
   const [seasonFromQueryDone, setSeasonFromQueryDone] = useState(false)
   const [editorPart, setEditorPart] = useState<'basic' | 'pending'>('basic')
+  const partners = useDraftSabangnetPartners(form.brandId, editorPart === 'pending')
+  const openChannelId = form.specs.openChannelTargetId ?? null
+  const openChannel = withSavedDraftPartner(
+    [{ id: 'all', label: '전체' }, ...partners.options],
+    openChannelId ?? (form.openTypeDetail === '전체' ? 'all' : null),
+    form.openTypeDetail,
+    openChannelId ? partners.names.get(openChannelId) : undefined,
+  )
   const selectedBrand = form.brandId ? brandById.get(form.brandId) : undefined
   const designer = form.owner.trim() || (isNew ? profile?.displayName?.trim() : '') || '미정'
 
@@ -853,7 +861,12 @@ export function DraftEditPage() {
                 onChange={event => {
                   setSeasonPrefillDone(true)
                   setSeasonFromQueryDone(true)
-                  patch({ brandId: event.target.value || null, seasonId: null })
+                  patch({
+                    brandId: event.target.value || null, seasonId: null,
+                    ...(form.specs.openChannelTargetId
+                      ? { openTypeDetail: '', specs: { ...form.specs, openChannelTargetId: null } }
+                      : {}),
+                  })
                 }}>
                 <option value="">브랜드 미정</option>
                 {brands.map(brand => <option key={brand.id} value={brand.id}
@@ -1236,13 +1249,20 @@ export function DraftEditPage() {
               />
             </Field>
             <Field label="오픈 채널">
-              <OptionSelect
-                className="h-8"
-                value={form.openTypeDetail}
-                options={DRAFT_OPEN_DETAIL_OPTIONS}
-                placeholder="채널 선택"
-                onChange={(openTypeDetail) => patch({ openTypeDetail })}
-              />
+              <Select aria-label="오픈 채널" className="h-8" value={openChannel.value}
+                disabled={!editable || saveMutation.isPending}
+                onChange={event => {
+                  const value = event.currentTarget.value
+                  if (value === openChannel.value) return
+                  const target = partners.options.find(option => option.id === value)
+                  patch({
+                    openTypeDetail: target?.registeredName ?? (value === 'all' ? '전체' : ''),
+                    specs: { ...form.specs, openChannelTargetId: target?.id ?? null },
+                  })
+                }}>
+                <option value="">{partners.placeholder}</option>
+                {openChannel.options.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+              </Select>
             </Field>
           </div>
 

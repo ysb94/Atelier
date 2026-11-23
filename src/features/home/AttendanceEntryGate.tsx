@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { usePagePreview } from '@/lib/company/page-preview-context'
+import { cn } from '@/lib/utils'
 import { clockOutLabel, koreaDateKey } from '@/features/settings/my-attendance'
 import { useAttendanceEntry } from './attendance-entry-context'
 import { fitPreviousClockOut, validatePreviousClockOut, workInstant } from './attendance-guidance'
@@ -115,9 +118,68 @@ function ClockInCircle() {
   const [now, setNow] = useState(() => new Date())
   useEffect(() => { const timer = window.setInterval(() => setNow(new Date()), 1000); return () => window.clearInterval(timer) }, [])
   return <Button type="button" aria-label="출근하기" className="attendance-entry-circle" disabled={entry.clock.saving}
-    onClick={() => { void entry.clock.clockIn().catch(error => console.warn('[attendance-entry] 오늘 출근 저장 실패', error)) }}>
+    onClick={() => saveClockIn(entry.clock.clockIn)}>
     <small>지금 시각</small><strong>{clockOutLabel(now.toISOString())}</strong><span>{entry.clock.saving ? '기록 중…' : '출근하기'}</span>
   </Button>
+}
+
+function saveClockIn(clockIn: () => Promise<string>) {
+  void clockIn().catch(() => { /* 기존 출근 mutation이 실패를 기록하고 오류를 화면에 표시한다. */ })
+}
+
+export function AttendanceClockInReminder() {
+  const entry = useAttendanceEntry()
+  const preview = usePagePreview()
+  const reminder = entry?.clockInReminder
+  if (!entry || !reminder || entry.phase !== 'ready' || preview?.active) return null
+  const expected = reminder.expected && `${reminder.expected} 출근 예정`
+  return <section aria-label="출근 안내" className={cn('w-full min-w-0 rounded-xl border px-4 py-3 text-center sm:min-w-64',
+    reminder.due ? 'border-primary/25 bg-primary/5' : 'border-border bg-card')}>
+    <div role="status">
+      <p className={cn('font-semibold', reminder.due ? 'text-xl text-primary sm:text-2xl' : 'text-base')}>
+        {reminder.due ? '아직 출근 기록이 없어요' : reminder.morningHalf ? '오전 반차' : '오늘 출근 기록이 없어요'}
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        {reminder.due && reminder.morningHalf && '오전 반차 · '}{expected || '출근 예정 시각 미설정'}
+      </p>
+    </div>
+    {(reminder.due || !reminder.morningHalf) && <Button type="button" variant={reminder.due ? 'default' : 'outline'} className="mt-2 h-11 px-7 text-base font-semibold"
+      disabled={entry.clock.saving} onClick={() => saveClockIn(entry.clock.clockIn)}>{entry.clock.saving ? '기록 중…' : '출근하기'}</Button>}
+    {entry.clock.error && <p role="alert" className="mt-2 text-sm text-danger">{entry.clock.error}</p>}
+  </section>
+}
+
+/** My home 밖에서 업무를 보고 있을 때만 별도 안내를 한 번 표시한다. */
+function ClockInReminderNotice() {
+  const entry = useAttendanceEntry()
+  const { pathname } = useLocation()
+  const preview = usePagePreview()
+  const onHome = pathname === '/settings/profile' || pathname === '/settings/profile/'
+  const [shownFor, setShownFor] = useState<string | null>(null)
+  const shown = useRef<string | null>(null)
+  const identity = entry?.identity
+  const { userId, today } = entry ?? {}
+  const due = entry?.phase === 'ready' && entry.clockInReminder?.due && !preview?.active
+  const now = entry?.now
+  useEffect(() => {
+    if (!due || !identity || !userId || !today || shown.current === identity || document.visibilityState !== 'visible') return
+    shown.current = identity
+    try {
+      const key = `atelier:clock-in-reminder-shown:${userId}`
+      if (localStorage.getItem(key) === today) return
+      localStorage.setItem(key, today)
+    } catch { /* 저장이 막혀도 현재 화면에서는 한 번만 표시한다. */ }
+    if (!onHome) setShownFor(identity)
+  }, [due, identity, userId, today, now, onHome])
+  if (!entry || !due || onHome || shownFor !== identity) return null
+  return <aside aria-label="출근 기록 안내" className="fixed right-4 top-16 z-40 w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-primary/25 bg-card p-4 shadow-md">
+    <p role="status" className="font-semibold text-primary">아직 출근 기록이 없어요</p>
+    <div className="mt-3 flex justify-end gap-2">
+      <Button type="button" variant="outline" size="sm" onClick={() => setShownFor(null)}>닫기</Button>
+      <Button type="button" size="sm" disabled={entry.clock.saving} onClick={() => saveClockIn(entry.clock.clockIn)}>{entry.clock.saving ? '기록 중…' : '출근하기'}</Button>
+    </div>
+    {entry.clock.error && <p role="alert" className="mt-2 text-sm text-danger">{entry.clock.error}</p>}
+  </aside>
 }
 
 function PreviousClockOutForm() {
@@ -201,12 +263,18 @@ export function AttendanceEntryGate({ children }: { children: ReactNode }) {
   return <><div ref={background} aria-hidden={blocked || undefined} className="h-full min-h-0">{children}</div>
     {entry && entry.phase !== 'ready' && <AttendanceDialog label={entry.phase === 'previous' ? '직전 근무일 퇴근 확인' : entry.phase === 'clock-in' ? '출근하기' : '출퇴근 기록 확인'}>
       <div className="my-auto w-full py-3">
-        {entry.phase === 'clock-in' ? <ClockInCircle /> : entry.phase === 'previous' ? <PreviousClockOutForm key={`${entry.identity}:${entry.target?.date}`} /> : <div className="mx-auto max-w-sm rounded-xl border border-border bg-card p-6 text-center shadow-sm"><p role={entry.phase === 'error' ? 'alert' : 'status'}>{entry.phase === 'error' ? '출퇴근 기록을 확인하지 못했습니다. 다시 조회해 주세요.' : '출퇴근 기록을 확인하고 있습니다.'}</p><Button type="button" className="mt-4" variant="outline" onClick={entry.refresh}>다시 조회</Button></div>}
+        {entry.phase === 'clock-in' ? <div className="flex flex-col items-center gap-5">
+          <ClockInCircle />
+          {entry.canBrowse && <Button type="button" variant="outline" className="h-11 bg-card px-5" disabled={entry.clock.saving} onClick={entry.browse}>
+            출근 기록 없이 둘러보기
+          </Button>}
+        </div> : entry.phase === 'previous' ? <PreviousClockOutForm key={`${entry.identity}:${entry.target?.date}`} /> : <div className="mx-auto max-w-sm rounded-xl border border-border bg-card p-6 text-center shadow-sm"><p role={entry.phase === 'error' ? 'alert' : 'status'}>{entry.phase === 'error' ? '출퇴근 기록을 확인하지 못했습니다. 다시 조회해 주세요.' : '출퇴근 기록을 확인하고 있습니다.'}</p><Button type="button" className="mt-4" variant="outline" onClick={entry.refresh}>다시 조회</Button></div>}
         {entry.clock.error && <p role="alert" className="mx-auto mt-3 max-w-md rounded-md bg-card p-3 text-sm text-danger">{entry.clock.error}</p>}
         <div className="mt-4 flex justify-center gap-3">{entry.developerSkip && <Button type="button" variant="outline" disabled={entry.clock.saving || entry.confirming} onClick={entry.skip}>개발자입니다</Button>}<Button type="button" variant="ghost" disabled={entry.clock.saving || entry.confirming} onClick={() => { void entry.signOut().catch(error => console.warn('[attendance-entry] 로그아웃 실패', error)) }}>로그아웃</Button></div>
       </div>
     </AttendanceDialog>}
     {entry?.phase === 'ready' && <><AttendancePresenceMonitor />{entry.checkoutOpen && <CheckoutConfirmation key={entry.identity} />}</>}
+    <ClockInReminderNotice />
   </>
 }
 

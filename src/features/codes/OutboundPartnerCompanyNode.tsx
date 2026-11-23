@@ -109,6 +109,7 @@ export function OutboundPartnerCompanyNode({
   selectedId,
   last = false,
   root = false,
+  defaultOpen,
   onSelect,
   onRenamed,
   onError,
@@ -117,6 +118,7 @@ export function OutboundPartnerCompanyNode({
   selectedId: string | null
   last?: boolean
   root?: boolean
+  defaultOpen?: boolean
   onSelect: (id: string) => void
   onRenamed?: () => void | Promise<void>
   onError?: (message: string | null) => void
@@ -185,7 +187,7 @@ export function OutboundPartnerCompanyNode({
     >
       <Input
         autoFocus
-        className="h-7 text-xs font-semibold"
+        className="h-7 font-medium"
         value={draft}
         disabled={renameMutation.isPending}
         aria-label="업체명"
@@ -204,7 +206,7 @@ export function OutboundPartnerCompanyNode({
     </form>
   ) : (
     <div
-      className="w-full truncate px-1 text-xs font-semibold"
+      className="w-full truncate px-1"
       title="클릭해서 접기 · 더블클릭해서 이름 바꾸기"
       onDoubleClick={(event) => {
         event.preventDefault()
@@ -213,29 +215,32 @@ export function OutboundPartnerCompanyNode({
       }}
     >
       {company.groupName}
-      <span className="ml-1 font-normal text-muted-foreground">
+      <span className="ml-1 text-xs font-normal text-muted-foreground">
         {company.units.length}곳
       </span>
     </div>
   )
 
-  if (company.mode !== 'branched') {
-    const unit = company.units[0]
-    if (!unit) return null
+  const firstUnit = company.units[0]
+  if (!firstUnit) return null
+  const showBranches = company.mode === 'branched' ||
+    (company.groupId !== null && firstUnit.siteName.trim() !== '')
+
+  if (!showBranches) {
     return (
       <TreeLeaf last={last} root={root}>
         <OutboundPartnerUnitItem
-          target={unit}
-          selected={selectedId === unit.id}
+          target={firstUnit}
+          selected={selectedId === firstUnit.id}
           identityVariant="full"
-          onSelect={() => onSelect(unit.id)}
+          onSelect={() => onSelect(firstUnit.id)}
         />
       </TreeLeaf>
     )
   }
 
   return (
-    <TreeBranch last={last} root={root} label={header}>
+    <TreeBranch last={last} root={root} label={header} defaultOpen={defaultOpen}>
       {company.units.map((unit, index) => (
         <TreeLeaf
           key={unit.id}
