@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { createPreviewWork, type WorkItem, type WorkState } from '@/features/work-requests/my-work-preview-data'
 import { cn } from '@/lib/utils'
+import { MyWorkCardDrawer } from './MyWorkCardDrawer'
 
 const columns = [
   { id: 'todo', label: 'ToDo', icon: CircleDashed, tone: 'text-muted-foreground' },
@@ -13,7 +14,7 @@ const columns = [
   { id: 'done', label: 'done', icon: CircleCheck, tone: 'text-success' },
 ] as const
 
-type BoardCard = Pick<WorkItem, 'id' | 'title' | 'status'>
+type BoardCard = Pick<WorkItem, 'id' | 'title' | 'description' | 'status'>
 type DropTarget = { status: WorkState; beforeId?: string }
 
 function cardAt(event: DragEvent<HTMLElement>) {
@@ -25,11 +26,13 @@ function cardAt(event: DragEvent<HTMLElement>) {
 export function MyWorkBoard() {
   const [cards, setCards] = useState<BoardCard[]>(() => createPreviewWork()
     .filter(item => item.assignee === 'me')
-    .map(({ id, title, status }) => ({ id, title, status })))
+    .map(({ id, title, description, status }) => ({ id, title, description, status })))
   const [draggedId, setDraggedId] = useState<string | null>(null)
   const [target, setTarget] = useState<DropTarget | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const [draftTitle, setDraftTitle] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const selectedCard = cards.find(card => card.id === selectedId)
   const addFormId = useId()
   const addButton = useRef<HTMLButtonElement>(null)
 
@@ -42,7 +45,7 @@ export function MyWorkBoard() {
     event.preventDefault()
     const title = draftTitle?.trim()
     if (!title) return
-    const card: BoardCard = { id: crypto.randomUUID(), title, status: 'todo' }
+    const card: BoardCard = { id: crypto.randomUUID(), title, description: '', status: 'todo' }
     setCards(current => [card, ...current])
     setAnnouncement(`${title} · ToDo에 추가`)
     closeAddForm()
@@ -66,7 +69,7 @@ export function MyWorkBoard() {
   }
 
   return <section className="space-y-3" aria-label="내 업무 보드">
-    <p className="text-sm text-muted-foreground">카드를 원하는 열로 끌어 놓으세요. 카드 추가와 이동은 새로고침 전까지 유지됩니다.</p>
+    <p className="text-sm text-muted-foreground">카드를 눌러 상세를 열거나 끌어서 옮기세요. 변경 사항은 새로고침 전까지 유지됩니다.</p>
     <p className="sr-only" role="status">{announcement}</p>
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {columns.map(({ id, label, icon: Icon, tone }) => {
@@ -124,9 +127,15 @@ export function MyWorkBoard() {
                 event.dataTransfer.setData('text/plain', card.id)
                 setDraggedId(card.id)
               }} onDragEnd={endDrag}>
-              <Card className="flex items-start gap-2 p-3">
-                <GripVertical size={16} className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                <h3 className="min-w-0 break-words text-sm font-medium leading-5">{card.title}</h3>
+              <Card>
+                <h3 className="text-sm font-medium leading-5">
+                  <button type="button" aria-haspopup="dialog"
+                    className="flex w-full cursor-inherit items-start gap-2 rounded-xl p-3 text-left hover:bg-muted/45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                    onClick={() => setSelectedId(card.id)}>
+                    <GripVertical size={16} className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <span className="min-w-0 wrap-anywhere">{card.title}</span>
+                  </button>
+                </h3>
               </Card>
             </li>)}
           </ul> : <p className="rounded-lg border border-dashed border-border bg-card/60 px-3 py-5 text-center text-xs text-muted-foreground">
@@ -135,5 +144,16 @@ export function MyWorkBoard() {
         </section>
       })}
     </div>
+    {selectedCard && <MyWorkCardDrawer key={selectedCard.id} card={selectedCard}
+      statusLabel={columns.find(column => column.id === selectedCard.status)?.label}
+      onClose={() => setSelectedId(null)}
+      onSave={details => {
+        setCards(current => current.map(card => card.id === selectedCard.id ? { ...card, ...details } : card))
+        setAnnouncement(`${details.title} · 수정됨`)
+      }} onDelete={() => {
+        setCards(current => current.filter(card => card.id !== selectedCard.id))
+        setAnnouncement(`${selectedCard.title} · 삭제됨`)
+        addButton.current?.focus()
+      }} />}
   </section>
 }
