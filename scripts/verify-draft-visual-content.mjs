@@ -30,7 +30,7 @@ try {
     'supabase/migrations/20261118071459_save_draft_colors.sql',
     'supabase/migrations/20261122161836_draft_visual_html.sql',
     'supabase/migrations/20261123053353_draft_visual_assignments_and_status.sql',
-    'supabase/migrations/20261123054744_draft_shared_color_photos.sql',
+    'supabase/migrations/20261123062029_draft_shared_color_photos.sql',
   ]) await db.exec(await readFile(file, 'utf8'))
   const otherCompany = crypto.randomUUID()
   await db.query('insert into public.companies(id) values($1),($2)', [company, otherCompany])
