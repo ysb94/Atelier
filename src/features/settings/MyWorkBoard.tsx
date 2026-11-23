@@ -1,11 +1,12 @@
 import { useId, useRef, useState, type DragEvent, type FormEvent } from 'react'
-import { CircleCheck, CircleDashed, CircleDot, GripVertical, MessageSquare, Plus } from 'lucide-react'
+import { CircleCheck, CircleDashed, CircleDot, GripVertical, MessageSquare, Plus, Settings2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { createPreviewWork, type WorkItem, type WorkState } from '@/features/work-requests/my-work-preview-data'
 import { cn } from '@/lib/utils'
 import { MyWorkCardDrawer } from './MyWorkCardDrawer'
+import { MyWorkFeedbackDialog } from './MyWorkFeedbackDialog'
 
 const columns = [
   { id: 'todo', label: 'ToDo', icon: CircleDashed, tone: 'text-muted-foreground' },
@@ -14,8 +15,23 @@ const columns = [
   { id: 'done', label: 'done', icon: CircleCheck, tone: 'text-success' },
 ] as const
 
-type BoardCard = Pick<WorkItem, 'id' | 'title' | 'description' | 'status'>
+type BoardCard = Pick<WorkItem, 'id' | 'title' | 'description' | 'status'> & { reviewer?: string }
 type DropTarget = { status: WorkState; beforeId?: string }
+type FeedbackDrop = { cardId: string; beforeId?: string }
+
+function feedbackPreferenceKey(actorId: string) {
+  return `atelier:my-work-feedback:${actorId}`
+}
+
+function loadFeedbackRecipients(actorId?: string): string[] {
+  if (!actorId) return []
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(feedbackPreferenceKey(actorId)) ?? '[]')
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : []
+  } catch {
+    return []
+  }
+}
 
 function cardAt(event: DragEvent<HTMLElement>) {
   return event.target instanceof Element
@@ -23,7 +39,7 @@ function cardAt(event: DragEvent<HTMLElement>) {
     : undefined
 }
 
-export function MyWorkBoard() {
+export function MyWorkBoard({ feedbackActorId }: { feedbackActorId?: string }) {
   const [cards, setCards] = useState<BoardCard[]>(() => createPreviewWork()
     .filter(item => item.assignee === 'me')
     .map(({ id, title, description, status }) => ({ id, title, description, status })))
@@ -32,7 +48,11 @@ export function MyWorkBoard() {
   const [announcement, setAnnouncement] = useState('')
   const [draftTitle, setDraftTitle] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [recipientIds, setRecipientIds] = useState(() => loadFeedbackRecipients(feedbackActorId))
+  const [feedbackDrop, setFeedbackDrop] = useState<FeedbackDrop | null>(null)
+  const [feedbackSettings, setFeedbackSettings] = useState(false)
   const selectedCard = cards.find(card => card.id === selectedId)
+  const feedbackCard = cards.find(card => card.id === feedbackDrop?.cardId)
   const addFormId = useId()
   const addButton = useRef<HTMLButtonElement>(null)
 
@@ -51,16 +71,32 @@ export function MyWorkBoard() {
     closeAddForm()
   }
 
-  function moveCard(id: string, status: WorkState, beforeId?: string) {
+  function moveCard(id: string, status: WorkState, beforeId?: string, reviewer?: string) {
     const card = cards.find(item => item.id === id)
     if (!card || id === beforeId) return
     setCards(current => {
       const next = current.filter(item => item.id !== id)
       const index = next.findIndex(item => item.id === beforeId)
-      next.splice(index >= 0 ? index : next.length, 0, { ...card, status })
+      next.splice(index >= 0 ? index : next.length, 0, { ...card, status,
+        reviewer: status === 'feedback' ? reviewer ?? card.reviewer : undefined })
       return next
     })
     setAnnouncement(`${card.title} · ${columns.find(column => column.id === status)?.label} 이동`)
+  }
+
+  function dropCard(id: string, status: WorkState, beforeId?: string) {
+    const card = cards.find(item => item.id === id)
+    if (card && status === 'feedback' && card.status !== 'feedback') {
+      setFeedbackDrop({ cardId: id, beforeId })
+    } else moveCard(id, status, beforeId)
+    endDrag()
+  }
+
+  function saveFeedbackRecipients(ids: string[]) {
+    if (!feedbackActorId) return
+    setRecipientIds(ids)
+    try { localStorage.setItem(feedbackPreferenceKey(feedbackActorId), JSON.stringify(ids)) } catch { /* 현재 화면의 선택은 유지한다. */ }
+    setFeedbackSettings(false)
   }
 
   function endDrag() {
@@ -87,8 +123,7 @@ export function MyWorkBoard() {
           onDrop={event => {
             if (!draggedId) return
             event.preventDefault()
-            moveCard(draggedId, id, cardAt(event))
-            endDrag()
+            dropCard(draggedId, id, cardAt(event))
           }}>
           <header className="mb-3 flex items-center gap-2 px-1">
             <Icon size={16} className={tone} aria-hidden="true" />
@@ -102,6 +137,10 @@ export function MyWorkBoard() {
               onClick={() => draftTitle === null ? setDraftTitle('') : closeAddForm()}>
               <Plus size={16} aria-hidden="true" />
             </button>}
+            {id === 'feedback' && <Button type="button" variant="outline" size="icon" className="size-7 shrink-0"
+              title="피드백 담당자 설정" aria-label="피드백 담당자 설정" aria-haspopup="dialog" onClick={() => setFeedbackSettings(true)}>
+              <Settings2 size={15} aria-hidden="true" />
+            </Button>}
           </header>
           {id === 'todo' && draftTitle !== null && <form id={addFormId} aria-label="업무 카드 추가" onSubmit={addCard}
             onKeyDown={event => {
@@ -128,11 +167,14 @@ export function MyWorkBoard() {
               }} onDragEnd={endDrag}>
               <Card>
                 <h3 className="text-sm font-medium leading-5">
-                  <button type="button" aria-haspopup="dialog"
+                  <button type="button" aria-haspopup="dialog" aria-label={card.title}
                     className="flex w-full cursor-inherit items-start gap-2 rounded-xl p-3 text-left hover:bg-muted/45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                     onClick={() => setSelectedId(card.id)}>
                     <GripVertical size={16} className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                    <span className="min-w-0 wrap-anywhere">{card.title}</span>
+                    <span className="min-w-0 wrap-anywhere">
+                      {card.title}
+                      {card.reviewer && <span className="mt-1 block text-xs font-normal text-muted-foreground">피드백 · {card.reviewer}</span>}
+                    </span>
                   </button>
                 </h3>
               </Card>
@@ -143,6 +185,14 @@ export function MyWorkBoard() {
         </section>
       })}
     </div>
+    {(feedbackSettings || feedbackCard) && <MyWorkFeedbackDialog actorId={feedbackActorId} settings={feedbackSettings}
+      cardTitle={feedbackCard?.title} recipientIds={recipientIds} onSettings={() => setFeedbackSettings(true)}
+      onSave={saveFeedbackRecipients} onClose={() => { setFeedbackSettings(false); setFeedbackDrop(null) }}
+      onSent={person => {
+        if (!feedbackDrop) return
+        moveCard(feedbackDrop.cardId, 'feedback', feedbackDrop.beforeId, person.displayName)
+        setAnnouncement(`${person.displayName}님에게 피드백 요청을 보냈습니다.`)
+      }} />}
     {selectedCard && <MyWorkCardDrawer key={selectedCard.id} card={selectedCard}
       statusLabel={columns.find(column => column.id === selectedCard.status)?.label}
       onClose={() => setSelectedId(null)}

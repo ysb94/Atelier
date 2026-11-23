@@ -24,6 +24,7 @@ import { WORK_REQUEST_VIEW_PARAMS } from '@/features/work-requests/work-request-
 import { ReleaseAccessProvider, useReleaseAccess } from '@/components/layout/release-access-context'
 import { WorkspaceTabActivityContext, useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { releasePersonalPart } from '@/lib/company/release-access'
+import { isPreviewProfile } from '@/lib/company/profile-preview'
 import { CompanyMeetingsPage } from '@/features/meetings/CompanyMeetingsPage'
 import { MyHomeNotificationBadge, MyHomeNotificationList, MyHomeWorkNoticeDetail, VisualWorkflowNotificationList } from './MyHomeNotificationList'
 import { HomeNoticeBoard } from './HomeNoticeBoard'
@@ -70,9 +71,11 @@ export function ProfileSettingsPage() {
 
 function ProfileSettingsContent() {
   useRenderWatch('ProfileSettingsPage')
-  const { profile, email } = useAuth()
+  const { profile, email, session } = useAuth()
   const preview = usePagePreview()
   const release = useReleaseAccess()
+  const feedbackActorId = !preview?.active && !isPreviewProfile(release.profile) && profile?.status === 'active' &&
+    profile.id === session?.user.id && profile.id === release.profile?.id ? profile.id : undefined
   const { approvals, departments } = release
   const active = useWorkspaceTabActivity()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -128,7 +131,9 @@ function ProfileSettingsContent() {
         <div id="personal-my-attendance-panel" role="tabpanel" aria-labelledby="personal-my-attendance-tab" hidden={visiblePart !== 'my-attendance'}><MyAttendancePanel key={profile?.id ?? 'signed-out'} /></div>
       </WorkspaceTabActivityContext.Provider>
       {releasePersonalPart(release.profile, 'my-work') && <div id="personal-my-work-panel" role="tabpanel"
-        aria-labelledby="personal-my-work-tab" hidden={visiblePart !== 'my-work'}><MyWorkBoard key={release.profile?.id} /></div>}
+        aria-labelledby="personal-my-work-tab" hidden={visiblePart !== 'my-work'}>
+        <MyWorkBoard key={`${release.profile?.id}:${feedbackActorId ?? 'preview'}`} feedbackActorId={feedbackActorId} />
+      </div>}
       {visiblePart === 'overtime' && <div id="personal-overtime-panel" role="tabpanel" aria-labelledby="personal-overtime-tab"><OvertimePanel /></div>}
       {visiblePart === 'attendance' && showDepartmentTab && <div id="personal-attendance-panel" role="tabpanel" aria-labelledby="personal-attendance-tab">
         {approvals.error && <p className="personal-page-notice is-error" role="alert">
