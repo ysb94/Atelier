@@ -413,20 +413,21 @@ function VendorHtmlCode({ id, name, text, templates }: { id: string; name: strin
   const template = vendors.some(option => option === vendor) ? templates[vendor] : undefined
   const code = template && text.trim() ? [template.top, text, template.bottom].filter(part => part.trim()).join('\n') : ''
 
-  return <div id={id} className="col-span-full grid gap-2 rounded-md border border-border bg-muted/35 p-3">
+  return <div id={id} className="grid min-w-0 gap-1.5">
     {vendors.length ? <>
-      <label className="grid w-full gap-1 text-xs font-medium sm:max-w-52">
+      <label className="grid min-w-0 gap-1 text-xs font-medium">
         업체 선택
-        <Select value={template ? vendor : ''} onChange={event => setVendor(event.target.value)}>
+        <Select className="h-7 min-w-0 px-2 text-xs" value={template ? vendor : ''} onChange={event => setVendor(event.target.value)}>
           <option value="">업체를 선택해 주세요</option>
           {vendors.map(option => <option key={option} value={option}>{option}</option>)}
         </Select>
       </label>
-      {template && <>
+      {template && <div className="relative min-w-0">
         <Textarea aria-label={`${name} 업체별 생성 HTML`} value={code} readOnly rows={5}
-          className="font-mono text-xs" placeholder="컬러 HTML을 입력해 주세요." />
-        <InformationCopyButton label={`${name} 업체별 HTML`} text={code} buttonText="복사" className="justify-self-end" />
-      </>}
+          className="block min-h-28 resize-y bg-muted/35 pb-9 font-mono text-xs" placeholder="컬러 HTML을 입력해 주세요." />
+        <InformationCopyButton label={`${name} 업체별 HTML`} text={code} buttonText="복사"
+          className="absolute bottom-2 right-2 h-6 px-2" />
+      </div>}
     </> : <p className="text-xs text-muted-foreground">상단 업체별 Top Buttom 등록에서 업체 HTML을 먼저 저장해 주세요.</p>}
   </div>
 }
@@ -494,7 +495,9 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
   }
 
   return <section aria-label={`${name} HTML`}
-    className="grid min-w-0 grid-cols-[3.5rem_minmax(0,1fr)] items-start gap-x-3 gap-y-2 border-b border-primary/45 p-3 @[560px]:grid-cols-[minmax(5rem,0.9fr)_minmax(0,3.8fr)] @[560px]:gap-x-4">
+    className={cn('grid min-w-0 grid-cols-[3.5rem_minmax(0,1fr)] items-start gap-x-3 gap-y-2 border-b border-primary/45 p-3 @[560px]:gap-x-4',
+      readOnly ? '@[560px]:grid-cols-[minmax(5rem,0.9fr)_minmax(0,3.8fr)]'
+        : '@[560px]:grid-cols-[minmax(5rem,0.9fr)_minmax(0,2.5fr)_minmax(9rem,1.3fr)]')}>
     <div className="self-center text-center">
       <div className={cn('relative grid aspect-square w-full place-items-center overflow-hidden rounded-xl border border-border bg-muted/35 font-semibold',
         showingTemporaryPhoto && 'draft-visual-image-temporary')}>
@@ -529,13 +532,15 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
           <Button type="button" size="sm" className="h-6 px-3"
             disabled={(!hasContent && !working && !stored) || saved || saving || versionChanged}
             onClick={() => void save(false)}>{saving ? '저장 중…' : '저장'}</Button>
-          <Button type="button" size="sm" variant="outline" className="h-6 px-2"
-            aria-expanded={codeOpen} aria-controls={codeOpen ? codeId : undefined}
-            onClick={() => setCodeOpen(open => !open)}>업체별 HTML 생성</Button>
         </>}
       </div>
     </div>
-    {!readOnly && codeOpen && <VendorHtmlCode id={codeId} name={name} text={text} templates={vendorHtml} />}
+    {!readOnly && <div className="col-start-2 grid min-w-0 content-end gap-1.5 self-stretch @[560px]:col-start-3">
+      <Button type="button" size="sm" variant="outline" className="order-last h-6 justify-self-end px-2"
+        aria-expanded={codeOpen} aria-controls={codeOpen ? codeId : undefined}
+        onClick={() => setCodeOpen(open => !open)}>업체별 HTML 생성</Button>
+      {codeOpen && <VendorHtmlCode id={codeId} name={name} text={text} templates={vendorHtml} />}
+    </div>}
     {!readOnly && versionChanged ? <div className="col-span-full flex flex-wrap items-center gap-2">
       <p role="alert" className="text-xs text-danger">다른 화면에서 먼저 저장했습니다. 작성 중인 HTML은 복사할 수 있습니다.</p>
       <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => {

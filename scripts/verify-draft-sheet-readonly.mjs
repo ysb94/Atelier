@@ -797,6 +797,13 @@ try{
  const musinsaIvoryCode=['<p>무신사 상단</p>',await ivoryInput.inputValue(),'<p>무신사 하단</p>'].join('\n')
  assert.equal(await ivoryVendorHtml.getAttribute('readonly'),'')
  assert.equal(await ivoryVendorHtml.inputValue(),musinsaIvoryCode)
+ const [sourceHtmlBox,generatedHtmlBox,generateButtonBox,copyHtmlBox]=await Promise.all([
+   ivoryInput,ivoryVendorHtml,generateVendorCode(ivoryHtml),ivoryHtml.getByRole('button',{name:'아이보리 업체별 HTML 복사',exact:true}),
+ ].map(locator=>locator.boundingBox()))
+ assert.ok(generatedHtmlBox.x>=sourceHtmlBox.x+sourceHtmlBox.width,'Generated HTML is in the right-hand column')
+ assert.ok(generatedHtmlBox.y+generatedHtmlBox.height<=generateButtonBox.y,'Generated HTML is above its button')
+ assert.ok(copyHtmlBox.x>=generatedHtmlBox.x&&copyHtmlBox.x+copyHtmlBox.width<=generatedHtmlBox.x+generatedHtmlBox.width&&
+   copyHtmlBox.y>=generatedHtmlBox.y&&copyHtmlBox.y+copyHtmlBox.height<=generatedHtmlBox.y+generatedHtmlBox.height,'Copy is in the generated HTML field')
  await expectCopy(ivoryHtml,'아이보리 업체별 HTML',musinsaIvoryCode)
  await ivoryVendor.selectOption('29CM')
  assert.equal(await ivoryVendorHtml.inputValue(),['<p>29CM 상단</p>',await ivoryInput.inputValue()].join('\n'))
@@ -813,6 +820,10 @@ try{
  await page.setViewportSize({width:390,height:850})
  await visualHtml.click()
  assert.equal(await ivoryInput.inputValue(),'<p>아이보리 상세 HTML</p><script>document.body.dataset.previewScript = "ran"</script>')
+ await generateVendorCode(ivoryHtml).click()
+ await ivoryVendor.selectOption('무신사')
+ const [mobileSource,mobileOutput]=await Promise.all([ivoryInput.boundingBox(),ivoryVendorHtml.boundingBox()])
+ assert.ok(mobileOutput.y>=mobileSource.y+mobileSource.height,'On mobile, generated HTML is below the editor')
  assert.equal(await panel.evaluate(node=>node.scrollWidth<=node.clientWidth),true)
  await vendorTopButtom.click()
  await vendor.selectOption('29CM')
