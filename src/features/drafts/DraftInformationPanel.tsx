@@ -431,6 +431,32 @@ function VendorHtmlCode({ id, name, text, templates }: { id: string; name: strin
   </div>
 }
 
+function openHtmlPreview(title: string, html: string) {
+  const tab = window.open('', '_blank')
+  if (!tab) return false
+
+  tab.opener = null
+  const document = tab.document
+  document.documentElement.lang = 'ko'
+  document.title = title
+  const viewport = document.createElement('meta')
+  viewport.name = 'viewport'
+  viewport.content = 'width=device-width,initial-scale=1'
+  document.head.append(viewport)
+
+  // Render editable HTML in an opaque sandbox, including when the preview fills a tab.
+  const frame = document.createElement('iframe')
+  frame.title = title
+  frame.setAttribute('sandbox', '')
+  frame.referrerPolicy = 'no-referrer'
+  frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0'
+  frame.srcdoc = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">${html}`
+  document.body.append(frame)
+  return true
+}
+
 function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSaveTemporary, entry, workingCopy, vendorHtml, onSave }: {
   color: DraftColorRow; index: number; visualPhoto?: string; colorPhoto?: string; readOnly: boolean
   canSaveTemporary: boolean
@@ -440,7 +466,6 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
   const name = color.name.trim() || `컬러 ${index + 1}`
   const { src: photo, temporary: showingTemporaryPhoto } = resolveDraftVisualPhoto(visualPhoto, colorPhoto)
   const [edit, setEdit] = useState<{ text: string; revision: string | null }>()
-  const [preview, setPreview] = useState('')
   const [codeOpen, setCodeOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -453,10 +478,6 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
   const hasContent = Boolean(text.trim())
   const saved = Boolean(entry) && !working && stored === text
   const temporary = working?.text === text
-  const previewDocument = preview
-    ? `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">${preview}`
-    : undefined
 
   async function save(asTemporary: boolean) {
     if (readOnly || saving) return
@@ -465,7 +486,6 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
     try {
       await onSave(text, revision, asTemporary, workingCopy?.revision)
       setEdit(undefined)
-      if (!hasContent) setPreview('')
     } catch (error) {
       setError(draftVisualSaveError(error))
     } finally {
@@ -474,7 +494,7 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
   }
 
   return <section aria-label={`${name} HTML`}
-    className="grid min-w-0 grid-cols-[3.5rem_minmax(0,1fr)] items-start gap-x-3 gap-y-2 border-b border-primary/45 p-3 @[560px]:grid-cols-[minmax(5rem,0.9fr)_minmax(0,2.8fr)_minmax(7.75rem,1fr)] @[560px]:gap-x-4">
+    className="grid min-w-0 grid-cols-[3.5rem_minmax(0,1fr)] items-start gap-x-3 gap-y-2 border-b border-primary/45 p-3 @[560px]:grid-cols-[minmax(5rem,0.9fr)_minmax(0,3.8fr)] @[560px]:gap-x-4">
     <div className="self-center text-center">
       <div className={cn('relative grid aspect-square w-full place-items-center overflow-hidden rounded-xl border border-border bg-muted/35 font-semibold',
         showingTemporaryPhoto && 'draft-visual-image-temporary')}>
@@ -498,32 +518,28 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
         <span className="mr-auto text-[10px] text-muted-foreground" role="status">
           {saved ? '저장됨' : temporary ? '임시저장됨' : ''}
         </span>
-        <Button type="button" size="sm" variant="outline" className="h-6 px-2"
-          disabled={!hasContent} onClick={() => setPreview(text)}>미리보기</Button>
+        <Button type="button" size="sm" variant="outline" className="h-6 px-2" title="새 탭에서 미리보기"
+          disabled={!hasContent} onClick={() => {
+            const opened = openHtmlPreview(`${name} HTML 미리보기`, text)
+            setError(opened ? '' : '미리보기를 열려면 브라우저의 팝업 차단을 해제해 주세요.')
+          }}>미리보기</Button>
         {!readOnly && <>
           <Button type="button" size="sm" variant="secondary" className="h-6 px-2"
             disabled={!canSaveTemporary || !hasContent || saved || temporary || saving || versionChanged} onClick={() => void save(true)}>임시저장</Button>
           <Button type="button" size="sm" className="h-6 px-3"
             disabled={(!hasContent && !working && !stored) || saved || saving || versionChanged}
             onClick={() => void save(false)}>{saving ? '저장 중…' : '저장'}</Button>
+          <Button type="button" size="sm" variant="outline" className="h-6 px-2"
+            aria-expanded={codeOpen} aria-controls={codeOpen ? codeId : undefined}
+            onClick={() => setCodeOpen(open => !open)}>업체별 HTML 생성</Button>
         </>}
       </div>
-    </div>
-    <div className="col-start-2 grid min-w-0 gap-1 @[560px]:col-start-3">
-      <div className="h-24 overflow-hidden rounded-md border border-border bg-card @[560px]:h-[10.65rem]">
-        {previewDocument && <iframe title={`${name} HTML 미리보기`} sandbox="" srcDoc={previewDocument}
-          tabIndex={-1} className="pointer-events-none size-full" />}
-      </div>
-      {!readOnly && <Button type="button" size="sm" variant="outline" className="h-6 justify-self-end px-2"
-        aria-expanded={codeOpen} aria-controls={codeOpen ? codeId : undefined}
-        onClick={() => setCodeOpen(open => !open)}>업체별 HTMl 생성</Button>}
     </div>
     {!readOnly && codeOpen && <VendorHtmlCode id={codeId} name={name} text={text} templates={vendorHtml} />}
     {!readOnly && versionChanged ? <div className="col-span-full flex flex-wrap items-center gap-2">
       <p role="alert" className="text-xs text-danger">다른 화면에서 먼저 저장했습니다. 작성 중인 HTML은 복사할 수 있습니다.</p>
       <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => {
         setEdit({ text: stored, revision: entry?.revision ?? null })
-        setPreview('')
         setError('')
       }}>최신 저장본 불러오기</Button>
     </div> : error && <p role="alert" className="col-span-full text-xs text-danger">{error}</p>}
