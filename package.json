@@ -76,6 +76,7 @@
     "verify:warehouse-sheet-sync": "node scripts/verify-warehouse-sheet-sync.mjs",
     "verify:warehouse-snapshot-finder-guard": "node scripts/verify-warehouse-snapshot-finder-guard.mjs",
     "verify:outbound-partner": "node scripts/verify-outbound-partner.mjs",
+    "verify:outbound-partner-registration": "node scripts/verify-outbound-partner-registration.mjs",
     "verify:invoice-mall": "node scripts/verify-invoice-mall.mjs",
     "verify:invoice-data-entry": "node scripts/verify-invoice-data-entry.mjs",
     "verify:work-instruction": "node scripts/verify-work-instruction.mjs",

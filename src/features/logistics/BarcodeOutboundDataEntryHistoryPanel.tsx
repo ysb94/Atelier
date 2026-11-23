@@ -52,8 +52,10 @@ function companyNameForKey(
   companyKey: string,
 ) {
   if (!companyKey) return '알 수 없는 업체'
+  const originalUnitId = companyKey.startsWith('legacy:') ? companyKey.slice('legacy:'.length) : null
   return (
-    companies.find((company) => company.key === companyKey)?.groupName ||
+    companies.find((company) => company.key === companyKey ||
+      company.units.some((unit) => unit.id === originalUnitId))?.groupName ||
     '알 수 없는 업체'
   )
 }

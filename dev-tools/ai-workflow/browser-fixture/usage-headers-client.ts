@@ -177,6 +177,7 @@ if (new URLSearchParams(location.search).has('grouped')) {
   })
 }
 const audit: any[] = []
+let nextRegistrationId = 110
 const fingerprint = () =>
   JSON.stringify(
     Object.fromEntries(
@@ -265,6 +266,43 @@ export function getSupabase() {
       return q
     },
     async rpc(name: string, args: any) {
+      if (name === 'register_outbound_partner') {
+        const rows = data.code_usage_targets
+        const base = rows.find((row) => row.id === args.p_existing_id && row.brand_id === args.p_brand_id)
+        const companyName = base?.outbound_partner_groups?.name ?? base?.name ?? args.p_company_name
+        if (args.p_action === 'new-company' && rows.some((row) => (row.outbound_partner_groups?.name ?? row.name) === companyName)) {
+          return { data: null, error: { code: '23505', message: 'duplicate fixture company' } }
+        }
+        if (args.p_action !== 'new-company' && base?.updated_at !== args.p_expected_updated_at) {
+          return { data: null, error: { code: '40001', message: 'fixture company changed' } }
+        }
+        const groupId = base?.group_id ?? uuid(nextRegistrationId++)
+        const group = { name: companyName }
+        if (base && !base.group_id) {
+          base.group_id = groupId
+          base.outbound_partner_groups = group
+        }
+        const site = args.p_site_name
+        const stamp = new Date().toISOString()
+        audit.push({ name, args: structuredClone(args) })
+        if (args.p_action === 'name-existing' && base) {
+          Object.assign(base, { site_name: site, normalized_site_name: compactOutboundPartnerKey(site), updated_at: stamp })
+          return { data: base.id, error: null }
+        }
+        const created = {
+          ...target(uuid(nextRegistrationId++), [companyName, site].filter(Boolean).join(' '), rows.length),
+          brand_id: args.p_brand_id,
+          group_id: groupId,
+          outbound_partner_groups: group,
+          folder_id: base?.folder_id ?? args.p_folder_id,
+          channel_type: base?.channel_type ?? args.p_channel_type,
+          site_name: site,
+          normalized_site_name: compactOutboundPartnerKey(site),
+          updated_at: stamp,
+        }
+        rows.push(created)
+        return { data: created.id, error: null }
+      }
       if (name === 'save_outbound_partner_unit_with_display_name') {
         const row = data.code_usage_targets.find((item) => item.id === args.p_id && item.brand_id === args.p_brand_id)
         if (!row) return { data: null, error: { message: 'fixture target not found' } }

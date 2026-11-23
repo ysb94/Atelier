@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, CardContent } from '@/components/ui/card'
-import { OutboundPartnerRegistrationPreview } from '@/features/codes/OutboundPartnerRegistrationPreview'
+import { OutboundPartnerRegistration } from '@/features/codes/OutboundPartnerRegistration'
 import { UsageTargetManagerPanel } from '@/features/codes/UsageTargetManager'
 import {
   getCodeUsageAssignments,
@@ -89,7 +89,18 @@ export function UsageTargetsSettingsPage() {
       ) : (
         <Card>
           <CardContent className="space-y-4 p-5">
-            <OutboundPartnerRegistrationPreview targets={targets} folders={folders} />
+            <OutboundPartnerRegistration
+              brandId={brand.id}
+              targets={targets}
+              folders={folders}
+              onSaved={async () => {
+                await Promise.all([
+                  invalidate(),
+                  queryClient.invalidateQueries({ queryKey: ['outboundShipments', brand.id] }),
+                  queryClient.invalidateQueries({ queryKey: ['barcodeDataEntryShipments', brand.id] }),
+                ])
+              }}
+            />
             <UsageTargetManagerPanel
               brandId={brand.id}
               targets={targets}
