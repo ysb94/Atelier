@@ -68,8 +68,7 @@ export function MyWorkBoard() {
     setTarget(null)
   }
 
-  return <section className="space-y-3" aria-label="내 업무 보드">
-    <p className="text-sm text-muted-foreground">카드를 눌러 상세를 열거나 끌어서 옮기세요. 변경 사항은 새로고침 전까지 유지됩니다.</p>
+  return <section aria-label="내 업무 보드">
     <p className="sr-only" role="status">{announcement}</p>
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {columns.map(({ id, label, icon: Icon, tone }) => {
