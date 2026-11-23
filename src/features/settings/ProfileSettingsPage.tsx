@@ -132,7 +132,8 @@ function ProfileSettingsContent() {
       </WorkspaceTabActivityContext.Provider>
       {releasePersonalPart(release.profile, 'my-work') && <div id="personal-my-work-panel" role="tabpanel"
         aria-labelledby="personal-my-work-tab" hidden={visiblePart !== 'my-work'}>
-        <MyWorkBoard key={`${release.profile?.id}:${feedbackActorId ?? 'preview'}`} feedbackActorId={feedbackActorId} />
+        <MyWorkBoard key={`${release.profile?.id}:${feedbackActorId ?? 'preview'}`} feedbackActorId={feedbackActorId}
+          active={active && visiblePart === 'my-work'} />
       </div>}
       {visiblePart === 'overtime' && <div id="personal-overtime-panel" role="tabpanel" aria-labelledby="personal-overtime-tab"><OvertimePanel /></div>}
       {visiblePart === 'attendance' && showDepartmentTab && <div id="personal-attendance-panel" role="tabpanel" aria-labelledby="personal-attendance-tab">

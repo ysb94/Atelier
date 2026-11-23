@@ -1,25 +1,25 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { EmployeeDirectoryColumns } from '@/components/ui/employee-directory-columns'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { chatKeys } from '@/features/chat/use-chat'
-import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { formatChatPerson } from '@/lib/inbox/format'
-import type { ChatDirectoryPerson } from '@/lib/inbox/types'
-import { listChatDirectory, openDirectChat, sendChatMessage } from '@/lib/supabase/chat'
+import { listChatDirectory } from '@/lib/supabase/chat'
+import { personalWorkErrorMessage } from '@/lib/supabase/personal-work'
 import { cn } from '@/lib/utils'
 
-export function MyWorkFeedbackDialog({ actorId, settings, cardTitle, recipientIds, onSettings, onSave, onSent, onClose }: {
+export function MyWorkFeedbackDialog({ actorId, settings, cardTitle, recipientIds, fixedReviewer, onSettings, onSave, onRequest, onClose }: {
   actorId?: string
   settings: boolean
   cardTitle?: string
   recipientIds: readonly string[]
+  fixedReviewer?: { id: string; name: string }
   onSettings: () => void
   onSave: (ids: string[]) => void
-  onSent: (person: ChatDirectoryPerson) => void
+  onRequest: (recipient: string, note: string, command: string) => Promise<void>
   onClose: () => void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
@@ -31,14 +31,15 @@ export function MyWorkFeedbackDialog({ actorId, settings, cardTitle, recipientId
   const [note, setNote] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
-  const attempt = useRef<{ id: string; recipient: string; body: string }>(null)
+  const attempt = useRef<{ id: string; recipient: string; note: string }>(null)
   const inFlight = useRef(false)
-  const cache = useQueryClient()
+  const needsDirectory = settings || !fixedReviewer
   const directory = useQuery({
-    queryKey: [...chatKeys.directory, actorId], queryFn: listChatDirectory, enabled: Boolean(actorId), retry: false,
+    queryKey: [...chatKeys.directory, actorId], queryFn: listChatDirectory, enabled: Boolean(actorId) && needsDirectory, retry: false,
   })
   const people = directory.data ?? []
   const available = people.filter(person => recipientIds.includes(person.profileId))
+  const reviewerId = fixedReviewer?.id ?? available.find(person => person.profileId === recipient)?.profileId
   const selectedPeople = people.filter(person => savedSelection.has(person.profileId))
   const query = search.trim().toLowerCase()
   const filtered = people.filter(person => [person.displayName, person.departmentName, person.position]
@@ -66,27 +67,20 @@ export function MyWorkFeedbackDialog({ actorId, settings, cardTitle, recipientId
   }
 
   async function requestFeedback() {
-    const person = available.find(person => person.profileId === recipient)
-    if (!person || !actorId || !cardTitle || inFlight.current || !directory.isSuccess) return
-    const body = ['[내 업무 피드백 요청]', cardTitle, note.trim()].filter(Boolean).join('\n\n')
+    if (!reviewerId || !actorId || !cardTitle || inFlight.current) return
+    const message = note.trim()
     const previous = attempt.current
-    const id = previous?.recipient === recipient && previous.body === body ? previous.id : crypto.randomUUID()
-    attempt.current = { id, recipient, body }
+    const id = previous?.recipient === reviewerId && previous.note === message ? previous.id : crypto.randomUUID()
+    attempt.current = { id, recipient: reviewerId, note: message }
     inFlight.current = true
     setSending(true)
     setError('')
-    const trace = startWorkflow('app', 'my_work_feedback_request')
     try {
-      const roomId = await trace.run('open_direct_chat', () => openDirectChat(recipient))
-      await trace.run('send_chat_message', () => sendChatMessage({ id, roomId, body }))
-      void cache.invalidateQueries({ queryKey: chatKeys.rooms })
-      void cache.invalidateQueries({ queryKey: chatKeys.messages(roomId, actorId) })
-      trace.done()
+      await onRequest(reviewerId, message, id)
       inFlight.current = false
       close()
-      onSent(person)
-    } catch {
-      setError('요청을 보내지 못했습니다. 다시 시도해 주세요.')
+    } catch (failure) {
+      setError(personalWorkErrorMessage(failure))
     } finally {
       inFlight.current = false
       setSending(false)
@@ -108,8 +102,8 @@ export function MyWorkFeedbackDialog({ actorId, settings, cardTitle, recipientId
     }}>
       <h2 id={titleId} className="text-lg font-semibold">{settings ? '피드백 담당자 설정' : '피드백 요청'}</h2>
       {!actorId ? <p className="text-sm text-muted-foreground">미리보기에서는 피드백 요청을 보낼 수 없습니다.</p>
-        : directory.isPending ? <p role="status" className="text-sm text-muted-foreground">직원 목록을 불러오는 중입니다.</p>
-        : directory.isError ? <div role="alert" className="space-y-2 text-sm text-danger">
+        : needsDirectory && directory.isPending ? <p role="status" className="text-sm text-muted-foreground">직원 목록을 불러오는 중입니다.</p>
+        : needsDirectory && directory.isError ? <div role="alert" className="space-y-2 text-sm text-danger">
           <p>직원 목록을 불러오지 못했습니다.</p>
           <Button type="button" variant="outline" size="sm" onClick={() => void directory.refetch()}>다시 불러오기</Button>
         </div> : settings ? <>
@@ -143,15 +137,16 @@ export function MyWorkFeedbackDialog({ actorId, settings, cardTitle, recipientId
           </div>
         </> : <>
           <p className="break-words text-sm font-medium">{cardTitle}</p>
-          {available.length ? <>
-            <label className="grid gap-2 text-sm">피드백 담당자
+          {fixedReviewer || available.length ? <>
+            {fixedReviewer ? <p className="text-sm">피드백 담당자 · {fixedReviewer.name} (업무를 배정한 사람)</p>
+              : <label className="grid gap-2 text-sm">피드백 담당자
               <Select className="w-full" value={recipient} disabled={sending} onChange={event => setRecipient(event.currentTarget.value)}>
                 <option value="">담당자 선택</option>
                 {available.map(person => <option key={person.profileId} value={person.profileId}>
                   {formatChatPerson(person.displayName, person.position)}{person.departmentName ? ` · ${person.departmentName}` : ''}
                 </option>)}
               </Select>
-            </label>
+            </label>}
             <label className="grid gap-2 text-sm">함께 보낼 내용 (선택)
               <Textarea rows={3} maxLength={3600} className="py-2" value={note} disabled={sending}
                 onChange={event => setNote(event.currentTarget.value)} />
@@ -165,8 +160,7 @@ export function MyWorkFeedbackDialog({ actorId, settings, cardTitle, recipientId
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       <footer className="flex justify-end gap-2">
         <Button type="button" variant="outline" disabled={sending} onClick={close}>취소</Button>
-        <Button type="submit" disabled={!actorId || !directory.isSuccess || sending ||
-          (!settings && !available.some(person => person.profileId === recipient))}>
+        <Button type="submit" disabled={!actorId || (needsDirectory && !directory.isSuccess) || sending || (!settings && !reviewerId)}>
           {settings ? '저장' : sending ? '보내는 중…' : '요청 보내기'}
         </Button>
       </footer>
