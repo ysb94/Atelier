@@ -24,11 +24,13 @@ import { WORK_REQUEST_VIEW_PARAMS } from '@/features/work-requests/work-request-
 import { ReleaseAccessProvider, useReleaseAccess } from '@/components/layout/release-access-context'
 import { WorkspaceTabActivityContext, useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { releasePersonalPart } from '@/lib/company/release-access'
+import { isPreviewProfile } from '@/lib/company/profile-preview'
 import { CompanyMeetingsPage } from '@/features/meetings/CompanyMeetingsPage'
 import { MyHomeNotificationBadge, MyHomeNotificationList, MyHomeWorkNoticeDetail, VisualWorkflowNotificationList } from './MyHomeNotificationList'
 import { HomeNoticeBoard } from './HomeNoticeBoard'
 import { MyAttendanceStartPanel } from './MyAttendanceStartPanel'
 import { MyAttendancePanel } from './MyAttendancePanel'
+import { MyWorkBoard } from './MyWorkBoard'
 import { OvertimePanel } from './OvertimePanel'
 import { RequiredInformationButton } from './RequiredInformationButton'
 import './personal-requests.css'
@@ -43,6 +45,8 @@ function formatHireDate(value: string | null | undefined) {
 }
 
 type PersonalPart = 'work' | 'my-work' | 'my-attendance' | 'profile' | 'overtime' | 'approvals' | 'company-notice' | 'department-notice' | 'meetings' | 'attendance'
+
+const overviewTabs = [{ id: 'my-attendance', label: 'My Schedule' }, { id: 'my-work', label: '내 업무' }] as const
 
 function personalPart(value: string | null): PersonalPart {
   if (
@@ -67,9 +71,11 @@ export function ProfileSettingsPage() {
 
 function ProfileSettingsContent() {
   useRenderWatch('ProfileSettingsPage')
-  const { profile, email } = useAuth()
+  const { profile, email, session } = useAuth()
   const preview = usePagePreview()
   const release = useReleaseAccess()
+  const feedbackActorId = !preview?.active && !isPreviewProfile(release.profile) && profile?.status === 'active' &&
+    profile.id === session?.user.id && profile.id === release.profile?.id ? profile.id : undefined
   const { approvals, departments } = release
   const active = useWorkspaceTabActivity()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -88,12 +94,12 @@ function ProfileSettingsContent() {
   const permitted = releasePersonalPart(release.profile, part, release.approver) && (part !== 'attendance' || showDepartmentTab)
   const visiblePart = !permitted || (part === 'attendance' && !showDepartmentTab) ? 'my-attendance' : part
   const tabs: { id: PersonalPart; label: string }[] = release.scope.unrestricted ? [
-    { id: 'my-attendance', label: 'My Schedule' }, { id: 'profile', label: '내 정보' },
+    ...overviewTabs, { id: 'profile', label: '내 정보' },
     { id: 'overtime', label: '야근' }, { id: 'work', label: '작업 요청' },
     { id: 'approvals', label: '승인할 신청' }, { id: 'company-notice', label: '회사 공지' },
     { id: 'department-notice', label: '부서 공지' }, { id: 'meetings', label: '회의' },
     ...(showDepartmentTab ? [{ id: 'attendance' as const, label: '담당 부서 출근시간' }] : []),
-  ] : [{ id: 'my-attendance', label: 'My Schedule' }, { id: 'overtime', label: '야근' }, { id: 'meetings', label: '회의' }, { id: 'work', label: '작업 요청' },
+  ] : [...overviewTabs, { id: 'overtime', label: '야근' }, { id: 'meetings', label: '회의' }, { id: 'work', label: '작업 요청' },
     ...(release.approver ? [{ id: 'approvals' as const, label: '승인할 신청' }, { id: 'attendance' as const, label: '담당 부서 출근시간' }] : [])]
   useEffect(() => {
     if (!active || permitted || ((part === 'approvals' || part === 'attendance') && approvals.loading)) return
@@ -111,7 +117,7 @@ function ProfileSettingsContent() {
       <div className="personal-page-tabs" role="tablist" aria-label="My home 메뉴">
         {tabs.filter(tab => releasePersonalPart(release.profile, tab.id, release.approver)).map(tab => <Fragment key={tab.id}>
           {release.scope.unrestricted && tab.id === 'approvals' && <span className="personal-page-tab-split" aria-hidden="true" />}
-          <button type="button" role="tab" id={`personal-${tab.id}-tab`} className={tab.id === 'attendance' ? 'personal-page-tab-end' : undefined} aria-selected={visiblePart === tab.id} aria-controls={`personal-${tab.id}-panel`} onClick={() => selectPart(tab.id)}>{tab.label}<MyHomeNotificationBadge tab={tab.id} /></button>
+          <button type="button" role="tab" id={`personal-${tab.id}-tab`} className={tab.id === 'attendance' ? 'personal-page-tab-end' : undefined} aria-selected={visiblePart === tab.id} aria-controls={`personal-${tab.id}-panel`} onClick={() => selectPart(tab.id)}>{tab.label}{tab.id !== 'my-work' && <MyHomeNotificationBadge tab={tab.id} />}</button>
         </Fragment>)}
       </div>
       {['meetings','my-attendance','approvals','overtime','attendance'].includes(visiblePart) && <MyHomeNotificationList key={visiblePart} tab={visiblePart as 'meetings'|'my-attendance'|'approvals'|'overtime'|'attendance'} />}
@@ -124,6 +130,11 @@ function ProfileSettingsContent() {
       <WorkspaceTabActivityContext.Provider value={active && visiblePart === 'my-attendance'}>
         <div id="personal-my-attendance-panel" role="tabpanel" aria-labelledby="personal-my-attendance-tab" hidden={visiblePart !== 'my-attendance'}><MyAttendancePanel key={profile?.id ?? 'signed-out'} /></div>
       </WorkspaceTabActivityContext.Provider>
+      {releasePersonalPart(release.profile, 'my-work') && <div id="personal-my-work-panel" role="tabpanel"
+        aria-labelledby="personal-my-work-tab" hidden={visiblePart !== 'my-work'}>
+        <MyWorkBoard key={`${release.profile?.id}:${feedbackActorId ?? 'preview'}`} feedbackActorId={feedbackActorId}
+          active={active && visiblePart === 'my-work'} />
+      </div>}
       {visiblePart === 'overtime' && <div id="personal-overtime-panel" role="tabpanel" aria-labelledby="personal-overtime-tab"><OvertimePanel /></div>}
       {visiblePart === 'attendance' && showDepartmentTab && <div id="personal-attendance-panel" role="tabpanel" aria-labelledby="personal-attendance-tab">
         {approvals.error && <p className="personal-page-notice is-error" role="alert">

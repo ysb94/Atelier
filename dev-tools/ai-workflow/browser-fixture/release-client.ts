@@ -1,6 +1,38 @@
 import { getSupabase as baseClient } from './page-preview-client'
 import { fixtureProfile, releaseFixture } from './release-auth'
 import { hasPermission } from '@/lib/company/permissions'
+import type { PersonalWorkCard, PersonalWorkEvent } from '@/lib/supabase/personal-work'
+
+const coworker = {id:'fixture-coworker',name:'부서원',position:'사원'}
+const personalWork = new Map<string, PersonalWorkCard>()
+let workMinute = 0
+
+function workFixture(name:string,args:Record<string,unknown>) {
+ const actor=fixtureProfile()
+ if(name==='list_personal_work_members')return {data:[coworker],error:null}
+ if(name==='list_personal_work_cards')return {data:[...personalWork.values()].filter(card=>
+  card.assignee_id===actor.id || card.created_by===actor.id || (card.reviewer_id===actor.id && card.status==='feedback')),error:null}
+ const id=String(args.p_id), current=personalWork.get(id), action=String(args.p_action)
+ const at=new Date(Date.UTC(2026,10,23,0,workMinute++)).toISOString()
+ if(action==='create') {
+  const assigned=args.p_assignee===coworker.id
+  personalWork.set(id,{id,title:String(args.p_title),description:String(args.p_description??''),status:'todo',round:1,revision:1,
+   created_at:at,created_by:actor.id,creator_name:actor.displayName,assignee_id:assigned?coworker.id:actor.id,
+   assignee_name:assigned?coworker.name:actor.displayName,reviewer_id:assigned?actor.id:null,reviewer_name:assigned?actor.displayName:null,events:[]})
+ } else if(!current) return {data:null,error:{message:'테스트 카드를 찾을 수 없습니다.'}}
+ else if(action==='edit') {
+  current.title=String(args.p_title);current.description=String(args.p_description??'');current.revision++
+ } else if(action==='delete') personalWork.delete(id)
+ else {
+  const states={start:'doing',pause:'todo',complete:'done'} as const
+  const events={start:current.events.length?'resumed':'started',pause:'paused',complete:'completed'} as const
+  const transition=action as keyof typeof states
+  if(!states[transition])return {data:null,error:{message:'테스트 업무 상태 변경 실패'}}
+  const event:PersonalWorkEvent={kind:events[transition],round:current.round,at,actor_id:actor.id,note:null}
+  current.status=states[transition];current.events.push(event);current.revision++
+ }
+ return {data:null,error:null}
+}
 export const isSupabaseConfigured=()=>true
 export function getSupabase(){
  const base=baseClient()
@@ -31,6 +63,7 @@ export function getSupabase(){
   }}
   return chain
  },rpc(name:string,args?:Record<string,unknown>){
+  if(['list_personal_work_cards','list_personal_work_members','personal_work_action'].includes(name))return Promise.resolve(workFixture(name,args??{}))
   if(name==='list_work_requests')return Promise.resolve({data:{requests:[],files:[],timers:[],managerAvailable:true},error:null})
   if(name==='is_my_attendance_exempt')return Promise.resolve({data:hasPermission(fixtureProfile(),'attendance.exempt'),error:null})
   if(name==='clock_in_today'){releaseFixture.writes.push(name);return Promise.resolve({data:'09:00:00',error:null})}
