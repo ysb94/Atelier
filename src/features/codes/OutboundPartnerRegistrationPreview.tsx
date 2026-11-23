@@ -3,12 +3,22 @@ import { ChevronRight, Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { buildFolderForest, folderPath } from '@/lib/codes/outbound-folder'
-import { compactOutboundPartnerKey } from '@/lib/codes/outbound-partner'
+import { compactOutboundPartnerKey, outboundPartnerRegisteredName } from '@/lib/codes/outbound-partner'
 import type { CodeUsageTarget, CodeUsageTargetFolder } from '@/lib/types'
+import { cn } from '@/lib/utils'
 
 type Props = {
   targets: readonly CodeUsageTarget[]
   folders: readonly CodeUsageTargetFolder[]
+}
+
+const FIRST_SITE_ACTIONS = [
+  { id: 'name-existing', label: '기존 출고처에 지점명 붙이기', description: '지금까지 출고해 온 곳과 같은 곳입니다.' },
+  { id: 'add-separate', label: '별도 지점 추가하기', description: '기존 출고처와 다른 곳입니다.' },
+] as const
+
+function registrationCompanyName(target: CodeUsageTarget) {
+  return target.groupName || outboundPartnerRegisteredName(target)
 }
 
 export function OutboundPartnerRegistrationPreview(props: Props) {
@@ -35,6 +45,7 @@ function RegistrationDialog({ targets, folders, onClose }: Props & { onClose: ()
   const [folderId, setFolderId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [companyId, setCompanyId] = useState<string | null>(null)
+  const [firstSiteAction, setFirstSiteAction] = useState<(typeof FIRST_SITE_ACTIONS)[number]['id'] | null>(null)
   const [reviewed, setReviewed] = useState(false)
 
   useEffect(() => {
@@ -50,15 +61,20 @@ function RegistrationDialog({ targets, folders, onClose }: Props & { onClose: ()
   const companies = useMemo(() => {
     const byLocation = new Map<string, CodeUsageTarget>()
     for (const target of targets) {
-      if (!target.active || !target.groupId) continue
-      const key = `${target.groupId}:${target.folderId ?? ''}`
+      if (!target.active) continue
+      const key = target.groupId ? `${target.groupId}:${target.folderId ?? ''}` : target.id
       if (!byLocation.has(key)) byLocation.set(key, target)
     }
-    return [...byLocation.values()].sort((a, b) => a.groupName.localeCompare(b.groupName, 'ko'))
+    return [...byLocation.values()].sort((a, b) => registrationCompanyName(a).localeCompare(registrationCompanyName(b), 'ko'))
   }, [targets])
   const company = companies.find((item) => item.id === companyId)
+  const companyName = company ? registrationCompanyName(company) : ''
+  const isFirstSite = company && !targets.some((target) =>
+    (target.id === company.id || (company.groupId && target.groupId === company.groupId && target.folderId === company.folderId)) && target.siteName.trim(),
+  )
+  const canNameSite = Boolean(company && (!isFirstSite || firstSiteAction))
   const companyQuery = compactOutboundPartnerKey(query)
-  const matches = companies.filter((item) => compactOutboundPartnerKey(item.groupName).includes(companyQuery))
+  const matches = companies.filter((item) => compactOutboundPartnerKey(registrationCompanyName(item)).includes(companyQuery))
   const path = folderPath(folders, mode === 'site' ? company?.folderId : folderId)
   const rootFolders = useMemo(() => buildFolderForest(folders), [folders])
   const folderOptions = folderId
@@ -67,24 +83,32 @@ function RegistrationDialog({ targets, folders, onClose }: Props & { onClose: ()
   const location = path.map((folder) => folder.name).join(' › ') || '미분류'
   const trimmedName = name.trim()
   const firstSite = firstSiteName.trim()
-  const ready = Boolean(trimmedName && (mode === 'company' || company))
+  const ready = Boolean(trimmedName && (mode === 'company' || canNameSite))
+  const renameExistingSite = isFirstSite && firstSiteAction === 'name-existing'
   const summary = mode === 'company'
     ? firstSite
       ? `${location}에 ‘${trimmedName}’ 업체와 첫 지점 ‘${firstSite}’을 함께 추가합니다.`
       : `${location}에 ‘${trimmedName}’ 업체를 추가합니다.`
-    : `추가할 지점은 ${company?.groupName}의 ${trimmedName}입니다.`
+    : renameExistingSite
+      ? `기존 ${companyName} 출고처에 ‘${trimmedName}’ 지점명을 붙입니다.`
+      : `추가할 지점은 ${companyName}의 ${trimmedName}입니다.`
   const submitLabel = mode === 'company'
     ? firstSite ? '업체와 지점 등록하기' : '업체 등록하기'
-    : '지점 등록하기'
+    : renameExistingSite ? '지점명 붙이기' : '지점 등록하기'
+
+  function chooseCompany(id: string | null) {
+    setCompanyId(id)
+    setFirstSiteAction(null)
+    setName('')
+    setReviewed(false)
+  }
 
   function chooseMode(next: typeof mode) {
     setMode(next)
-    setName('')
     setFirstSiteName('')
     setFolderId(null)
     setQuery('')
-    setCompanyId(null)
-    setReviewed(false)
+    chooseCompany(null)
   }
 
   return (
@@ -127,10 +151,10 @@ function RegistrationDialog({ targets, folders, onClose }: Props & { onClose: ()
               {company ? (
                 <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
                   <div>
-                    <p className="font-semibold">{company.groupName}</p>
+                    <p className="font-semibold">{companyName}</p>
                     <p className="text-sm text-muted-foreground">{location}</p>
                   </div>
-                  <Button type="button" variant="outline" onClick={() => { setCompanyId(null); setReviewed(false) }}>다시 선택</Button>
+                  <Button type="button" variant="outline" onClick={() => chooseCompany(null)}>다시 선택</Button>
                 </div>
               ) : (
                 <>
@@ -140,8 +164,8 @@ function RegistrationDialog({ targets, folders, onClose }: Props & { onClose: ()
                   </label>
                   <div className="grid gap-2">
                     {matches.slice(0, 5).map((item) => (
-                      <Button key={item.id} type="button" variant="outline" className="h-auto min-h-12 justify-between gap-3 text-left" onClick={() => setCompanyId(item.id)}>
-                        <span className="break-all font-semibold">{item.groupName}</span>
+                      <Button key={item.id} type="button" variant="outline" className="h-auto min-h-12 justify-between gap-3 text-left" onClick={() => chooseCompany(item.id)}>
+                        <span className="break-all font-semibold">{registrationCompanyName(item)}</span>
                         <span className="text-right text-xs text-muted-foreground">{folderPath(folders, item.folderId).map((folder) => folder.name).join(' › ') || '미분류'}</span>
                       </Button>
                     ))}
@@ -153,7 +177,34 @@ function RegistrationDialog({ targets, folders, onClose }: Props & { onClose: ()
             </div>
           )}
 
-          {(mode === 'company' || company) && (
+          {isFirstSite && (
+            <fieldset className="space-y-2">
+              <legend className="font-medium">기존에 출고하던 곳에 지점명을 붙이는 건가요?</legend>
+              {FIRST_SITE_ACTIONS.map((option) => (
+                <label key={option.id} className={cn(
+                  'flex min-h-16 cursor-pointer items-center gap-3 rounded-lg border border-border px-4 py-2 focus-within:ring-2 focus-within:ring-ring/40',
+                  firstSiteAction === option.id && 'border-primary bg-primary/5',
+                )}>
+                  <input
+                    type="radio"
+                    name={`${titleId}-first-site`}
+                    checked={firstSiteAction === option.id}
+                    className="size-5 shrink-0 accent-primary"
+                    onChange={() => {
+                      setFirstSiteAction(option.id)
+                      setReviewed(false)
+                    }}
+                  />
+                  <span>
+                    <span className="block font-semibold">{option.label}</span>
+                    <span className="block text-sm text-muted-foreground">{option.description}</span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+          )}
+
+          {(mode === 'company' || canNameSite) && (
             <label className="block space-y-2 font-medium">
               <span>{mode === 'company' ? '업체명' : '지점명'}</span>
               <Input className="h-12 text-base" value={name} placeholder={mode === 'company' ? '예: 롯데면세점' : '예: 김포공항점'} onChange={(event) => { setName(event.target.value); setReviewed(false) }} />
@@ -194,7 +245,16 @@ function RegistrationDialog({ targets, folders, onClose }: Props & { onClose: ()
             </fieldset>
           )}
 
-          {ready && <p className="rounded-lg bg-muted px-4 py-3 font-medium">{summary}</p>}
+          {ready && (
+            <div className="space-y-1 rounded-lg bg-muted px-4 py-3">
+              <p className="font-medium">{summary}</p>
+              {isFirstSite && (
+                <p className="text-sm text-muted-foreground">
+                  {renameExistingSite ? '기존 출고 이력은 이 지점에서 이어집니다.' : '기존 출고 이력은 기존 출고처에 남습니다.'}
+                </p>
+              )}
+            </div>
+          )}
           {reviewed && <p role="status" className="text-sm text-muted-foreground">입력 내용을 확인했습니다. 미리보기에서는 저장되지 않습니다.</p>}
           <div className="flex gap-2">
             <Button type="button" variant="outline" size="lg" onClick={() => chooseMode(null)}>이전</Button>
