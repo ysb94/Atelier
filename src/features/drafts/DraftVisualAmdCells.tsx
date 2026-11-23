@@ -1,14 +1,11 @@
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import type { DraftColorRow } from '@/lib/types'
 import { DRAFT_VISUAL_INFORMATION_TABS, type DraftVisualInformationField } from './draft-information-tabs'
-import { DraftTeamActions, DraftTeamNotice } from './DraftTeamActions'
-import { matchesTeamColors, useDraftTeamSection, type DraftTeamWork } from './use-draft-team-work'
+import { DraftAmdCell } from './DraftAmdCell'
+import type { DraftTeamWork } from './use-draft-team-work'
 import { DraftVisualAssignees } from './DraftVisualAssignees'
 import type { DraftVisualBoardRow } from './use-draft-visual-board'
-
-const EMPTY_CODES = { sabangnet: '', barcode: '' }
 
 export function DraftVisualAmdCells({ colors, colorPhotos, readOnly, panelId, activeTrigger, onOpenVisualTab, teamWork, visualBoard }: {
   colors: DraftColorRow[]
@@ -20,16 +17,6 @@ export function DraftVisualAmdCells({ colors, colorPhotos, readOnly, panelId, ac
   teamWork: DraftTeamWork
   visualBoard: DraftVisualBoardRow
 }) {
-  const amd = useDraftTeamSection(teamWork, 'amd', { collection: '', colors: {} }, readOnly)
-  const confirmed = amd.confirmed && matchesTeamColors(amd.value.colors, colors)
-  const locked = amd.locked || confirmed || amd.conflict
-
-  function changeCode(colorId: string, code: keyof typeof EMPTY_CODES, value: string) {
-    amd.change(previous => ({ ...previous, colors: {
-      ...previous.colors, [colorId]: { ...(previous.colors[colorId] ?? EMPTY_CODES), [code]: value },
-    } }))
-  }
-
   return <>
     <td className="draft-sheet-visual-cell">
       <DraftVisualAssignees board={visualBoard} readOnly={readOnly} />
@@ -57,41 +44,6 @@ export function DraftVisualAmdCells({ colors, colorPhotos, readOnly, panelId, ac
         })}
       </div>
     </td>
-    <td className="draft-sheet-amd-cell">
-      <div className="draft-color-pad draft-amd-header">
-        <label className="draft-amd-entry">
-          <Input className="draft-team-control" aria-label="모음전 번호" placeholder="모음전 no." autoComplete="off"
-            value={amd.value.collection} maxLength={80} disabled={locked} onChange={event => {
-              const collection = event.currentTarget.value
-              amd.change(previous => ({ ...previous, collection }))
-            }} />
-        </label>
-        <DraftTeamActions label="AMD" className="ml-auto" locked={amd.locked} confirmed={confirmed}
-          editing={amd.editing} busy={amd.busy} conflict={amd.conflict} onReset={amd.reset}
-          onEdit={() => amd.change(value => value)} onSave={confirm => void amd.save(confirm, {
-            collection: amd.value.collection,
-            colors: Object.fromEntries(colors.map(color => [color.id, amd.value.colors[color.id] ?? EMPTY_CODES])),
-          })} />
-      </div>
-      <div className="draft-color-lines">
-        {colors.map((color, index) => {
-          const name = color.name.trim() || `컬러 ${index + 1}`
-          const codes = amd.value.colors[color.id] ?? EMPTY_CODES
-          return <div key={color.id} className={`draft-color-line${index % 2 ? ' is-alt' : ''}`}>
-            <label className="draft-amd-entry">
-              <Input className="draft-team-control" aria-label={`${name} 사방넷 번호`} placeholder="사방넷 no."
-                autoComplete="off" maxLength={80} disabled={locked} value={codes.sabangnet}
-                onChange={event => changeCode(color.id, 'sabangnet', event.currentTarget.value)} />
-            </label>
-            <label className="draft-amd-entry">
-              <Input className="draft-team-control" aria-label={`${name} 바코드 번호`} placeholder="바코드 no."
-                inputMode="numeric" autoComplete="off" maxLength={80} disabled={locked} value={codes.barcode}
-                onChange={event => changeCode(color.id, 'barcode', event.currentTarget.value)} />
-            </label>
-          </div>
-        })}
-      </div>
-      <DraftTeamNotice error={amd.error} conflict={amd.conflict} />
-    </td>
+    <DraftAmdCell colors={colors} readOnly={readOnly} teamWork={teamWork} />
   </>
 }

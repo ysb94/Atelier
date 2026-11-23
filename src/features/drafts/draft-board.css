@@ -113,7 +113,7 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-action.is-pending{background:#c60920;border-color:#c60920;color:#fff}
 .draft-information-action.is-done{background:var(--color-primary);border-color:var(--color-primary);color:var(--color-primary-foreground)}
 .draft-information-action.is-editing{position:relative}
-.draft-information-action.is-editing::before,.draft-md-order-quantity::before,.draft-md-unconfirmed::before,.draft-amd-entry:has(input:not(:placeholder-shown))::before,.draft-visual-image-pending::before,.draft-visual-image-temporary::before{position:absolute;top:0;left:0;width:6px;height:6px;background:var(--color-primary);clip-path:polygon(0 0,100% 0,0 100%);content:'';pointer-events:none}
+.draft-information-action.is-editing::before,.draft-md-order-quantity::before,.draft-md-unconfirmed::before,.draft-visual-image-pending::before,.draft-visual-image-temporary::before{position:absolute;top:0;left:0;width:6px;height:6px;background:var(--color-primary);clip-path:polygon(0 0,100% 0,0 100%);content:'';pointer-events:none}
 .draft-visual-image-pending::before,.draft-visual-image-temporary::before{z-index:1;width:18px;height:18px}
 .draft-sheet-brand-actions{display:flex;align-items:center;gap:5px;width:100%;margin-top:5px}
 .draft-sheet-edit{display:inline-flex;align-items:center;gap:4px;padding:3px 0;border:0;background:transparent;font:inherit;font-size:11px;color:var(--color-muted-foreground);white-space:nowrap;cursor:pointer}
@@ -174,8 +174,9 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-team-notice{padding:4px 8px;font-size:11px;line-height:1.35;color:var(--color-danger)}
 .draft-amd-header{gap:8px;padding-inline:8px}
 .draft-amd-header .draft-amd-entry{width:86px}
-.draft-amd-entry{position:relative;min-width:0}
-.draft-sheet-amd-cell .draft-color-line{display:grid;grid-template-columns:2fr 3fr}
+.draft-amd-entry{min-width:0}
+.draft-amd-header .draft-amd-save{margin-left:auto}
+.draft-sheet-amd-cell .draft-color-line{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr) auto}
 .draft-amd-entry input{width:100%;font-variant-numeric:tabular-nums}
 .draft-sheet-color-tools{display:flex;gap:5px;align-items:flex-start}
 .draft-color-add{position:relative}
