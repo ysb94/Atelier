@@ -18,7 +18,7 @@ import type { DraftColorRow, ProductDraft } from '@/lib/types'
 import { draftInformationTemporaryStore, type DraftInformationTemporary, type DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
 import {
   draftVisualSaveError, listDraftVisualContent, saveDraftVisualContent,
-  type DraftVendorHtml, type DraftVisualChange, type DraftVisualContent,
+  type DraftVendorHtml, type DraftVisualChange, type DraftVisualContent, type DraftVisualStatus,
 } from '@/lib/supabase/draft-visual-content'
 import { cn } from '@/lib/utils'
 import { DRAFT_INFORMATION_PANEL_TAB_GROUPS, type DraftInformationPanelField } from './draft-information-tabs'
@@ -671,7 +671,16 @@ export function DraftInformationPanel({
     await cache.cancelQueries({ queryKey, exact: true })
     cache.setQueryData<DraftInformationTemporary[]>(queryKey, current =>
       [...(current ?? []).filter(row => row.field !== field || row.color_id !== colorId), copy])
-    if (visualField) void cache.invalidateQueries({ queryKey: draftVisualBoardKey(editorId) })
+    if (visualField && colorId) {
+      const boardQuery = { queryKey: draftVisualBoardKey(editorId) }
+      const temporaryColors = field === 'image' ? 'temporary_images' : 'temporary_html'
+      await cache.cancelQueries(boardQuery)
+      cache.setQueriesData<DraftVisualStatus[]>(boardQuery, rows => rows?.map(row =>
+        row.draft_id === draft.id && !row[temporaryColors].includes(colorId)
+          ? { ...row, [temporaryColors]: [...row[temporaryColors], colorId] }
+          : row))
+      void cache.invalidateQueries(boardQuery)
+    }
   }
 
   async function saveVisual(changes: DraftVisualChange[], temporaryRevision?: string) {

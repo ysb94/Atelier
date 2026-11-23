@@ -1005,7 +1005,8 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
         </div>
       </div>
     </td>
-    <DraftVisualAmdCells key={`${informationEditorId ?? ''}:${readOnly}:visual-amd`} colors={draft.colors} readOnly={readOnly} teamWork={teamWork} visualBoard={visualBoard}
+    <DraftVisualAmdCells key={`${informationEditorId ?? ''}:${readOnly}:visual-amd`} colors={draft.colors} colorPhotos={draft.specs.colorPhotoUrls}
+      readOnly={readOnly} teamWork={teamWork} visualBoard={visualBoard}
       panelId={informationId} activeTrigger={information?.visualTrigger ? { colorId: information.colorId, field: information.visualTrigger } : null}
       onOpenVisualTab={(anchor, colorId, field) => setInformation(current =>
         current?.anchor === anchor && current.field === field ? null : { anchor, colorId, field, visualTrigger: field })} />

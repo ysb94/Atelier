@@ -105,10 +105,12 @@ try{
    teamRows.set(p_section,saved)
    return route.fulfill({json:{data:[saved],error:null}})
  })
- let visualContent=[]
+ let visualContent=[], resumeVisualStatus
+ let visualStatusPause
  await page.route('**/rest/v1/draft_visual_content?*',route=>route.fulfill({json:visualContent.filter(row=>row.kind!=='assignees')}))
  await page.route('**/rpc/list_draft_visual_status',async route=>{
    assert.deepEqual(route.request().postDataJSON(),{p_draft_ids:['fixture']})
+   await visualStatusPause
    const temporary=await page.evaluate(()=>JSON.parse(sessionStorage.getItem('atelier-fixture-information-temporary')??'[]'))
    const team=visualContent.find(row=>row.kind==='assignees')
    const ids=kind=>visualContent.filter(row=>row.kind===kind&&row.payload).map(row=>row.entry_key)
@@ -673,6 +675,8 @@ try{
  const visualHtml=visualCell.getByRole('button',{name:'아이보리 html',exact:true})
  const vendorTopButtom=panel.getByRole('button',{name:'업체별 Top Buttom 등록',exact:true})
  const writeActions=panel.getByRole('button',{name:/^(수정|확정|임시 저장|다른 컬러에 적용)$/})
+ assert.equal(await visualImage.getAttribute('aria-description'),'컬러에 등록된 임시 이미지')
+ assert.equal(await ivoryVisualImage.getAttribute('aria-description'),null)
  await visualImage.click()
  assert.equal(await vendorTopButtom.count(),0)
  assert.deepEqual(await fields.getByRole('button').allTextContents(),['size','Fabric','스펙 문서','Image','html'])
@@ -735,9 +739,20 @@ try{
  assert.equal(await ivoryImageCard.getByRole('img').count(),0)
  assert.equal(await saveImage.isEnabled(),true)
  await panel.screenshot({path:'.tmp/draft-visual-image-panel.png'})
- await blackImageCard.getByRole('button',{name:'블랙 이미지 임시저장',exact:true}).click()
- await blackImageCard.getByText('임시저장됨',{exact:true}).waitFor()
- await visualCell.locator('button[aria-label="블랙 Image"][aria-description="임시저장됨"]').waitFor()
+ const tempVisualImage=visualCell.locator('button[aria-label="블랙 Image"][aria-description="임시저장됨"]')
+ visualStatusPause=new Promise(resolve=>{resumeVisualStatus=resolve})
+ try {
+   await blackImageCard.getByRole('button',{name:'블랙 이미지 임시저장',exact:true}).click()
+   await blackImageCard.getByText('임시저장됨',{exact:true}).waitFor()
+   await tempVisualImage.waitFor({timeout:5000})
+ } finally {
+   resumeVisualStatus()
+   visualStatusPause=undefined
+ }
+ assert.equal(await tempVisualImage.evaluate(button=>{
+   const corner=getComputedStyle(button,'::before')
+   return corner.top==='0px'&&corner.left==='0px'&&corner.clipPath==='polygon(0px 0px, 100% 0px, 0px 100%)'
+ }),true,'The Image button has a triangle at the top-left corner')
  await panel.getByRole('button',{name:'INFORMATION 닫기'}).click()
  await visualImage.click()
  await blackImageCard.getByText('임시저장됨',{exact:true}).waitFor()

@@ -10,8 +10,9 @@ import type { DraftVisualBoardRow } from './use-draft-visual-board'
 
 const EMPTY_CODES = { sabangnet: '', barcode: '' }
 
-export function DraftVisualAmdCells({ colors, readOnly, panelId, activeTrigger, onOpenVisualTab, teamWork, visualBoard }: {
+export function DraftVisualAmdCells({ colors, colorPhotos, readOnly, panelId, activeTrigger, onOpenVisualTab, teamWork, visualBoard }: {
   colors: DraftColorRow[]
+  colorPhotos?: Readonly<Record<string, string>>
   readOnly: boolean
   panelId: string
   activeTrigger: { colorId: string | null; field: DraftVisualInformationField } | null
@@ -40,8 +41,9 @@ export function DraftVisualAmdCells({ colors, readOnly, panelId, activeTrigger, 
               const expanded = activeTrigger?.colorId === color.id && activeTrigger.field === field
               const temporary = (field === 'image' ? visualBoard.status?.temporary_images : visualBoard.status?.temporary_html)?.includes(color.id)
               const saved = (field === 'image' ? visualBoard.status?.saved_images : visualBoard.status?.saved_html)?.includes(color.id)
-              const tone = temporary ? 'is-editing' : saved ? 'is-done' : 'is-neutral'
-              const statusText = temporary ? '임시저장됨' : saved ? '저장됨' : undefined
+              const colorPhoto = field === 'image' && !saved && Boolean(colorPhotos?.[color.id])
+              const tone = temporary || colorPhoto ? 'is-editing' : saved ? 'is-done' : 'is-neutral'
+              const statusText = temporary ? '임시저장됨' : saved ? '저장됨' : colorPhoto ? '컬러에 등록된 임시 이미지' : undefined
               return <Button key={field} type="button" variant="outline" size="sm" className={cn('draft-team-control draft-information-action', tone)}
                 aria-label={`${name} ${label}`} aria-haspopup="dialog" aria-expanded={expanded}
                 aria-description={statusText} title={statusText}
