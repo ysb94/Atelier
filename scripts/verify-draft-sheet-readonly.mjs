@@ -667,7 +667,7 @@ try{
  const blackHtml=panel.getByRole('region',{name:'블랙 HTML',exact:true})
  const ivoryHtml=panel.getByRole('region',{name:'아이보리 HTML',exact:true})
  const blackHtmlPhoto=blackHtml.getByRole('img',{name:'블랙 컬러 이미지'})
- const generateVendorCode=name=>name.getByRole('button',{name:'업체별 코드 자동생성',exact:true})
+ const generateVendorCode=name=>name.getByRole('button',{name:'업체별 HTMl 생성',exact:true})
  await fields.getByRole('button',{name:'html',exact:true}).click()
  assert.equal(await panel.getByText('2color',{exact:true}).isVisible(),true)
  assert.equal(await blackHtmlPhoto.getAttribute('src'),originalPhoto)

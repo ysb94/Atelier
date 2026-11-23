@@ -516,7 +516,7 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
       </div>
       {!readOnly && <Button type="button" size="sm" variant="outline" className="h-6 justify-self-end px-2"
         aria-expanded={codeOpen} aria-controls={codeOpen ? codeId : undefined}
-        onClick={() => setCodeOpen(open => !open)}>업체별 코드 자동생성</Button>}
+        onClick={() => setCodeOpen(open => !open)}>업체별 HTMl 생성</Button>}
     </div>
     {!readOnly && codeOpen && <VendorHtmlCode id={codeId} name={name} text={text} templates={vendorHtml} />}
     {!readOnly && versionChanged ? <div className="col-span-full flex flex-wrap items-center gap-2">
