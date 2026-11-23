@@ -277,6 +277,7 @@ export function OutboundPartnerBrowser({
   layout,
   brandId,
   targets,
+  hiddenTargetId,
   folders,
   groups,
   keyword,
@@ -290,6 +291,7 @@ export function OutboundPartnerBrowser({
   layout: 'wide' | 'compact'
   brandId: string
   targets: CodeUsageTarget[]
+  hiddenTargetId?: string
   folders: CodeUsageTargetFolder[]
   groups: OutboundPartnerGroup[]
   keyword: string
@@ -317,16 +319,20 @@ export function OutboundPartnerBrowser({
 
   const searching = Boolean(keyword.trim())
   const forest = useMemo(() => buildFolderForest(folders), [folders])
+  const listTargets = useMemo(
+    () => hiddenTargetId ? targets.filter((target) => target.id !== hiddenTargetId) : targets,
+    [hiddenTargetId, targets],
+  )
   const cardsIn = useMemo(() => {
     const map = new Map<string | null, CodeUsageTarget[]>()
-    targets.forEach((target) => {
+    listTargets.forEach((target) => {
       const key = target.folderId
       const list = map.get(key)
       if (list) list.push(target)
       else map.set(key, [target])
     })
     return (folderId: string | null) => map.get(folderId) ?? []
-  }, [targets])
+  }, [listTargets])
 
   const unfiled = cardsIn(null)
   const rootTabs = useMemo(
@@ -388,7 +394,7 @@ export function OutboundPartnerBrowser({
 
   const searchHits = useMemo(() => {
     if (!searching) return []
-    return targets.filter((target) => {
+    return listTargets.filter((target) => {
       const aliasesHere = aliasesByTarget.get(target.id) ?? EMPTY_ALIASES
       if (matchesOutboundPartnerSearch(keyword, target, aliasesHere)) {
         return true
@@ -397,7 +403,7 @@ export function OutboundPartnerBrowser({
         matchesFolderSearch(keyword, folder),
       )
     })
-  }, [aliasesByTarget, folders, keyword, searching, targets])
+  }, [aliasesByTarget, folders, keyword, listTargets, searching])
 
   const searchSections = useMemo<OutboundUnitSection[]>(() => {
     if (!searching) return []

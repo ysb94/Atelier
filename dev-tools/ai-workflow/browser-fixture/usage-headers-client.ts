@@ -113,12 +113,13 @@ const data: Record<string, any[]> = {
   usage_partner_values: [],
 }
 if (new URLSearchParams(location.search).has('partner-folders')) {
-  const online = uuid(61), fulfillment = uuid(62), supply = uuid(63), distribution = uuid(64)
+  const online = uuid(61), fulfillment = uuid(62), supply = uuid(63), distribution = uuid(64), offline = uuid(68)
   data.code_usage_target_folders = [
     { id: online, name: '온라인', parent_id: null },
     { id: fulfillment, name: '풀필먼트', parent_id: online },
     { id: supply, name: '사입', parent_id: fulfillment },
     { id: distribution, name: '유통', parent_id: fulfillment },
+    { id: offline, name: '오프라인', parent_id: null },
   ].map((folder, order) => ({
     ...folder, brand_id: brand, normalized_name: folder.name, sort_order: order, created_at: now, updated_at: now,
   }))
@@ -133,6 +134,22 @@ if (new URLSearchParams(location.search).has('partner-folders')) {
       outbound_partner_groups: { name: '롯데면세점' },
       site_name: '인천공항점',
       normalized_site_name: '인천공항점',
+    },
+    {
+      ...target('38ea0156-c5b3-4df7-843c-d71ec0e5540f', 'W컨셉', 4),
+      folder_id: offline,
+      group_id: uuid(69),
+      outbound_partner_groups: { name: 'W컨셉' },
+      channel_type: 'offline',
+    },
+    {
+      ...target(uuid(70), 'W컨셉 · 한남점', 5),
+      folder_id: offline,
+      group_id: uuid(69),
+      outbound_partner_groups: { name: 'W컨셉' },
+      channel_type: 'offline',
+      site_name: '한남점',
+      normalized_site_name: '한남점',
     },
   ]
 }
