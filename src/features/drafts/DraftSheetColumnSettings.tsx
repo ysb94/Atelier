@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, ArrowRight, Settings2 } from 'lucide-react'
+import { Settings2 } from 'lucide-react'
 import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { Button } from '@/components/ui/button'
 import {
@@ -20,17 +20,6 @@ function ColumnSettingsDialog({ layout, accountId, onClose }: {
 
   useEffect(() => { dialog.current?.showModal() }, [])
 
-  function move(index: number, offset: -1 | 1) {
-    setDraft(current => {
-      const next = [...current]
-      const destination = index + offset
-      if (destination < 0 || destination >= next.length) return current
-      next[index] = current[destination]
-      next[destination] = current[index]
-      return next
-    })
-  }
-
   return createPortal(<dialog ref={dialog} aria-labelledby={titleId} onClose={onClose}
     onKeyDown={event => { if (event.key === 'Escape') event.stopPropagation() }}
     className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm rounded-xl border border-border bg-card p-4 text-foreground shadow-xl backdrop:bg-black/35">
@@ -39,13 +28,13 @@ function ColumnSettingsDialog({ layout, accountId, onClose }: {
       if (saveDraftSheetLayout(accountId, draft)) dialog.current?.close()
       else setError(true)
     }}>
-      <h2 id={titleId} className="text-base font-semibold">표 열 설정</h2>
-      <p className="text-xs text-muted-foreground">위에서부터 표의 왼쪽 순서입니다. 체크를 끄면 열을 숨깁니다.</p>
+      <h2 id={titleId} className="text-base font-semibold">열 표시 설정</h2>
+      <p className="text-xs text-muted-foreground">체크를 끄면 해당 열을 숨깁니다.</p>
       <ol className="divide-y divide-border rounded-md border border-border">
-        {draft.map(({ id, visible }, index) => {
+        {draft.map(({ id, visible }) => {
           const { label } = DRAFT_SHEET_COLUMNS[id]
-          return <li key={id} className="flex items-center justify-between gap-3 px-2 py-1">
-            <label className="flex min-w-0 items-center gap-2 px-1 text-sm">
+          return <li key={id}>
+            <label className="flex min-w-0 items-center gap-2 px-3 py-2 text-sm">
               <input type="checkbox" className="accent-primary" checked={visible}
                 disabled={visible && visibleCount === 1}
                 onChange={event => {
@@ -54,16 +43,6 @@ function ColumnSettingsDialog({ layout, accountId, onClose }: {
                 }} />
               {label}
             </label>
-            <div className="flex shrink-0 gap-1">
-              <Button type="button" variant="outline" size="icon" className="size-7"
-                aria-label={`${label} 왼쪽으로 이동`} disabled={index === 0} onClick={() => move(index, -1)}>
-                <ArrowLeft className="size-3.5" aria-hidden="true" />
-              </Button>
-              <Button type="button" variant="outline" size="icon" className="size-7"
-                aria-label={`${label} 오른쪽으로 이동`} disabled={index === draft.length - 1} onClick={() => move(index, 1)}>
-                <ArrowRight className="size-3.5" aria-hidden="true" />
-              </Button>
-            </div>
           </li>
         })}
       </ol>
@@ -83,7 +62,7 @@ export function DraftSheetColumnSettings({ layout, accountId }: { layout: DraftS
   return <>
     <Button type="button" size="sm" variant="outline" aria-haspopup="dialog" disabled={!accountId}
       onClick={() => setOpen(true)}>
-      <Settings2 className="size-3.5" aria-hidden="true" />표 열 설정
+      <Settings2 className="size-3.5" aria-hidden="true" />열 표시 설정
     </Button>
     {open && accountId && <WorkspaceTabOverlay>
       <ColumnSettingsDialog accountId={accountId} layout={layout} onClose={() => setOpen(false)} />

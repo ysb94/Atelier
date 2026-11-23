@@ -18,6 +18,23 @@ export type DraftSheetLayout = readonly { id: DraftSheetColumnId; visible: boole
 export const DEFAULT_DRAFT_SHEET_LAYOUT: DraftSheetLayout =
   (Object.keys(DRAFT_SHEET_COLUMNS) as DraftSheetColumnId[]).map(id => ({ id, visible: true }))
 
+export function moveDraftSheetColumn(
+  layout: DraftSheetLayout, from: DraftSheetColumnId, target: DraftSheetColumnId, after: boolean,
+): DraftSheetLayout {
+  if (from === target) return layout
+  const visible = layout.filter(column => column.visible)
+  const fromIndex = visible.findIndex(column => column.id === from)
+  if (fromIndex < 0) return layout
+  const [moved] = visible.splice(fromIndex, 1)
+  const targetIndex = visible.findIndex(column => column.id === target)
+  if (targetIndex < 0) return layout
+  const destination = targetIndex + (after ? 1 : 0)
+  if (destination === fromIndex) return layout
+  visible.splice(destination, 0, moved)
+  let index = 0
+  return layout.map(column => column.visible ? visible[index++] : column)
+}
+
 const LAYOUT_CHANGED = 'atelier:draft-sheet-layout-changed'
 
 function storageKey(accountId: string) {

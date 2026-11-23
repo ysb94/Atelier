@@ -3,7 +3,7 @@ import { FilterTabs, type FilterTab } from '@/components/ui/filter-tabs'
 import { DraftMdOptionsProvider } from './DraftMdTeamCell'
 import { DraftSheetColumnSettings } from './DraftSheetColumnSettings'
 import { DraftSheetTable } from './DraftSheetTable'
-import type { DraftSheetLayout } from './draft-sheet-layout'
+import { moveDraftSheetColumn, saveDraftSheetLayout, type DraftSheetColumnId, type DraftSheetLayout } from './draft-sheet-layout'
 
 export type DraftBoardMode = 'table' | 'card'
 
@@ -21,7 +21,14 @@ export function DraftBoardView({ layout, accountId, label, emptyMessage, tableNo
   renderRows: (mode: DraftBoardMode) => ReactNode
 }) {
   const [mode, setMode] = useState<DraftBoardMode>('table')
+  const [layoutError, setLayoutError] = useState(false)
   const visibleColumns = layout.filter(column => column.visible).length
+
+  function moveColumn(from: DraftSheetColumnId, target: DraftSheetColumnId, after: boolean) {
+    if (!accountId) return
+    const next = moveDraftSheetColumn(layout, from, target, after)
+    if (next !== layout) setLayoutError(!saveDraftSheetLayout(accountId, next))
+  }
 
   return <>
     {mode === 'table' && tableNotice}
@@ -29,9 +36,11 @@ export function DraftBoardView({ layout, accountId, label, emptyMessage, tableNo
       <FilterTabs tabs={viewTabs} value={mode} onChange={setMode} ariaLabel="기획안 보기 방식" />
       {mode === 'table' && <DraftSheetColumnSettings key={accountId} accountId={accountId} layout={layout} />}
     </div>
+    {mode === 'table' && layoutError && <p role="alert" className="mb-2 text-right text-xs text-danger">브라우저에 열 순서를 저장하지 못했습니다.</p>}
     <Activity mode={mode === 'table' ? 'visible' : 'hidden'}>
       <div className="draft-board-scroll" role="region" aria-label={label} tabIndex={0}>
-        <DraftSheetTable layout={layout} caption="기획안별 샘플, 상품 정보 및 팀별 진행 현황">
+        <DraftSheetTable layout={layout} onMoveColumn={accountId ? moveColumn : undefined}
+          caption="기획안별 샘플, 상품 정보 및 팀별 진행 현황">
           <DraftMdOptionsProvider><tbody>
             {emptyMessage ? <tr>
               <td colSpan={visibleColumns} className="bg-card px-4 py-10 text-center text-sm text-muted-foreground">
