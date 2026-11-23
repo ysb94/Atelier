@@ -31,6 +31,7 @@ function RegistrationDialog({ targets, folders, onClose }: Props & { onClose: ()
   const titleId = useId()
   const [mode, setMode] = useState<'company' | 'site' | null>(null)
   const [name, setName] = useState('')
+  const [firstSiteName, setFirstSiteName] = useState('')
   const [folderId, setFolderId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [companyId, setCompanyId] = useState<string | null>(null)
@@ -65,14 +66,21 @@ function RegistrationDialog({ targets, folders, onClose }: Props & { onClose: ()
     : rootFolders
   const location = path.map((folder) => folder.name).join(' › ') || '미분류'
   const trimmedName = name.trim()
+  const firstSite = firstSiteName.trim()
   const ready = Boolean(trimmedName && (mode === 'company' || company))
   const summary = mode === 'company'
-    ? `${location}에 ‘${trimmedName}’ 업체를 추가합니다.`
+    ? firstSite
+      ? `${location}에 ‘${trimmedName}’ 업체와 첫 지점 ‘${firstSite}’을 함께 추가합니다.`
+      : `${location}에 ‘${trimmedName}’ 업체를 추가합니다.`
     : `추가할 지점은 ${company?.groupName}의 ${trimmedName}입니다.`
+  const submitLabel = mode === 'company'
+    ? firstSite ? '업체와 지점 등록하기' : '업체 등록하기'
+    : '지점 등록하기'
 
   function chooseMode(next: typeof mode) {
     setMode(next)
     setName('')
+    setFirstSiteName('')
     setFolderId(null)
     setQuery('')
     setCompanyId(null)
@@ -101,7 +109,10 @@ function RegistrationDialog({ targets, folders, onClose }: Props & { onClose: ()
       {mode === null ? (
         <div className="space-y-3 p-5 sm:p-7">
           <Button type="button" variant="outline" className="h-auto min-h-20 w-full justify-between px-4 py-3 text-left" onClick={() => chooseMode('company')}>
-            <span><span className="block text-lg font-semibold">새 업체 등록</span><span className="block text-sm text-muted-foreground">처음 거래하는 업체를 추가합니다.</span></span>
+            <span>
+              <span className="block text-lg font-semibold">새 업체 등록</span>
+              <span className="block text-sm text-muted-foreground">업체만 등록하거나 첫 지점도 함께 등록할 수 있습니다.</span>
+            </span>
             <ChevronRight className="size-5 shrink-0" />
           </Button>
           <Button type="button" variant="outline" className="h-auto min-h-20 w-full justify-between px-4 py-3 text-left" onClick={() => chooseMode('site')}>
@@ -149,6 +160,21 @@ function RegistrationDialog({ targets, folders, onClose }: Props & { onClose: ()
             </label>
           )}
 
+          {mode === 'company' && (
+            <label className="block space-y-2 font-medium">
+              <span>첫 지점명 <span className="text-sm text-muted-foreground">선택</span></span>
+              <Input
+                className="h-12 text-base"
+                value={firstSiteName}
+                placeholder="예: 인천공항점"
+                onChange={(event) => {
+                  setFirstSiteName(event.target.value)
+                  setReviewed(false)
+                }}
+              />
+            </label>
+          )}
+
           {mode === 'company' && folders.length > 0 && (
             <fieldset className="space-y-2">
               <legend className="font-medium">등록 위치 <span className="text-sm text-muted-foreground">선택</span></legend>
@@ -173,7 +199,7 @@ function RegistrationDialog({ targets, folders, onClose }: Props & { onClose: ()
           <div className="flex gap-2">
             <Button type="button" variant="outline" size="lg" onClick={() => chooseMode(null)}>이전</Button>
             <Button type="submit" size="lg" className="flex-1 text-base" disabled={!ready}>
-              {mode === 'company' ? '업체 등록하기' : '지점 등록하기'}
+              {submitLabel}
             </Button>
           </div>
         </form>
