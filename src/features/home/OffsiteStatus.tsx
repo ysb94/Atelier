@@ -1,32 +1,52 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { useLeaveRequests } from '@/features/operations-support/use-leave-requests'
 import { clockOutLabel, koreaDateKey } from '@/features/settings/my-attendance'
 import { usePagePreview } from '@/lib/company/page-preview-context'
 import { useAuth } from '@/lib/supabase/auth'
-import { offsiteAction } from '@/lib/supabase/offsite-attendance'
+import { offsiteAction, type OffsiteState } from '@/lib/supabase/offsite-attendance'
 import { readImpersonationState } from '@/lib/supabase/impersonation'
 import { diagnosticOperation } from '@/lib/diagnostics/workflow-trace'
 
-export function OffsiteStatus() {
+export function canReturnFromOffsite(state: OffsiteState | undefined) {
+  return state?.state === 'offsite' || state?.state === 'clocked_out'
+}
+
+export function useOffsiteReturn(available = true) {
   const { session, profile } = useAuth()
   const preview = usePagePreview()
   const active = useWorkspaceTabActivity()
-  const leave = useLeaveRequests()
   const cache = useQueryClient()
   const userId = session?.user.id
   const today = koreaDateKey()
-  const hasOffsite = leave.requests.some(request => request.kind === 'offsite' && request.status === 'approved' && request.from <= today && request.to >= today)
-  const enabled = Boolean(userId && profile?.status === 'active' && active && !preview?.active && !readImpersonationState())
+  const enabled = Boolean(available && userId && profile?.id === userId && profile?.status === 'active' && active && !preview?.active && !readImpersonationState())
   const key = ['my-offsite-attendance', userId, today]
   const query = useQuery({ queryKey: key, queryFn: () => offsiteAction('my_offsite_attendance'), enabled, refetchInterval: enabled ? 30_000 : false, retry: false })
-  const returned = useMutation({ mutationFn: () => diagnosticOperation('offsite','return_and_refresh',async trace => {
+  const mutationKey = ['offsite-return', userId]
+  const returning = useIsMutating({ mutationKey, exact: true }) > 0
+  const returned = useMutation({ mutationKey, scope: { id: `offsite-return:${userId}` },
+    mutationFn: (matchesDetail?: (state: OffsiteState) => boolean) => diagnosticOperation('offsite','return_and_refresh',async trace => {
+    if (!enabled || !canReturnFromOffsite(cache.getQueryData<OffsiteState>(key))) throw new Error('복귀할 외근 상태를 다시 확인해 주세요.')
+    if (matchesDetail) {
+      const current = await trace.run('check_active_offsite', context => offsiteAction('my_offsite_attendance', context))
+      cache.setQueryData(key, current)
+      if (!matchesDetail(current)) throw new Error('이 외근은 현재 복귀 대상이 아닙니다.')
+    }
     const data = await trace.run('resume_office',context=>offsiteAction('return_from_offsite',context))
+    await cache.cancelQueries({ queryKey: key, exact: true })
     cache.setQueryData(key, data)
     await trace.run('refresh_queries',()=>Promise.all(['attendance-clock-ins', 'attendance-presence', 'company-attendance-spans', 'company-deferred-clock-outs', 'offsite-groups'].map(part => cache.invalidateQueries({ queryKey: [part] }))),{writeOutcome:'committed'})
     return data
   }) })
+  return { enabled, query, returned, returning }
+}
+
+export function OffsiteStatus() {
+  const leave = useLeaveRequests()
+  const today = koreaDateKey()
+  const hasOffsite = leave.requests.some(request => request.kind === 'offsite' && request.status === 'approved' && request.from <= today && request.to >= today)
+  const { enabled, query, returned, returning } = useOffsiteReturn()
   if (!enabled) return null
   if (query.error) return hasOffsite ? <span role="status" className="text-warning">{query.error instanceof Error ? query.error.message : '외근 상태 조회 실패'}</span> : null
   const current = query.data
@@ -34,7 +54,7 @@ export function OffsiteStatus() {
   const end = current.scheduledEndAt ? clockOutLabel(current.scheduledEndAt, current.workDate ?? undefined) : ''
   return <div className="flex items-center gap-2" role="group" aria-label="외근 상태">
     <span className="hidden text-muted-foreground sm:inline">{current.state === 'clocked_out' ? `${end} 외근 자동 퇴근` : `${current.state === 'offsite' ? '외근 중' : '외근 예정'}${end ? ` · ${end} 자동 퇴근 예정` : ''}`}</span>
-    {(current.state === 'offsite' || current.state === 'clocked_out') && <Button type="button" size="sm" variant="outline" disabled={returned.isPending} onClick={() => returned.mutate()}>{returned.isPending ? '처리 중…' : '사무실 복귀'}</Button>}
+    {canReturnFromOffsite(current) && <Button type="button" size="sm" variant="outline" disabled={returning} onClick={() => returned.mutate(undefined)}>{returning ? '처리 중…' : '사무실 복귀'}</Button>}
     {returned.error && <span role="alert" className="text-danger">{returned.error instanceof Error ? returned.error.message : '복귀 처리 실패'}</span>}
   </div>
 }
