@@ -25,6 +25,13 @@ type RequestFilter = 'all' | 'first' | 'repeat' | 'confirmed'
 type SelectedPhoto = { requestId: string; color: DraftPriceColor }
 export type DraftPriceInputs = Record<string, Record<string, string>>
 
+function linkedColorPhoto(draft: ProductDraft | undefined, colorId: string): string | null | undefined {
+  // Only fall back to the request attachment when the original color no longer resolves.
+  if (!draft?.colors.some(color => color.id === colorId)) return undefined
+  if (draft.specs.colorImageChoices?.[colorId] === 'None') return null
+  return draft.specs.colorPhotoUrls?.[colorId] || null
+}
+
 function groupPriceRequests(requests: readonly DraftPriceRequest[]) {
   const byDraft = new Map<string, DraftPriceRequest[]>()
   for (const request of requests) {
@@ -41,15 +48,17 @@ function groupPriceRequests(requests: readonly DraftPriceRequest[]) {
     || Date.parse(a.requestedAt) - Date.parse(b.requestedAt))
 }
 
-function ChinaPricePhoto({ photo, onClose }: { photo: SelectedPhoto; onClose: () => void }) {
+function ChinaPricePhoto({ photo, linkedPhoto, onClose }: { photo: SelectedPhoto; linkedPhoto?: string | null; onClose: () => void }) {
   const { session } = useAuth()
   const active = useWorkspaceTabActivity()
   const dialog = useRef<HTMLDialogElement>(null)
+  const useRequestPhoto = linkedPhoto === undefined
   const query = useQuery({
     queryKey: ['draft-price-photo', session?.user.id, photo.requestId, photo.color.id],
     queryFn: ({ signal }) => getDraftPricePhoto(photo.requestId, photo.color.id, signal),
-    enabled: active && Boolean(session), gcTime: 0, retry: false,
+    enabled: active && Boolean(session) && useRequestPhoto, gcTime: 0, retry: false,
   })
+  const image = useRequestPhoto ? query.data : linkedPhoto
   useEffect(() => {
     if (!active) return
     const current = dialog.current
@@ -61,9 +70,9 @@ function ChinaPricePhoto({ photo, onClose }: { photo: SelectedPhoto; onClose: ()
     aria-label={`${photo.color.name} 컬러 사진 크게 보기`} onCancel={event => { event.preventDefault(); onClose() }}
     onClick={event => { if (event.target === event.currentTarget) onClose() }}>
     <header><strong>{photo.color.name} 컬러</strong><button type="button" aria-label="사진 크게 보기 닫기" onClick={onClose}><X size={20} /></button></header>
-    {query.isPending ? <p role="status">사진을 불러오는 중입니다.</p>
-      : query.isError ? <p role="alert">{draftPriceError(query.error, '컬러 사진을 불러오지 못했습니다.')}</p>
-      : query.data ? <img src={query.data} alt={`${photo.color.name} 컬러`} /> : <p>첨부 사진이 없습니다.</p>}
+    {useRequestPhoto && query.isPending ? <p role="status">사진을 불러오는 중입니다.</p>
+      : useRequestPhoto && query.isError ? <p role="alert">{draftPriceError(query.error, '컬러 사진을 불러오지 못했습니다.')}</p>
+      : image ? <img src={image} alt={`${photo.color.name} 컬러`} /> : <p>첨부 사진이 없습니다.</p>}
   </dialog>, document.body)
 }
 
@@ -140,12 +149,16 @@ function ChinaPriceRequestRow({ request, earlier, draft, confirmed, brandName, a
     </td>
     <td className="py-4 pl-3 align-top">
       <div className="divide-y divide-primary/20">
-        {colors.map(color => <div key={color.id} className="flex h-9 items-center gap-2 pr-2">
-          <span className="flex w-2 shrink-0 justify-center" aria-hidden="true">{color.hasPhoto && <span className="size-1 rounded-full bg-primary" />}</span>
-          <span title={color.name} className="min-w-0 flex-1 truncate text-sm">{color.name}</span>
-          {color.hasPhoto && <Button type="button" variant="outline" size="sm" className="h-6 shrink-0 px-1.5 text-xs text-primary"
-            aria-label={`${color.name} 컬러 사진 크게 보기`} onClick={() => onPhoto(color)}>Image</Button>}
-        </div>)}
+        {colors.map(color => {
+          const linkedPhoto = linkedColorPhoto(draft, color.id)
+          const hasPhoto = linkedPhoto === undefined ? color.hasPhoto : Boolean(linkedPhoto)
+          return <div key={color.id} className="flex h-9 items-center gap-2 pr-2">
+            <span className="flex w-2 shrink-0 justify-center" aria-hidden="true">{hasPhoto && <span className="size-1 rounded-full bg-primary" />}</span>
+            <span title={color.name} className="min-w-0 flex-1 truncate text-sm">{color.name}</span>
+            {hasPhoto && <Button type="button" variant="outline" size="sm" className="h-6 shrink-0 px-1.5 text-xs text-primary"
+              aria-label={`${color.name} 컬러 사진 크게 보기`} onClick={() => onPhoto(color)}>Image</Button>}
+          </div>
+        })}
       </div>
     </td>
     <td className="border-r border-border/60 py-4 pr-4 align-top">
@@ -216,6 +229,7 @@ export function ChinaPriceRequests({ requests, drafts, brandById, inputs, loadin
   }), [byDraft, requests])
   const pending = groups.filter(({ request }) => !request.answeredAt)
   const shown = groups.filter(({ status }) => filter === 'all' ? status !== 'confirmed' : status === filter)
+  const selectedRequest = photo ? requests.find(request => request.id === photo.requestId) : undefined
 
   return <section aria-labelledby="china-price-requests-title">
     <h2 id="china-price-requests-title" className="sr-only">단가요청</h2>
@@ -256,6 +270,7 @@ export function ChinaPriceRequests({ requests, drafts, brandById, inputs, loadin
         </tbody>
       </table>
     </Card>
-    {photo && requests.some(request => request.id === photo.requestId) && <ChinaPricePhoto photo={photo} onClose={() => setPhoto(null)} />}
+    {photo && selectedRequest && <ChinaPricePhoto photo={photo}
+      linkedPhoto={linkedColorPhoto(byDraft.get(selectedRequest.draftId), photo.color.id)} onClose={() => setPhoto(null)} />}
   </section>
 }

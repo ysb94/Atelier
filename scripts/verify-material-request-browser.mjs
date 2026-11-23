@@ -28,7 +28,8 @@ const { outputFiles } = await build({
     const ids = ${JSON.stringify(ids)}
     const actors = { planning: ids.requester, pricePlanning: ids.requester, manager: ids.manager, managerBoard: ids.manager, worker: ids.worker, other: ids.other, recipient: ids.worker, scoreRecipient: ids.viewer, dualRecipient: ids.colleague }
     const priceDraft = ${JSON.stringify(draftPriceFixture)}
-    const priceDraftFields={id:priceDraft.id,draftNo:'PL-0007',brandId:null,imageUrl:null,owner:'테스트 디자이너',nameKo:'검증용 상품',nameEn:'Fixture Product'}
+    const priceDraftFields={id:priceDraft.id,draftNo:'PL-0007',brandId:null,imageUrl:null,owner:'테스트 디자이너',nameKo:'검증용 상품',nameEn:'Fixture Product',
+      colors:[{id:priceDraft.black,name:'Black'},{id:priceDraft.yellow,name:'Yellow'}]}
     async function readPriceDraft(confirmId) {
       const response=await fetch('/rpc/fixture_price_draft',{
         method:'POST',headers:{'x-actor':window.actor},body:JSON.stringify({confirmId}),
@@ -55,7 +56,8 @@ const { outputFiles } = await build({
     }
     function ManagerBoard() {
       const screen=useQuery({queryKey:['china-work-screen',window.actor],queryFn:getMyChinaWorkOrders,refetchInterval:30_000})
-      const draft=useQuery({queryKey:['fixture-china-price-draft',screen.data?.revision],queryFn:()=>readPriceDraft(),enabled:screen.isSuccess})
+      const draft=useQuery({queryKey:['fixture-china-price-draft',screen.data?.revision],queryFn:()=>readPriceDraft(),
+        enabled:screen.isSuccess,placeholderData:previous=>previous})
       return <ChinaWorkOrderTabs workloads={screen.data?.workloads} unchecked={new Map()} unreceived={0} priceDrafts={draft.data ? [draft.data] : []}>{()=>null}</ChinaWorkOrderTabs>
     }
     function NudgeInbox() {
@@ -151,6 +153,7 @@ const errors = []
 let holdDetail
 let failConfirmation = false
 let failPriceReply = false
+let priceSnapshotReads = 0
 await db.query('insert into public.material_nudge_recipients (company_id,profile_id) values ($1,$2),($1,$3)',
   [company, ids.manager, ids.worker])
 try {
@@ -203,7 +206,10 @@ try {
           if (!rows.length) throw Error('Fixture draft unavailable')
           return {data:rows[0],error:null}
         }
-        if (Object.hasOwn(draftPriceRpcArgs, rpc)) return { data:await callDraftPriceFixture(tx,rpc,p),error:null }
+        if (Object.hasOwn(draftPriceRpcArgs, rpc)) {
+          if (rpc === 'get_draft_price_photo') priceSnapshotReads++
+          return { data:await callDraftPriceFixture(tx,rpc,p),error:null }
+        }
         if (path.endsWith('/material_nudge_recipients')) {
           const { rows } = await tx.query('select profile_id from public.material_nudge_recipients order by profile_id')
           return {data:rows,error:null}
@@ -424,7 +430,9 @@ try {
   assert.equal(await firstPriceRow.getByRole('button',{name:'Yellow 컬러 사진 크게 보기'}).count(),0)
   await firstPriceRow.getByRole('button',{name:'Black 컬러 사진 크게 보기'}).click()
   const colorDialog=priceManager.getByRole('dialog',{name:'Black 컬러 사진 크게 보기'})
-  await colorDialog.getByRole('img',{name:'Black 컬러'}).waitFor()
+  const linkedBlack=colorDialog.getByRole('img',{name:'Black 컬러'})
+  await linkedBlack.waitFor()
+  assert.equal(await linkedBlack.getAttribute('src'),draftPriceFixture.photo)
   await colorDialog.getByRole('button',{name:'사진 크게 보기 닫기'}).click()
   const blackPrice=firstPriceRow.getByRole('spinbutton',{name:'Black 단가 (위안)',exact:true})
   assert.equal(await blackPrice.inputValue(),'')
@@ -523,8 +531,38 @@ try {
   assert.deepEqual(await previousRoundLabels.allTextContents(),['1차 회신','2차 회신'])
   await priceFilters.getByRole('button',{name:'ALL (1)',exact:true}).click()
   await rounds.getByText('단가 재요청 · 3차',{exact:true}).waitFor()
+  await repeatPriceRow.getByRole('button',{name:'Black 컬러 사진 크게 보기'}).click()
+  await linkedBlack.waitFor()
+  const replacementPhoto=await priceManager.evaluate(()=>{
+    const canvas=document.createElement('canvas')
+    canvas.width=canvas.height=2
+    const painting=canvas.getContext('2d')
+    painting.fillStyle='#0044dd'
+    painting.fillRect(0,0,2,2)
+    return canvas.toDataURL('image/png')
+  })
+  const updateLinkedPhoto=async (colorId,photo) => db.query(`update public.product_drafts
+    set specs=jsonb_set(jsonb_set(specs,array['colorImageChoices',$2::text],to_jsonb($4::text)),
+      array['colorPhotoUrls',$2::text],to_jsonb($3::text)),updated_at=date_trunc('milliseconds',clock_timestamp())
+    where id=$1`,[draftPriceFixture.id,colorId,photo,photo ? 'Image' : 'None'])
+  await updateLinkedPhoto(draftPriceFixture.black,replacementPhoto)
+  await updateLinkedPhoto(draftPriceFixture.yellow,replacementPhoto)
+  await priceManager.clock.fastForward(31_000)
+  await priceManager.waitForFunction(src=>document.querySelector('img[alt="Black 컬러"]')?.getAttribute('src')===src,replacementPhoto)
+  await colorDialog.getByRole('button',{name:'사진 크게 보기 닫기'}).click()
+  const yellowPhotoButton=repeatPriceRow.getByRole('button',{name:'Yellow 컬러 사진 크게 보기'})
+  await yellowPhotoButton.click()
+  const yellowDialog=priceManager.getByRole('dialog',{name:'Yellow 컬러 사진 크게 보기'})
+  assert.equal(await yellowDialog.getByRole('img',{name:'Yellow 컬러'}).getAttribute('src'),replacementPhoto)
+  await updateLinkedPhoto(draftPriceFixture.yellow,'')
+  await priceManager.clock.fastForward(31_000)
+  await yellowDialog.getByText('첨부 사진이 없습니다.',{exact:true}).waitFor()
+  await yellowDialog.getByRole('button',{name:'사진 크게 보기 닫기'}).click()
+  assert.equal(await yellowPhotoButton.count(),0)
+  assert.equal(priceSnapshotReads,0,'Existing colors reuse the refreshed draft without fetching a request snapshot')
+  assert.equal((await db.query("select photos->>$2 as photo from app.draft_price_requests where draft_id=$1 and round=1",[draftPriceFixture.id,draftPriceFixture.black])).rows[0].photo,draftPriceFixture.photo)
   await priceManager.close()
-  console.log('Draft price browser: grouped replies and history, planning confirmation, and confirmed-to-re-request transition passed')
+  console.log('Draft price browser: current linked color photos, grouped replies and history, planning confirmation, and confirmed-to-re-request transition passed')
   await open('managerBoard')
   const assigneeTabs=page.getByRole('group',{name:'자재요청 담당자',exact:true})
   const workerTab=assigneeTabs.getByRole('button',{name:/김영인/})
