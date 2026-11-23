@@ -29,9 +29,9 @@ const fixtureClient={
    const client = createClient(location.origin, 'fixture-key', { auth: { persistSession: false } })
    export const getSupabase = () => ({
      from: table => client.from(table),
-     async rpc(name, args) {
-       const response = await fetch('/rpc/'+name, {method:'POST',body:JSON.stringify(args)})
-       return response.json()
+     rpc(name, args) {
+       const send = signal => fetch('/rpc/'+name, {method:'POST',body:JSON.stringify(args),signal}).then(response => response.json())
+       return { then(resolve, reject) { return send().then(resolve, reject) }, abortSignal: send }
      }
    })`
  },
@@ -80,6 +80,7 @@ try{
  page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(15000)
  await page.route('**/*',route=>route.request().url().startsWith(origin+'/')||route.request().url().startsWith('data:')?route.continue():route.abort())
  const mdDepartment = '919b2c44-afb6-4d7e-a5b8-b7203df9cef9'
+ const visualDepartment = '7ac8b7a8-7f12-4f3e-a371-d2dac7e492f1'
  let directoryReads = 0
  await page.route('**/rpc/list_org_chart_members', route => {
    directoryReads++
@@ -87,7 +88,8 @@ try{
      {id:'fixture-md', display_name:'MD 검증 담당', department_id:mdDepartment},
      {id:'fixture-md-second', display_name:'MD 검증 팀원', department_id:mdDepartment},
      {id:'fixture-md-unnamed', display_name:null, department_id:mdDepartment},
-     {id:'fixture-visual', display_name:'Visual 검증 담당', department_id:'fixture-visual-department'},
+     {id:'fixture-visual', display_name:'Visual 검증 담당', department_id:visualDepartment},
+     {id:'fixture-visual-second', display_name:'Visual 검증 팀원', department_id:visualDepartment},
    ],error:null}})
  })
  await page.route('**/rpc/list_company_attendance_exempt', route => route.fulfill({json:{data:['fixture-md'],error:null}}))
@@ -104,7 +106,17 @@ try{
    return route.fulfill({json:{data:[saved],error:null}})
  })
  let visualContent=[]
- await page.route('**/rest/v1/draft_visual_content?*',route=>route.fulfill({json:visualContent}))
+ await page.route('**/rest/v1/draft_visual_content?*',route=>route.fulfill({json:visualContent.filter(row=>row.kind!=='assignees')}))
+ await page.route('**/rpc/list_draft_visual_status',async route=>{
+   assert.deepEqual(route.request().postDataJSON(),{p_draft_ids:['fixture']})
+   const temporary=await page.evaluate(()=>JSON.parse(sessionStorage.getItem('atelier-fixture-information-temporary')??'[]'))
+   const team=visualContent.find(row=>row.kind==='assignees')
+   const ids=kind=>visualContent.filter(row=>row.kind===kind&&row.payload).map(row=>row.entry_key)
+   const temporaryIds=field=>temporary.filter(row=>row.field===field).map(row=>row.color_id)
+   return route.fulfill({json:{data:[{draft_id:'fixture',saved_images:ids('color-photo'),saved_html:ids('color-html'),
+     temporary_images:temporaryIds('image'),temporary_html:temporaryIds('html'),
+     assignee_ids:team?.payload??[],assignee_revision:team?.revision??null}],error:null}})
+ })
  await page.route('**/rpc/save_draft_visual_content',async route=>{
    const {p_changes,p_temporary_revision}=route.request().postDataJSON()
    if(p_changes.some(change=>change.revision!==(visualContent.find(row=>row.kind===change.kind&&row.entry_key===change.entry_key)?.revision??null))) {
@@ -130,7 +142,8 @@ try{
  const mdCell=row.locator('.draft-sheet-md-cell')
  const board=page.locator('.draft-board-scroll')
  assert.equal(await board.evaluate(node=>node.scrollWidth>node.clientWidth),true)
- assert.equal(await visualCell.getByRole('combobox',{name:'담당자'}).isDisabled(),true)
+ const visualAssigneePicker=visualCell.getByRole('button',{name:'비주얼 팀 담당자',exact:true})
+ await visualAssigneePicker.waitFor()
  assert.equal(await visualCell.getByRole('button',{name:'블랙 Image'}).isEnabled(),true)
  assert.equal(await visualCell.getByRole('button',{name:'아이보리 html'}).isEnabled(),true)
  const amdBarcode=amdCell.getByRole('textbox',{name:'블랙 바코드 번호'})
@@ -722,8 +735,18 @@ try{
  assert.equal(await ivoryImageCard.getByRole('img').count(),0)
  assert.equal(await saveImage.isEnabled(),true)
  await panel.screenshot({path:'.tmp/draft-visual-image-panel.png'})
+ await blackImageCard.getByRole('button',{name:'블랙 이미지 임시저장',exact:true}).click()
+ await blackImageCard.getByText('임시저장됨',{exact:true}).waitFor()
+ await visualCell.locator('button[aria-label="블랙 Image"][aria-description="임시저장됨"]').waitFor()
+ await panel.getByRole('button',{name:'INFORMATION 닫기'}).click()
+ await visualImage.click()
+ await blackImageCard.getByText('임시저장됨',{exact:true}).waitFor()
+ assert.equal(await blackPreview.getAttribute('src'),newPhoto)
  await saveImage.click()
  assert.equal(await saveImage.isDisabled(),true)
+ const finalVisualImage=visualCell.locator('button[aria-label="블랙 Image"][aria-description="저장됨"]')
+ await finalVisualImage.waitFor()
+ assert.match(await finalVisualImage.getAttribute('class'),/is-done/)
  await fields.getByRole('button',{name:'size',exact:true}).click()
  assert.equal(await visualImage.getAttribute('aria-expanded'),'true')
  assert.equal(await size.getByLabel('Weight 값').getAttribute('readonly'),'')
@@ -836,6 +859,9 @@ try{
  assert.equal(await temporaryHtmlMarker.count(),0)
  await ivoryHtml.getByRole('button',{name:'임시저장',exact:true}).click()
  await ivoryHtml.getByText('임시저장됨',{exact:true}).waitFor()
+ const tempVisualHtml=visualCell.locator('button[aria-label="아이보리 html"][aria-description="임시저장됨"]')
+ await tempVisualHtml.waitFor()
+ assert.match(await tempVisualHtml.getAttribute('class'),/is-editing/)
  const markerBox=await temporaryHtmlMarker.boundingBox()
  const savedEditorBox=await ivoryInput.boundingBox()
  assert.ok(markerBox&&Math.abs(markerBox.y-savedEditorBox.y)<=2&&
@@ -847,6 +873,9 @@ try{
  assert.match(await ivoryInput.inputValue(),/아이보리 상세 HTML/)
  await ivoryHtml.getByRole('button',{name:'저장',exact:true}).click()
  await ivoryHtml.getByText('저장됨',{exact:true}).waitFor()
+ const finalVisualHtml=visualCell.locator('button[aria-label="아이보리 html"][aria-description="저장됨"]')
+ await finalVisualHtml.waitFor()
+ assert.match(await finalVisualHtml.getAttribute('class'),/is-done/)
  assert.equal(await temporaryHtmlMarker.count(),0)
  assert.equal(await ivoryHtml.getByText('저장됨',{exact:true}).isVisible(),true)
  await generateVendorCode(ivoryHtml).click()
@@ -1038,6 +1067,18 @@ try{
  await releaseFolder.selectOption('group-dec')
  await row.locator('.draft-sheet-schedule').filter({hasText:/12월 출시/}).waitFor({state:'attached'})
  assert.doesNotMatch(await row.locator('.draft-sheet-schedule').textContent(),/2026\. 11\. 27\./)
+ await visualCell.getByRole('button',{name:'비주얼 팀 담당자 추가',exact:true}).click()
+ const visualAssignees=page.getByRole('dialog',{name:'Visual 팀 담당자 지정',exact:true})
+ await visualAssignees.getByRole('checkbox',{name:'Visual 검증 담당',exact:true}).check()
+ await visualAssignees.getByRole('checkbox',{name:'Visual 검증 팀원',exact:true}).check()
+ assert.equal(await visualAssignees.getByRole('checkbox',{name:'MD 검증 담당',exact:true}).count(),0)
+ await visualAssignees.getByRole('button',{name:'담당자 저장',exact:true}).click()
+ await visualAssignees.waitFor({state:'hidden'})
+ await visualAssigneePicker.filter({hasText:'Visual 검증 담당 외 1명'}).waitFor()
+ await page.reload({waitUntil:'domcontentloaded'})
+ await visualAssigneePicker.filter({hasText:'Visual 검증 담당 외 1명'}).waitFor()
+ await page.getByRole('button',{name:'다른 직원으로 전환'}).click()
+ assert.equal(await visualAssigneePicker.isDisabled(),true)
  assert.deepEqual(errors,[])
  console.log('draft-sheet-readonly: saved AMD/MD and Visual content, conflict recovery, permissions, color updates, and release schedules passed')
 }finally{await browser?.close();await server?.close()}

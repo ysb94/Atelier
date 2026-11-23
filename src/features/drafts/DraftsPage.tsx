@@ -47,6 +47,7 @@ import { DraftMdOptionsProvider } from './DraftMdTeamCell'
 import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
 import { useDraftPriceRequests } from './useDraftPriceRequests'
 import { useDraftTeamWork } from './use-draft-team-work'
+import { useDraftVisualBoard } from './use-draft-visual-board'
 import {
   formatReleaseGroupLabel,
   isUnassignedReleaseFolder,
@@ -386,6 +387,7 @@ export function CompanyDraftsPage() {
     })
   }, [boardFilter, folderDrafts, scheduleByDraft])
   const teamWork = useDraftTeamWork(profileId, visible, !showingCompleted)
+  const visualBoard = useDraftVisualBoard(profileId, visible, !showingCompleted)
 
   const scheduleDraft = scheduleDraftId
     ? (ownerDrafts.find((draft) => draft.id === scheduleDraftId) ??
@@ -642,6 +644,11 @@ export function CompanyDraftsPage() {
         <Button type="button" size="sm" variant="outline" disabled={teamWork.query.isFetching}
           onClick={() => { void teamWork.query.refetch() }}>AMD·MD 다시 조회</Button>
       </div>}
+      {!showingCompleted && visualBoard.query.isError && <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+        <p role="status" className="text-muted-foreground">Visual 팀 저장 상태와 담당자를 불러오지 못했습니다.</p>
+        <Button type="button" size="sm" variant="outline" disabled={visualBoard.query.isFetching}
+          onClick={() => { void visualBoard.query.refetch() }}>Visual 다시 조회</Button>
+      </div>}
       <div className="draft-board-scroll" role="region" aria-label={showingCompleted ? '완료된 기획안 목록' : '기획안 목록'} tabIndex={0}>
         <table className="draft-board-table">
           <caption className="sr-only">기획안별 샘플, 상품 정보 및 팀별 진행 현황</caption>
@@ -688,6 +695,7 @@ export function CompanyDraftsPage() {
                     key={draft.id}
                     draft={draft}
                     teamWork={teamWork.forDraft(draft.id)}
+                    visualBoard={visualBoard.forDraft(draft.id)}
                     readOnly={!canWriteDraft(workAccess.access,draft)}
                     informationEditorId={profile?.id}
                     schedule={schedule}

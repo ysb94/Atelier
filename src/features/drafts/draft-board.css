@@ -163,11 +163,9 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-color-line:last-child{border-bottom:0}
 .draft-color-line small{color:#8a8e94}
 .draft-sheet-visual-cell .draft-color-line{justify-content:flex-start}
-.draft-sheet-visual-cell .draft-team-control[aria-expanded=true]{border-color:var(--color-primary);color:var(--color-primary)}
+.draft-sheet-visual-cell .draft-team-control[aria-expanded=true]:not(.is-done){border-color:var(--color-primary);color:var(--color-primary)}
 .draft-visual-assignee{gap:5px;align-items:flex-end;padding:0 8px 7px}
-.draft-visual-assignee label{display:grid;gap:2px;color:var(--color-muted-foreground);font-size:10px;line-height:1}
-.draft-visual-assignee select.draft-team-control{width:68px;padding-right:18px;background-size:10px;background-position:right 4px center}
-.draft-visual-assignee button.draft-team-control{width:20px;padding:0}
+.draft-visual-assignee .draft-visual-assignee-add{width:20px;padding:0}
 .draft-board-table .draft-team-control{height:22px;min-width:0;padding-inline:7px;border-radius:4px;box-shadow:none;font-size:11px;font-weight:400;line-height:1}
 .draft-board-table .draft-team-control:disabled{cursor:default;opacity:.65}
 .draft-board-table .draft-team-confirm{margin-left:auto;color:var(--color-primary)}

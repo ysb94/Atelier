@@ -31,6 +31,7 @@ import type { DraftInformationPanelField, DraftVisualInformationField } from './
 import { DraftMdTeamCell } from './DraftMdTeamCell'
 import { DraftVisualAmdCells } from './DraftVisualAmdCells'
 import type { DraftTeamWork } from './use-draft-team-work'
+import type { DraftVisualBoardRow } from './use-draft-visual-board'
 
 const SAMPLE_WORK_ORDER_ACCEPT =
   'application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp,.xls,.xlsx'
@@ -757,13 +758,14 @@ function DraftReleaseFolderSelect({ draft, folders, readOnly, onChange }: {
   </>
 }
 
-export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releaseFolders, onChangeReleaseFolder, price, teamWork, informationEditorId, informationTemporaryStore, onOpen, onNextSample, onSchedule, onSaveColors, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releaseFolders, onChangeReleaseFolder, price, teamWork, visualBoard, informationEditorId, informationTemporaryStore, onOpen, onNextSample, onSchedule, onSaveColors, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
   readOnly?: boolean
   draft: ProductDraft; schedule: ResolvedReleaseSchedule | undefined; brand: Brand | undefined
   releaseFolders: Pick<Season, 'id' | 'name' | 'releaseTiming'>[]
   onChangeReleaseFolder: (seasonId: string | null) => Promise<void>
   price?: DraftPriceControls
   teamWork: DraftTeamWork
+  visualBoard: DraftVisualBoardRow
   onOpen: () => void
   onNextSample?: () => void
   onSchedule: () => void
@@ -1003,7 +1005,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, releas
         </div>
       </div>
     </td>
-    <DraftVisualAmdCells key={`${informationEditorId ?? ''}:${readOnly}:visual-amd`} colors={draft.colors} readOnly={readOnly} teamWork={teamWork}
+    <DraftVisualAmdCells key={`${informationEditorId ?? ''}:${readOnly}:visual-amd`} colors={draft.colors} readOnly={readOnly} teamWork={teamWork} visualBoard={visualBoard}
       panelId={informationId} activeTrigger={information?.visualTrigger ? { colorId: information.colorId, field: information.visualTrigger } : null}
       onOpenVisualTab={(anchor, colorId, field) => setInformation(current =>
         current?.anchor === anchor && current.field === field ? null : { anchor, colorId, field, visualTrigger: field })} />

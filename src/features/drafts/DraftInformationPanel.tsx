@@ -23,6 +23,7 @@ import {
 import { cn } from '@/lib/utils'
 import { DRAFT_INFORMATION_PANEL_TAB_GROUPS, type DraftInformationPanelField } from './draft-information-tabs'
 import { DRAFT_HTML_VENDORS, DraftVendorHtmlDialog } from './DraftVendorHtmlDialog'
+import { draftVisualBoardKey } from './use-draft-visual-board'
 import { DraftVisualImagePanel } from './DraftVisualImagePanel'
 
 const MEASUREMENT_FIELDS = ['size', 'weight'] as const
@@ -639,7 +640,7 @@ export function DraftInformationPanel({
   const queryKey = ['draft-information-temporary', editorId, draft.id] as const
   const locked = readOnly || fromVisual
   const visualTab = field === 'image' || field === 'html'
-  const temporaryEnabled = Boolean(editorId && (field === 'html' ? !readOnly : !locked && !visualTab))
+  const temporaryEnabled = Boolean(editorId && (visualTab ? !readOnly : !locked))
   const visualKey = ['draft-visual-content', editorId, draft.id] as const
   const visual = useQuery({
     queryKey: visualKey,
@@ -663,12 +664,14 @@ export function DraftInformationPanel({
   const savedDocument = temporaryEnabled ? temporary.data?.find(row => row.field === 'specDoc') : undefined
 
   async function saveTemporary(field: DraftInformationTemporary['field'], colorId: string | null, edits: DraftInformationTemporary['edits']) {
-    if (!editorId || (field === 'html' ? readOnly : locked)) return
+    const visualField = field === 'html' || field === 'image'
+    if (!editorId || (visualField ? readOnly : locked)) return
     const copy = { field, color_id: colorId, edits, revision: crypto.randomUUID() }
     await temporaryStore.save(draft.id, editorId, copy)
     await cache.cancelQueries({ queryKey, exact: true })
     cache.setQueryData<DraftInformationTemporary[]>(queryKey, current =>
       [...(current ?? []).filter(row => row.field !== field || row.color_id !== colorId), copy])
+    if (visualField) void cache.invalidateQueries({ queryKey: draftVisualBoardKey(editorId) })
   }
 
   async function saveVisual(changes: DraftVisualChange[], temporaryRevision?: string) {
@@ -684,6 +687,9 @@ export function DraftInformationPanel({
       ...saved,
     ])
     removeConfirmedTemporary(temporaryRevision)
+    if (changes.some(change => change.kind === 'color-html' || change.kind === 'color-photo')) {
+      void cache.invalidateQueries({ queryKey: draftVisualBoardKey(editorId) })
+    }
   }
 
   async function saveVendorHtml(rows: readonly DraftVisualContent[], templates: DraftVendorHtml) {
@@ -822,8 +828,11 @@ export function DraftInformationPanel({
           </div>
         </div>
         {field === 'image' ? <DraftVisualImagePanel key={`${editorId ?? ''}:${readOnly}`} colors={colors}
-          colorPhotos={draft.specs.colorPhotoUrls} visualPhotos={visualRows} readOnly={visualLocked}
-          onSave={(entry_key, payload, revision) => saveVisual([{ kind: 'color-photo', entry_key, payload, revision }])} /> : field === 'html' ? (
+          colorPhotos={draft.specs.colorPhotoUrls} visualPhotos={visualRows} readOnly={visualLocked || loadingTemporary}
+          workingCopies={temporaryEnabled ? temporary.data : undefined} canSaveTemporary={canSaveTemporary}
+          onSave={(entry_key, payload, revision, asTemporary, temporaryRevision) => asTemporary
+            ? saveTemporary('image', entry_key, { image: { source: revision ?? '', text: payload } })
+            : saveVisual([{ kind: 'color-photo', entry_key, payload, revision }], temporaryRevision)} /> : field === 'html' ? (
           <div className="border-t border-border">
             {colors.length ? colors.map((color, index) => {
               const photo = visualRows.find(row => row.kind === 'color-photo' && row.entry_key === color.id)

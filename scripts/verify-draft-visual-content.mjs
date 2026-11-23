@@ -5,6 +5,9 @@ import { PGlite } from '@electric-sql/pglite'
 const db = await PGlite.create()
 const company = 'e0000000-0000-4000-8000-000000000001'
 const planning = 'ced99f89-ea80-4eeb-8f03-272bf72f5db1'
+const visualTeam = '7ac8b7a8-7f12-4f3e-a371-d2dac7e492f1'
+const visualOne = crypto.randomUUID()
+const visualTwo = crypto.randomUUID()
 const author = crypto.randomUUID()
 const other = crypto.randomUUID()
 const outsider = crypto.randomUUID()
@@ -25,6 +28,7 @@ try {
     'supabase/migrations/20261027044909_department_work_access.sql',
     'supabase/migrations/20261118062623_draft_information_temporary.sql',
     'supabase/migrations/20261122161836_draft_visual_html.sql',
+    'supabase/migrations/20261123053353_draft_visual_assignments_and_status.sql',
   ]) await db.exec(await readFile(file, 'utf8'))
   const otherCompany = crypto.randomUUID()
   await db.query('insert into public.companies(id) values($1),($2)', [company, otherCompany])
@@ -32,6 +36,11 @@ try {
   for (const id of [author, other, operator, outsider]) {
     await db.query("insert into public.profiles(id,company_id,department_id,display_name,status,is_admin,position) values($1,$2,$3,$4,'active',false,'')",
       [id, id === outsider ? otherCompany : company, id === outsider ? null : planning, id])
+  }
+  await db.query("insert into public.departments(id,company_id,name,is_active) values($1,$2,'Visual',true)", [visualTeam, company])
+  for (const id of [visualOne, visualTwo]) {
+    await db.query("insert into public.profiles(id,company_id,department_id,display_name,status,is_admin) values($1,$2,$3,'Visual','active',false)",
+      [id, company, visualTeam])
   }
 
   await role(author)
@@ -102,7 +111,36 @@ try {
   await db.query('delete from public.draft_colors where draft_id=$1 and id=$2', [draft, ivory])
   assert.equal((await list()).some(row => row.entry_key === ivory), false)
   await assert.rejects(save([change('color-html', ivory, '삭제된 컬러')]), { code: '22023' })
-  console.log('Draft Visual DB: company and owner boundaries, separate records, temporary confirmation, rollback and draft/color lifecycle passed')
+
+  const status = async () => (await db.query('select * from public.list_draft_visual_status($1)', [[draft]])).rows[0]
+  const image = 'data:image/png;base64,YQ=='
+  const imageTemporary = crypto.randomUUID()
+  const imageWorkingCopy = "insert into public.draft_information_temporary(draft_id,editor_id,field,color_id,revision,edits) values($1,$2,'image',$3,$4,$5)"
+  await db.query(imageWorkingCopy, [draft, author, black, imageTemporary, { image: { source: '', text: image } }])
+  await assert.rejects(db.query(imageWorkingCopy, [draft, author, black, crypto.randomUUID(), { image: { source: '', text: 'https://example.com/image' } }]), { code: '23514' })
+  assert.deepEqual((await status()).temporary_images, [black])
+  assert.deepEqual((await status()).saved_html, [], 'A cleared HTML entry does not count as saved')
+  const [group] = await save([change('assignees', 'team', [visualOne, visualTwo])])
+  assert.deepEqual((await status()).assignee_ids, [visualOne, visualTwo])
+  await assert.rejects(save([change('assignees', 'team', [visualOne])]), { code: '40001' })
+  for (const invalid of [[author], [visualOne, visualOne], [outsider]]) {
+    await assert.rejects(save([change('assignees', 'team', invalid, group.revision)]), { code: '22023' })
+  }
+  await role(operator)
+  assert.deepEqual((await status()).temporary_images, [], 'Another editor cannot see an image working copy')
+  await db.query(imageWorkingCopy, [draft, operator, black, crypto.randomUUID(), { image: { source: '', text: image } }])
+  await role(author)
+  await save([change('color-photo', black, image)], imageTemporary)
+  assert.deepEqual((await status()).temporary_images, [])
+  assert.deepEqual((await status()).saved_images, [black])
+  await role(operator)
+  assert.deepEqual((await status()).temporary_images, [black], 'Final save cleared only the author’s working copy')
+  await role(other)
+  assert.deepEqual((await status()).assignee_ids, [visualOne, visualTwo])
+  await assert.rejects(save([change('assignees', 'team', [], group.revision)]), { code: '42501' })
+  await role(outsider)
+  assert.equal(await status(), undefined)
+  console.log('Draft Visual DB: access, private Image/HTML drafts, saved status, team-only assignments, revision conflicts and lifecycle passed')
 } finally {
   await db.close()
 }
