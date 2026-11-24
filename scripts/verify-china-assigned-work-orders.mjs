@@ -19,8 +19,8 @@ const asActor = async (actor, role = 'authenticated') => {
 }
 const read = async () => (await db.query('select public.get_my_china_work_orders() as value')).rows[0].value
 const file = async (key) => (await db.query("select public.get_my_china_work_order_file($1,$2,'sample') as value", [id(11), key])).rows[0].value
-const act = (draftId, key, action, kind = 'sample', rev = revision) =>
-  db.query('select app.china_work_order($1,$2,$3,$4,null,$5)', [draftId, key, kind, action, rev])
+const act = (draftId, key, action, kind = 'sample', rev = revision, assignee = null) =>
+  db.query('select app.china_work_order($1,$2,$3,$4,$5,$6)', [draftId, key, kind, action, assignee, rev])
 try {
   await db.exec(`
     create schema app; create schema auth; create role authenticated; create role anon;
@@ -49,6 +49,7 @@ try {
   await db.exec(await sql('20261106130000_china_assignee_receipt'))
   await db.exec(await sql('20261106131500_china_assignee_receipt_closed'))
   await db.exec(await sql('20261106134500_china_assigned_order_elapsed_days'))
+  await db.exec(await sql('20261124121357_require_china_work_order_receipt_before_shipping'))
   const received = { receivedAt: '2026-11-04T00:00:00Z' }
   for (const [draftId, actor, rounds, colors] of [
     [id(11), id(1), [
@@ -61,7 +62,7 @@ try {
       order('color', id(1), ''),
       { ...order('color-received', id(1), assignedAt, '한국'), ...received },
     ]],
-    [id(12), id(2), [order('theirs', id(2))], []],
+    [id(12), id(2), [order('theirs', id(2)), { ...order('completed', id(2)), ...received, assigneeCheckedAt: assignedAt }], [order('their-color', id(2), '')]],
   ]) {
     await db.query("insert into public.product_drafts values ($1,$2,$3,'open','중국','PL-fixture',null,'fixture','',null,'', $4,$5)",
       [draftId, company, revision, JSON.stringify(rounds), JSON.stringify({ chinaWorkAssignment: { assigneeId: actor, assignedAt }, colorSampleRequestedAt: assignedAt, colorSampleRounds: colors })])
@@ -77,6 +78,9 @@ try {
   assert.equal(before.orders.find(row => row.orderId === 'final-received').shippedAt,assignedAt)
   assert.match(await file('mine'), /^https:/)
   assert.match(await file('final-received'), /^https:/)
+  await assert.rejects(act(id(11), 'mine', 'ship'), { code: '55000' })
+  await assert.rejects(act(id(11), 'color', 'ship', 'color'), { code: '55000' })
+  assert.deepEqual(await read(), before, 'Blocked shipping leaves receipt, shipment and revision unchanged')
   await assert.rejects(act(id(11), 'final-received', 'ship'), { code: '42501' })
   await assert.rejects(act(id(11), 'color-received', 'ship', 'color'), { code: '42501' })
   for (const key of ['other', 'future', 'korea', 'other-received', 'future-received']) {
@@ -97,15 +101,42 @@ try {
   const shipped = after.orders.find(row => row.orderId === 'mine')
   assert.ok(shipped.closed && shipped.returnedAt && !shipped.receivedAt)
   await assert.rejects(act(id(11), 'mine', 'ship', 'sample', shipped.revision), { code: '42501' })
-  await act(id(11), 'color', 'ship', 'color', shipped.revision)
+  await assert.rejects(act(id(11), 'color', 'ship', 'color', shipped.revision), { code: '55000' })
+  await act(id(11), 'color', 'check', 'color', shipped.revision)
+  const checkedColor = (await read()).orders.find(row => row.orderId === 'color')
+  assert.ok(checkedColor.assigneeCheckedAt)
+  await act(id(11), 'color', 'ship', 'color', checkedColor.revision)
   assert.ok((await read()).orders.every(row => row.closed))
   await asActor(id(2))
-  assert.deepEqual((await read()).orders.map(row => row.orderId), ['theirs'])
+  assert.deepEqual((await read()).orders.map(row => row.orderId).sort(), ['completed', 'their-color', 'theirs'])
   await asActor(id(3))
   const manager = await read()
   assert.equal(manager.role, 'manager')
   assert.deepEqual(manager.orders, [])
-  await act(id(12), 'theirs', 'ship')
+  await assert.rejects(act(id(12), 'theirs', 'ship'), { code: '55000' })
+  await assert.rejects(act(id(12), 'their-color', 'ship', 'color'), { code: '55000' })
+  await assert.rejects(act(id(12), 'theirs', null), /지원하지 않는 지시서 작업/)
+  await act(id(12), 'theirs', 'check')
+  const managerChecked = (await read()).revision
+  await assert.rejects(act(id(12), 'theirs', 'ship', 'sample', managerChecked), { code: '55000' })
+  await asActor(id(2))
+  await act(id(12), 'theirs', 'check', 'sample', managerChecked)
+  const initialReceipt = (await read()).orders.find(row => row.orderId === 'theirs')
+  await act(id(12), 'their-color', 'check', 'color', initialReceipt.revision)
+  const lastReceipt = (await read()).orders.find(row => row.orderId === 'their-color')
+  await asActor(id(3))
+  await act(id(12), 'theirs', 'handoff', 'sample', lastReceipt.revision, id(1))
+  await asActor(id(1))
+  const reassigned = (await read()).orders.filter(row => row.draftId === id(12))
+  assert.equal(reassigned.find(row => row.orderId === 'theirs').assigneeCheckedAt, null)
+  assert.equal(reassigned.find(row => row.orderId === 'their-color').assigneeCheckedAt, null)
+  assert.equal(reassigned.find(row => row.orderId === 'completed').assigneeCheckedAt, assignedAt)
+  const newRevision = reassigned[0].revision
+  await assert.rejects(act(id(12), 'theirs', 'ship', 'sample', newRevision), { code: '55000' })
+  await act(id(12), 'theirs', 'check', 'sample', newRevision)
+  const newReceipt = (await read()).orders.find(row => row.orderId === 'theirs')
+  await asActor(id(3))
+  await act(id(12), 'theirs', 'ship', 'sample', newReceipt.revision)
   assert.notEqual((await read()).revision, manager.revision)
   await asActor(id(4))
   assert.deepEqual(await read(), { role: 'denied', orders: [] })

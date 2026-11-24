@@ -26,7 +26,7 @@ const dateFormat = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', mo
 
 function orderStatus(order: AssignedChinaOrder) {
   const timestamp = order.receivedAt ?? order.returnedAt
-  if (!timestamp) return order.closed ? '처리 완료' : '발송 대기'
+  if (!timestamp) return order.closed ? '처리 완료' : order.assigneeCheckedAt ? '발송 대기' : '지시서 받기 대기'
   const date = new Date(timestamp)
   const label = order.receivedAt ? '본사 수령 완료' : '발송 · 본사로 이동 중'
   return Number.isNaN(date.getTime()) ? label : `${dateFormat.format(date)} ${label}`
@@ -55,7 +55,7 @@ export function ChinaAssignedWorkOrders({ orders, brandById, accountId }: {
   const uncheckedPlans = new Set(orders.filter(order => !order.closed && !order.assigneeCheckedAt).map(order => order.draftId)).size
 
   async function handleOrder(order: AssignedChinaOrder, action: 'download' | 'ship') {
-    if (busy || (action === 'ship' && order.closed)) return
+    if (busy || (action === 'ship' && (order.closed || !order.assigneeCheckedAt))) return
     const trace = startWorkflow('app', action === 'ship' ? 'china_work_ship' : 'china_assigned_work_file')
     trace.step('validate_input')
     setBusy(true)
@@ -158,7 +158,7 @@ export function ChinaAssignedWorkOrders({ orders, brandById, accountId }: {
                     ? <Button type="button" variant="secondary" size="sm" className="w-full text-muted-foreground" disabled={busy} onClick={() => void handleOrder(order, 'download')}><Check className="size-3.5" aria-hidden="true" />받기</Button>
                     : <Button type="button" variant="outline" size="sm" className="w-full text-primary" disabled={busy} onClick={() => void handleOrder(order, 'download')}><Download className="size-3.5" aria-hidden="true" />받기</Button>}
                   {order.closed ? <Badge variant="muted" className="h-8 w-full justify-center"><Check className="mr-1 size-3.5" aria-hidden="true" />{order.returnedAt || order.receivedAt ? '발송 완료' : '완료'}</Badge>
-                    : <Button type="button" variant="outline" size="sm" className="w-full text-primary" disabled={busy} onClick={() => void handleOrder(order, 'ship')}><Send className="size-3.5" aria-hidden="true" />발송 하기</Button>}
+                    : <Button type="button" variant="outline" size="sm" className="w-full text-primary" disabled={busy || !order.assigneeCheckedAt} onClick={() => void handleOrder(order, 'ship')}><Send className="size-3.5" aria-hidden="true" />발송 하기</Button>}
                 </div>
               </td>
               </tr>
