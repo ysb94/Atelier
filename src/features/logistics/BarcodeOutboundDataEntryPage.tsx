@@ -366,7 +366,16 @@ export function BarcodeOutboundDataEntryPage() {
   ).length > 1)
   const hasLegacyDraft = legacyDraft.rows.length > 0 || Boolean(legacyDraft.note.trim())
   const hasScopedDraft = scopedDraft.rows.length > 0 || Boolean(scopedDraft.note.trim())
-  const draft = !hasScopedDraft && !sharedAcrossCategories ? legacyDraft : scopedDraft
+  const oldDraft = selectedCompany?.groupId && !hasScopedDraft && (!hasLegacyDraft || sharedAcrossCategories)
+    ? selectedCompany.units.flatMap((unit) => {
+        const key = `legacy:${unit.id}`
+        const scopedKey = `category:${selectedCompany.categoryKey}|company:${key}`
+        return sharedAcrossCategories ? [scopedKey] : [scopedKey, key]
+      }).map((key) => ({ key, draft: readBarcodeDataEntryDraft(brand.id, key) }))
+        .find(({ draft }) => draft.rows.length > 0 || Boolean(draft.note.trim()))
+    : undefined
+  const currentDraft = !hasScopedDraft && !sharedAcrossCategories ? legacyDraft : scopedDraft
+  const draft = oldDraft?.draft ?? currentDraft
   const settingsCompanyKeys =
     visibleCompanyKeysFromUnitIds(targets, visibleIds, folders) ?? new Set<string>()
 
@@ -376,6 +385,7 @@ export function BarcodeOutboundDataEntryPage() {
       throw new Error('출고업체를 먼저 고르세요.')
     }
     writeBarcodeDataEntryDraft(brand.id, selectedCompany.selectionKey, { rows, note })
+    if (oldDraft) writeBarcodeDataEntryDraft(brand.id, oldDraft.key, emptyBarcodeDataEntryDraft())
     if (!sharedAcrossCategories) {
       writeBarcodeDataEntryDraft(brand.id, selectedCompany.key, emptyBarcodeDataEntryDraft())
     }

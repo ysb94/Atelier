@@ -14,6 +14,7 @@ import { outboundPartnerSaveConflict } from '@/lib/codes/outbound-partner-matchi
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
 import { readOutboundPartnerDisplayName } from '@/lib/supabase/outbound-partner-display-name'
+import { diagnosticQuery } from '@/lib/supabase/diagnostic-query'
 
 const COLUMNS =
   'id, brand_id, name, normalized_name, active, is_one_time, channel_type, shipping_method, folder_id, group_id, site_name, normalized_site_name, outbound_partner_groups(name), contact_name, contact_phone, contact_email, address, note, sort_order, created_at, updated_at'
@@ -60,9 +61,9 @@ type AliasRow = {
 }
 
 export class CodeUsageTargetStoreError extends Error {
-  readonly code: 'duplicate' | 'not_found' | 'invalid'
+  readonly code: 'duplicate' | 'not_found' | 'invalid' | 'conflict'
 
-  constructor(message: string, code: 'duplicate' | 'not_found' | 'invalid') {
+  constructor(message: string, code: CodeUsageTargetStoreError['code']) {
     super(message)
     this.name = 'CodeUsageTargetStoreError'
     this.code = code
@@ -243,6 +244,42 @@ export type SaveCodeUsageTargetInput = CodeUsageTargetInput & {
   aliases?: readonly string[]
   folderId?: string | null
   groupName?: string
+}
+
+export type OutboundPartnerRegistrationInput =
+  | { action: 'new-company'; companyName: string; siteName: string; folderId: string | null; channelType: OutboundChannelType }
+  | { action: 'name-existing' | 'add-site'; existingId: string; expectedUpdatedAt: string; siteName: string }
+
+export async function registerOutboundPartner(brandId: string, input: OutboundPartnerRegistrationInput) {
+  const newCompany = input.action === 'new-company'
+  try {
+    const id = await diagnosticQuery<string | null>('app', 'outbound_partner_registration', getSupabase()
+      .rpc('register_outbound_partner', {
+        p_brand_id: brandId,
+        p_action: input.action,
+        p_company_name: newCompany ? input.companyName : null,
+        p_site_name: input.siteName,
+        p_folder_id: newCompany ? input.folderId : null,
+        p_channel_type: newCompany ? input.channelType : null,
+        p_existing_id: newCompany ? null : input.existingId,
+        p_expected_updated_at: newCompany ? null : input.expectedUpdatedAt,
+      }))
+    if (id) return id
+  } catch (error) {
+    const cause = error instanceof Error ? error.cause as PostgrestErrorLike | undefined : undefined
+    if (cause?.code === 'PGRST202' || cause?.code === '42883') {
+      throw new CodeUsageTargetStoreError('출고업체 등록 기능이 아직 서버에 적용되지 않았습니다.', 'invalid')
+    }
+    if (cause?.code === '23505') {
+      throw new CodeUsageTargetStoreError(newCompany ? '이미 등록된 이름입니다. 기존 업체를 검색해 주세요.' : '이미 등록된 지점 이름입니다.', 'duplicate')
+    }
+    if (cause?.code === '40001') {
+      throw new CodeUsageTargetStoreError('업체 정보가 바뀌었습니다. 업체를 다시 선택해 주세요.', 'conflict')
+    }
+    if (cause) throw rpcError(cause, '등록하지 못했습니다. 다시 시도해 주세요.')
+    throw error
+  }
+  throw new CodeUsageTargetStoreError('등록 결과를 확인하지 못했습니다. 업체를 검색해 확인해 주세요.', 'invalid')
 }
 
 /** 업체와 별칭을 한 트랜잭션으로 저장한다. 별칭 배열이 곧 최종 상태다. */
