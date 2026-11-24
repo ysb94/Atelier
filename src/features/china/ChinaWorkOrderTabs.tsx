@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FileText, Settings2, UserPlus } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { FilterTabs, type FilterTab } from '@/components/ui/filter-tabs'
 import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
@@ -147,7 +146,6 @@ export function ChinaWorkOrderTabs({ children, workloads, unchecked, unreceived,
     <div className="mb-5">
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
         <FilterTabs tabs={workTabItems} value={workTab} onChange={setWorkTab} ariaLabel="중국팀 업무" variant="underline" size="large" className="flex-1" />
-        {!isMaterials && !isPrices && <Badge variant="muted" className="self-start sm:self-center">화면 구성 미리보기</Badge>}
       </div>
       {showAssignees && (
         <div className="mt-2 flex min-w-0 items-stretch border-b border-border">

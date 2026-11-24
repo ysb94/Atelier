@@ -107,7 +107,6 @@ export function ChinaAssignedWorkOrders({ orders, brandById, accountId }: {
         }
         return item
       })} value={tab} onChange={setTab} ariaLabel="중국팀 업무" variant="underline" size="large" className="flex-1" />
-      {tab !== 'materials' && <Badge variant="muted">화면 구성 미리보기</Badge>}
     </div>
     {error && <p role="alert" className="mb-3 text-sm text-danger">{error}</p>}
     {tab === 'orders' ? <Card className="overflow-x-auto">
