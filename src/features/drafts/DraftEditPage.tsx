@@ -883,7 +883,7 @@ export function DraftEditPage() {
                 readOnly={!editable || saveMutation.isPending}
                 onChange={proposer => patch({ specs: { ...form.specs, proposer } })} />
               {savedSamples.length === 0 && <p className="text-xs text-muted-foreground">
-                CHINA의 지시서는 중국팀에 전달됩니다. KOREA와 PROMOTION [중국]은 기획안에 기록만 남습니다.
+                CHINA (김웅사장님)의 지시서는 중국팀에 전달됩니다. 다른 진행처는 기획안에 기록됩니다.
               </p>}
             </div>
             <div className="min-w-0">

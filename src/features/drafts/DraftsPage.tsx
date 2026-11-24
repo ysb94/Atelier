@@ -24,6 +24,7 @@ import {
 import { receiveColorSample, resolveColorSampleRounds, setColorSampleDone } from '@/lib/drafts/draft-flow'
 import { registerDraftSampleStage } from '@/lib/drafts/sample-registration'
 import { draftToInput, attachSampleWorkOrderFile, latestFilledSampleWorkOrder, legacyWorkOrderFields } from '@/lib/drafts/sample-work-order'
+import { normalizeDraftManualPrice } from '@/lib/drafts/manual-price'
 import { receiveSample, registerNextReceivedSample } from '@/lib/drafts/sample-receipt'
 import { writeColorSpec } from '@/lib/drafts/color-spec'
 import { useAuth } from '@/lib/supabase/auth'
@@ -690,6 +691,17 @@ export function CompanyDraftsPage() {
                       request: () => prices.change({
                         action: 'request', draftId: draft.id, revision: currentDraft(draft.id)?.updatedAt ?? draft.updatedAt, previousId: price?.latest.id ?? null,
                       }),
+                      saveManual: async (record) => {
+                        await saveDraftChange(draft.id, (current) => {
+                          const manualPrice = normalizeDraftManualPrice({ ...record, savedAt: new Date().toISOString() })
+                          if (!manualPrice || current.colors.length !== Object.keys(manualPrice.amounts).length ||
+                            current.colors.some(color => !Object.hasOwn(manualPrice.amounts, color.id))) {
+                            throw new Error('현재 컬러와 입력한 단가를 다시 확인해 주세요.')
+                          }
+                          const input = draftToInput(current)
+                          return { ...input, specs: { ...input.specs, manualPrice } }
+                        }, 'draft_price_manual_save')
+                      },
                       confirm: async (reply) => {
                         await saveDraftChange(draft.id, (current) => {
                           const amounts = reply.amounts

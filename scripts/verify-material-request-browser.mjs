@@ -413,7 +413,11 @@ try {
   await open('pricePlanning')
   await page.getByRole('button',{name:'단가 요청',exact:true}).click()
   const planningPriceDialog=page.getByRole('dialog')
-  await planningPriceDialog.getByRole('button',{name:'단가 요청 보내기',exact:true}).click()
+  const sendChinaPriceRequest=async()=>{
+    await planningPriceDialog.getByRole('combobox',{name:'제조국·제조처',exact:true}).selectOption({label:'CHINA (김웅사장님)'})
+    await planningPriceDialog.getByRole('button',{name:'단가 요청 보내기',exact:true}).click()
+  }
+  await sendChinaPriceRequest()
   await planningPriceDialog.getByText('1차 요청이 접수되어 중국팀 회신을 기다리고 있습니다.').waitFor()
   assert.equal(await planningPriceDialog.getByRole('button',{name:/단가.*보내기/}).count(),0)
 
@@ -467,6 +471,7 @@ try {
   await planningPriceDialog.getByText('¥0',{exact:true}).waitFor()
   await planningPriceDialog.getByRole('button',{name:'닫기',exact:true}).click()
   await page.getByRole('button',{name:'단가 재요청',exact:true}).click()
+  await sendChinaPriceRequest()
   await page.getByRole('status').filter({hasText:'재요청중'}).waitFor()
   assert.equal(await page.getByRole('dialog').count(),0)
   await priceManager.bringToFront()
@@ -517,6 +522,7 @@ try {
 
   await page.bringToFront()
   await page.getByRole('button',{name:'Black 단가 18.25위안 재요청',exact:true}).click()
+  await sendChinaPriceRequest()
   await page.getByRole('status').filter({hasText:'재요청중'}).waitFor()
   await priceManager.bringToFront()
   await priceManager.clock.fastForward(31_000)

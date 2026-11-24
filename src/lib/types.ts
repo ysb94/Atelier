@@ -300,6 +300,14 @@ export type DraftOptionRow = {
 /** 원가 통화. 중국 생산이 많아 위안이 기본이다. */
 export type CostCurrency = 'CNY' | 'USD' | 'KRW'
 
+export type DraftManualPrice = {
+  destination: string
+  vendor: string
+  currency: CostCurrency
+  amounts: Record<string, number>
+  savedAt: string
+}
+
 /** 값과 "확인 완료" 표시가 함께 다니는 스펙 항목 */
 export type DraftSpec = {
   value: string
@@ -328,6 +336,7 @@ export type DraftSpecs = Record<DraftSpecKey, DraftSpec> & {
   proposer?: { id: string; name: string }
   openChannelTargetId?: string | null
   confirmedPriceRequestId?: string
+  manualPrice?: DraftManualPrice
   colorImageChoices?: Record<string, DraftColorImageChoice>
   colorPhotoUrls?: Record<string, string>
   releaseSchedule?: { seasonId: string; targetDate: string | null; certainty: 'tentative' | 'confirmed' }

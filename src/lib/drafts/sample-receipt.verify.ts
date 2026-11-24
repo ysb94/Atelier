@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { applySampleOrigin, canReceiveSample, receiveSample, registerNextReceivedSample, sampleCountry, sampleSentToChinaTeam } from './sample-receipt'
+import { CHINA_EXTERNAL_DESTINATION, applySampleOrigin, canReceiveSample, isSampleDestination, receiveSample, registerNextReceivedSample, sampleCountry, sampleSentToChinaTeam } from './sample-receipt'
 import { attachSampleWorkOrderFile, normalizeSampleWorkOrders, sampleElapsedDays, sanitizeSampleWorkOrders, setLatestSampleWorkOrderPassed, setLatestSampleWorkOrderShipped } from './sample-work-order'
 
 const initial = attachSampleWorkOrderFile([], { url: 'data:file,first', name: 'first.xlsx' }, '2026-10-20T01:00:00Z')
@@ -7,6 +7,11 @@ assert.equal(canReceiveSample(initial[0]!, '중국'), false)
 assert.throws(() => receiveSample(initial, initial[0]!.id, '중국'), /발송 상태/)
 assert.equal(sampleCountry('국내 생산').code, 'KO')
 assert.equal(sampleCountry('중국 OEM').code, 'CN')
+assert.equal(sampleCountry('중국').label, 'CHINA (김웅사장님)')
+assert.equal(sampleCountry(CHINA_EXTERNAL_DESTINATION.value).label, 'CHINA (외부 업체)')
+assert.equal(isSampleDestination(CHINA_EXTERNAL_DESTINATION.value), true)
+assert.equal(sampleSentToChinaTeam(CHINA_EXTERNAL_DESTINATION.value, '중국'), false)
+assert.equal(canReceiveSample({ ...initial[0]!, originCountry: CHINA_EXTERNAL_DESTINATION.value }, '중국'), true)
 assert.deepEqual(sampleCountry('PROMOTION [중국]'), { code: 'PROMO', label: 'PROMOTION [중국]' })
 assert.equal(sampleSentToChinaTeam('PROMOTION [중국]', '중국'), false)
 assert.equal(sampleSentToChinaTeam(undefined, 'Promotion [CHINA]'), false)

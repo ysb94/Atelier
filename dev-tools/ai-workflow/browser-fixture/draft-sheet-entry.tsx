@@ -10,6 +10,7 @@ import { useDraftSpecDocumentTemporary } from '@/features/drafts/use-draft-spec-
 import { resolveReleaseSchedule } from '@/features/drafts/release-schedule-preview'
 import { emptyDraftInput, newColorRow } from '@/lib/drafts/empty-draft'
 import { normalizeColorSpecs, writeColorSpec, type SaveColorSpec } from '@/lib/drafts/color-spec'
+import { normalizeDraftManualPrice } from '@/lib/drafts/manual-price'
 import { newSampleWorkOrder } from '@/lib/drafts/sample-work-order'
 import type { Brand, ProductDraft } from '@/lib/types'
 import type { DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
@@ -18,6 +19,7 @@ import { saveDraftColors, saveDraftReleaseFolder, type DraftColorEdit } from '@/
 import '@/index.css'
 
 const temporaryKey = 'atelier-fixture-information-temporary'
+const manualPriceKey = 'atelier-fixture-manual-price'
 const withoutProposer = window.location.hash === '#without-proposer'
 const savedRelease = window.location.hash === '#saved-release'
 const stickyHeader = new URLSearchParams(window.location.search).has('sticky-header')
@@ -65,7 +67,8 @@ function Fixture() {
       imageUrl:'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="gray"/></svg>'),
       colors:[{...newColorRow(),id:'black',name:'블랙',orderQty:12},{...newColorRow(),id:'ivory',name:'아이보리',orderQty:8}],
       sampleWorkOrders:[{...newSampleWorkOrder(),id:'sample',url:'sample.pdf',shippedAt:'2026-10-01T00:00:00Z',receivedAt:'2026-10-02T00:00:00Z',passed:false}],
-      specs:{...base.specs,nameConfirmed:true,colorsConfirmed:true,colorNamesConfirmed:true,proposer:withoutProposer?undefined:{id:'proposer',name:'제안 직원'},
+      specs:{...base.specs,manualPrice:normalizeDraftManualPrice(JSON.parse(sessionStorage.getItem(manualPriceKey) ?? 'null')),
+        nameConfirmed:true,colorsConfirmed:true,colorNamesConfirmed:true,proposer:withoutProposer?undefined:{id:'proposer',name:'제안 직원'},
         releaseSchedule:savedRelease?{seasonId:'group',targetDate:'2026-11-27',certainty:'confirmed'}:undefined,
         coating:{...base.specs.coating,value:'기존 공통 코팅',note:'상품 공통 스펙 본문'},
         colorImageChoices:{black:'Image',ivory:'None'},
@@ -138,6 +141,11 @@ function Fixture() {
         confirm: async reply => setDraft(current => ({
           ...current, specs: { ...current.specs, confirmedPriceRequestId: reply.id },
         })),
+        saveManual: async record => {
+          const manualPrice = { ...record, savedAt: new Date().toISOString() }
+          sessionStorage.setItem(manualPriceKey, JSON.stringify(manualPrice))
+          setDraft(current => ({ ...current, specs: { ...current.specs, manualPrice } }))
+        },
       }}
       onOpen={()=>setOpened(n=>n+1)} onSchedule={()=>{void write()}} onSaveColors={saveColors} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={saveSpec} onSaveSpecDocument={saveDocument} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/>} />
     {stickyHeader && <div aria-hidden="true" className="h-[550px]" />}

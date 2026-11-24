@@ -851,7 +851,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   const documentInProgress = documentEditing || documentTemporarilySaved
   const documentOpen = !fromVisual && information?.field === 'specDoc'
   const colorRows: Array<DraftColorRow | null> = draft.colors.length ? draft.colors : [null]
-  const priceAmounts = price?.reply?.amounts
+  const priceAmounts = price?.reply?.amounts ?? draft.specs.manualPrice?.amounts
   function colorSampleDone(colorId: string) {
     return colorId in pendingDone ? pendingDone[colorId] : doneColorIds.has(colorId)
   }
@@ -951,7 +951,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
     sample: <td className="draft-sheet-sample-cell" hidden={hidden.has('sample')}>{sampleContent}</td>,
     price: <td className={`draft-sheet-price-cell${priceAmounts && hasColor ? ' has-reply' : ''}`} hidden={hidden.has('price')}>
       <DraftPriceRequestButton readOnly={readOnly} hasColors={hasColor} colors={draft.colors} missingColors={missingPriceColors} controls={price}
-        confirmedRequestId={draft.specs.confirmedPriceRequestId} />
+        confirmedRequestId={draft.specs.confirmedPriceRequestId} manualPrice={draft.specs.manualPrice} />
     </td>,
     color: <td className="draft-sheet-color-cell" hidden={hidden.has('color')}>
       <div className="draft-color-pad draft-sheet-color-tools">
