@@ -14,6 +14,7 @@ type ReviewItem = {
   photo_path: string
   place: string | null
   unplaced?: boolean
+  placement_review?: boolean
   label_date?: string | null
   units_per_box?: number | null
   suggested_name?: string | null
@@ -21,6 +22,7 @@ type ReviewItem = {
   candidates: Candidate[]
 }
 type ReviewQueue = { auditedPlaces: number; pending: number; items: ReviewItem[] }
+const bareStyleNumber = /^M\d{4,}$/i
 
 async function loadReviewQueue(brandId: string, includeUnplaced: boolean): Promise<ReviewQueue> {
   const { data, error } = await getSupabase().rpc('review_warehouse_qr_audit', {
@@ -35,6 +37,8 @@ function CandidateDetails({ candidate }: { candidate: Candidate }) {
   return (
     <span className="min-w-0">
       <span className="block font-medium">{candidate.number} {candidate.name || '상품명 미확인'}</span>
+      {!candidate.number && bareStyleNumber.test(candidate.name?.trim()) &&
+        <span className="block text-sm">아래 정식 상품 검색에서 이 M번호를 선택하세요.</span>}
       <span className="block text-xs text-muted-foreground">
         {candidate.date || '입고일 미확인'} · {candidate.units ?? '?'}개/박스 · {candidate.boxes ?? '?'}박스
         {candidate.opened > 0 && ' · 개봉 ' + candidate.opened + '개'}
@@ -64,26 +68,31 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
 
   const link = useMutation({
     mutationFn: async () => {
-      const quantity = units === '' ? null : Number(units)
-      if (quantity !== null && (!Number.isInteger(quantity) || quantity < 1 || quantity > 1_000_000)) {
+      const quantity = Number(units)
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1_000_000) {
         throw new Error('수량을 1 이상의 정수로 입력하세요.')
       }
+      const action = item.placement_review ? 'link_placement_review' : item.unplaced ? 'link_unplaced' : 'link'
+      const request = { rowId: item.external_row_id, styleId: style?.styleId, units: quantity }
       const { error } = await getSupabase().rpc('review_warehouse_qr_audit', {
         p_brand_id: brandId,
-        p_action: item.unplaced ? 'link_unplaced' : 'link',
-        p_request: { rowId: item.external_row_id, styleId: style?.styleId, name: name.trim(),
-          ...(item.unplaced ? { date: labelDate, units: quantity } : { candidateId, units: quantity, opened }) },
+        p_action: action,
+        p_request: item.placement_review ? request : {
+          ...request, name: name.trim(), ...(item.unplaced ? { date: labelDate } : { candidateId, opened }),
+        },
       })
       if (error) throw new Error(error.message)
     },
     onSuccess: onLinked,
   })
 
-  const hasProduct = Boolean(candidateId || style || name.trim())
+  const nameIsSku = bareStyleNumber.test(name.trim())
+  const hasProduct = item.placement_review ? Boolean(style) : Boolean(candidateId || style || (name.trim() && !nameIsSku))
   return (
     <article className="flex min-w-0 flex-col gap-4">
       <div>
-        <h3 className="font-semibold">{item.place || '자리 미정'}</h3>
+        <h3 className="font-semibold">{item.placement_review && '입고 요청 자리 · '}{item.place || '자리 미정'}</h3>
+        {item.placement_review && <p className="text-sm text-muted-foreground">상품과 수량을 확인한 후 파인더에서 입고할 수 있습니다.</p>}
         <p className="break-all font-mono text-sm text-muted-foreground">{item.box_qr}</p>
       </div>
       <div className="grid gap-5 xl:grid-cols-2">
@@ -103,6 +112,7 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
               {item.candidates.map((candidate) => (
                 <label key={candidate.id} className="flex cursor-pointer items-center gap-2 rounded-md border p-2 text-sm">
                   <input type="radio" name="audit-candidate" checked={candidateId === candidate.id}
+                    disabled={!candidate.number && bareStyleNumber.test(candidate.name?.trim())}
                     onChange={() => { setCandidateId(candidate.id); setStyle(null); setName('') }} />
                   <CandidateDetails candidate={candidate} />
                 </label>
@@ -118,18 +128,19 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
               if (value) { setCandidateId(''); setName('') }
             }} />
           </label>
-          <label className="block space-y-1 text-sm">
+          {!item.placement_review && <label className="block space-y-1 text-sm">
             <span>M번호 없는 물품명</span>
             <Input value={name} maxLength={300} onChange={(event) => {
               setName(event.target.value)
               if (event.target.value) { setCandidateId(''); setStyle(null) }
             }} />
-          </label>
+            {nameIsSku && <span className="text-muted-foreground">M번호는 위의 정식 상품 검색에서 선택하세요.</span>}
+          </label>}
           {item.unplaced ? <>
-            <label className="block space-y-1 text-sm">
+            {!item.placement_review && <label className="block space-y-1 text-sm">
               <span>선적일</span>
               <Input type="date" value={labelDate} onChange={event => setLabelDate(event.target.value)} />
-            </label>
+            </label>}
             <label className="block space-y-1 text-sm">
               <span>박스당 수량</span>
               <Input type="number" min={1} max={1000000} value={units} onChange={event => setUnits(event.target.value)} />
@@ -146,7 +157,7 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
             </label>
           </>}
           {link.isError && <p role="alert" className="text-sm text-destructive">{link.error.message}</p>}
-          <Button disabled={!hasProduct || !photo.data || link.isPending || (item.unplaced && !units)}
+          <Button disabled={!hasProduct || !photo.data || link.isPending || !units}
             onClick={() => link.mutate()}>
             {link.isPending ? '저장 중…' : '상품 연결'}
           </Button>

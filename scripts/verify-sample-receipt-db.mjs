@@ -32,6 +32,14 @@ try{
  assert.equal((await orders()).length,2);assert.equal((await orders())[0].receivedAt,receiptAt)
  assert.equal((await orders())[1].originCountry,'한국');assert.equal((await orders())[1].receivedAt,null)
  assert.equal((await orders())[1].sampleStage,'final','새 테이블 없이 기존 저장 함수가 최종 샘플 종류를 보존')
+ const manualPrice={destination:'CN-EXT',vendor:'외부 업체 A',currency:'CNY',amounts:{'color-1':23.75,'color-2':0},savedAt:receiptAt}
+ await db.query("select public.save_product_draft($1,null,$2,$3,'[]','[]')",[company,draft,{
+   nameKo:'샘플 수령 검증',originCountry:'CN-EXT',sampleWorkOrders:[received,{...second,originCountry:'CN-EXT'}],
+   specs:{manualPrice},expectedUpdatedAt:await revision(),
+ }])
+ assert.deepEqual(await scalar("select specs->'manualPrice' from public.product_drafts where id=$1",[draft]),manualPrice)
+ assert.equal((await orders())[1].originCountry,'CN-EXT')
+ assert.equal((await orders())[0].originCountry,'중국')
  const after=await orders();await actor(colleague)
  await assert.rejects(()=>db.query("select public.save_product_draft($1,null,$2,$3,'[]','[]')",[company,draft,{nameKo:'위조',sampleWorkOrders:after}]))
  assert.deepEqual(await orders(),after,'다른 직원의 수정 권한을 확대하지 않음')

@@ -22,7 +22,7 @@ const fixtureClient={
    const modulePath = importer?.replaceAll('\\','/') ?? ''
    if ((/\/lib\/supabase\/client(?:\.ts)?$/.test(source.replaceAll('\\','/')) &&
        /\/(product-drafts|profiles|code-usage-targets|code-usage-target-folders)\.ts$/.test(modulePath)) ||
-       (source === './client' && /\/(attendance-exemptions|draft-visual-content|draft-team-work)\.ts$/.test(modulePath))) return '\0draft-color-client'
+       (source === './client' && /\/(attendance-exemptions|draft-information-temporary|draft-price-requests|draft-visual-content|draft-team-work)\.ts$/.test(modulePath))) return '\0draft-color-client'
  },
  load(id) {
    if(id==='\0draft-color-client') return `import { createClient } from '@supabase/supabase-js'
@@ -67,7 +67,7 @@ try{
    if(asset){
      res.setHeader('Content-Type',asset.type==='chunk'?'text/javascript':asset.fileName.endsWith('.css')?'text/css':'application/octet-stream')
      res.end(asset.type==='chunk'?asset.code:asset.source)
-   }else if(req.url==='/'){
+   }else if(req.url==='/' || req.url==='/?sticky-header=1'){
      res.setHeader('Content-Type','text/html; charset=utf-8')
      res.end(`<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/${css.fileName}"><div id="root"></div><script type="module" src="/${entry.fileName}"></script>`)
    }else{res.statusCode=404;res.end()}
@@ -94,6 +94,30 @@ try{
  })
  await page.route('**/rpc/list_company_attendance_exempt', route => route.fulfill({json:{data:['fixture-md'],error:null}}))
  const teamRows=new Map()
+ const priceDestinations=[]
+ await page.route('**/rpc/list_draft_price_destinations',route=>route.fulfill({
+   json:{data:priceDestinations.filter(row=>!row.removed||row.preset_key),error:null},
+ }))
+ await page.route('**/rpc/change_draft_price_destination',route=>{
+   const {p_draft,p_option,p_revision,p_name}=route.request().postDataJSON()
+   assert.equal(p_draft,'fixture')
+   const index=priceDestinations.findIndex(row=>(row.preset_key??row.id)===p_option)
+   const previous=priceDestinations[index]
+   assert.equal(p_revision,previous?.revision??null)
+   const row={...(previous??{id:crypto.randomUUID(),preset_key:p_option}),
+     name:p_name??previous?.name,removed:p_name===null,revision:crypto.randomUUID()}
+   if(index<0) priceDestinations.push(row)
+   else priceDestinations[index]=row
+   return route.fulfill({json:{data:row,error:null}})
+ })
+ await page.route('**/rest/v1/draft_price_destinations?*',route=>{
+   assert.equal(route.request().method(),'POST')
+   const {source_draft_id,name}=route.request().postDataJSON()
+   assert.equal(source_draft_id,'fixture')
+   const row={id:crypto.randomUUID(),name,revision:crypto.randomUUID()}
+   priceDestinations.push(row)
+   return route.fulfill({status:201,json:row})
+ })
  const musinsaPartner=crypto.randomUUID()
  const twentyNinePartner=crypto.randomUUID()
  const kakaoPartner=crypto.randomUUID()
@@ -121,6 +145,18 @@ try{
  await page.route('**/rest/v1/draft_team_work?*',route=>{
    assert.equal(new URL(route.request().url()).searchParams.get('draft_id'),'in.(fixture)')
    return route.fulfill({json:[...teamRows.values()]})
+ })
+ await page.route('**/rest/v1/draft_information_temporary?*',async route=>{
+   const params=new URL(route.request().url()).searchParams
+   assert.equal(params.get('select'),'draft_id,source:edits->specDoc->>source')
+   assert.equal(params.get('editor_id'),'eq.fixture-owner')
+   assert.equal(params.get('field'),'eq.specDoc')
+   assert.equal(params.get('color_id'),'is.null')
+   assert.equal(params.get('edits->specDoc->>source'),'not.is.null')
+   assert.equal(params.get('draft_id'),'in.(fixture)')
+   const temporary=await page.evaluate(()=>JSON.parse(sessionStorage.getItem('atelier-fixture-information-temporary')??'[]'))
+   return route.fulfill({json:temporary.flatMap(row=>row.field==='specDoc'&&row.edits.specDoc
+     ? [{draft_id:'fixture',source:row.edits.specDoc.source}] : [])})
  })
  await page.route('**/rpc/save_draft_team_work',route=>{
    const {p_draft_id,p_section,p_payload,p_confirmed,p_revision}=route.request().postDataJSON()
@@ -168,6 +204,35 @@ try{
  const mdCell=row.locator('.draft-sheet-md-cell')
  const board=page.locator('.draft-board-scroll')
  assert.equal(await board.evaluate(node=>node.scrollWidth>node.clientWidth),true)
+ const dividerStyles=async (columns,pseudo)=>columns.evaluateAll((cells,part)=>cells.map(cell=>{
+   const {content,backgroundColor,width}=getComputedStyle(cell,part)
+   return {content,backgroundColor,width}
+ }),pseudo)
+ const headerDividers=await dividerStyles(page.getByRole('columnheader'),'::before')
+ const cellDividers=await dividerStyles(row.getByRole('cell'),'::after')
+ assert.equal(headerDividers[0].content,'none')
+ assert.equal(cellDividers[0].content,'none')
+ assert.notEqual(headerDividers[1].backgroundColor,'rgba(0, 0, 0, 0)')
+ for(const divider of [...headerDividers.slice(1),...cellDividers.slice(1)]) {
+   assert.deepEqual(divider,{content:'""',backgroundColor:headerDividers[1].backgroundColor,width:'1px'})
+ }
+ async function assertCompactColumns() {
+   for (const [id, width] of [['color',128],['information',174],['visual',154],['amd',232]]) {
+     const header=await page.locator(`th[data-column="${id}"]`).boundingBox()
+     const cell=row.locator(`.draft-sheet-${id}-cell`)
+     const body=await cell.boundingBox()
+     assert.equal(Math.round(header.width),width,`${id} has its compact width`)
+     assert.ok(Math.abs(header.x-body.x)<1 && Math.abs(header.width-body.width)<1)
+     const fits=await cell.locator('.draft-color-pad button, .draft-color-line :is(button,input)').evaluateAll(controls=>
+       controls.every(control=>{
+         const {left,right}=control.getBoundingClientRect()
+         const slot=control.closest('.draft-color-pad, .draft-color-line').getBoundingClientRect()
+         return left>=slot.left && right<=slot.right
+       }))
+     assert.ok(fits,`${id} controls fit on their color row`)
+   }
+ }
+ await assertCompactColumns()
  const visualAssigneePicker=visualCell.getByRole('button',{name:'비주얼 팀 담당자',exact:true})
  await visualAssigneePicker.waitFor()
  assert.equal(await visualCell.getByRole('button',{name:'블랙 Image'}).isEnabled(),true)
@@ -209,6 +274,14 @@ try{
  await reloadBlackAmd.click()
  assert.equal(await blackSabangnet.inputValue(),'00043')
  await page.setViewportSize({width:2600,height:950})
+ await assertCompactColumns()
+ assert.equal(Math.round((await page.locator('th[data-column="sample"]').boundingBox()).width),350,'The table does not transfer spare width to SAMPLE')
+ assert.ok(await amdBarcode.evaluate(input=>{
+   const style=getComputedStyle(input)
+   const canvas=document.createElement('canvas').getContext('2d')
+   canvas.font=style.font
+   return canvas.measureText(input.value).width<=input.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight)
+ }),'A 13-digit barcode remains visible in the compact AMD column')
  await board.screenshot({path:'.tmp/draft-sheet-team-columns.png'})
  await page.setViewportSize({width:1800,height:950})
  assert.equal(Math.round((await mdCell.boundingBox()).width),585,'MD TEAM keeps the reference column width')
@@ -354,7 +427,20 @@ try{
  const priceCell=row.locator(':scope > td').nth(2)
  await priceCell.getByRole('button',{name:'단가 요청',exact:true}).click()
  const priceDialog=page.getByRole('dialog',{name:'단가 요청',exact:true})
- await priceDialog.getByRole('button',{name:'단가 요청 보내기',exact:true}).click()
+ const priceDestination=page.getByRole('dialog').getByRole('group',{name:'제조국·제조처',exact:true})
+ const destinationButton=name=>priceDestination.getByRole('button',{name,exact:true})
+ const chinaConfirmation=page.getByRole('dialog',{name:'중국팀 단가 요청 확인',exact:true})
+ const manualConfirmation=page.getByRole('dialog',{name:'단가 수기 입력 확인',exact:true})
+ const sendChina=chinaConfirmation.getByRole('button',{name:'중국팀에 요청 보내기',exact:true})
+ const continueManual=manualConfirmation.getByRole('button',{name:'수기 입력 계속',exact:true})
+ assert.equal(await priceDestination.locator('[aria-pressed=true]').count(),0)
+ assert.equal(await sendChina.count(),0)
+ await destinationButton('CHINA (김웅사장님)').click()
+ await chinaConfirmation.getByText(/컬러별 단가를 중국팀에 요청합니다/).waitFor()
+ await chinaConfirmation.getByRole('button',{name:'취소',exact:true}).click()
+ assert.equal(await priceCell.getByRole('button',{name:'단가 계산중',exact:true,includeHidden:true}).count(),0)
+ await destinationButton('CHINA (김웅사장님)').click()
+ await sendChina.click()
  await page.getByRole('dialog').getByRole('button',{name:'닫기',exact:true}).click()
  const pricePending=priceCell.getByRole('button',{name:'단가 계산중',exact:true})
  const sent=priceCell.locator('time')
@@ -393,6 +479,27 @@ try{
  assert.deepEqual(await priceRows.allTextContents(),['15','0'],'회신 단가는 현재 컬러 ID에 맞춰 표시한다')
  assert.deepEqual(await coordinates(priceRows),await coordinates(colorRows),'회신 단가와 컬러 행을 같은 높이에 배치한다')
  await assertOrderAlignment()
+ const colorBands=await row.locator(':scope > td:is(.draft-sheet-color-cell,.draft-sheet-information-cell,.draft-sheet-visual-cell,.draft-sheet-amd-cell)').evaluateAll(cells=>
+   cells.map(cell=>Array.from(cell.querySelectorAll('.draft-color-line'),line=>{
+     const {left,right}=line.getBoundingClientRect()
+     return {left,right,background:getComputedStyle(line).backgroundColor,cellBackground:getComputedStyle(cell).backgroundColor}
+   })))
+ assert.equal(colorBands.length,4)
+ assert.notEqual(colorBands[0][0].background,colorBands[0][1].background)
+ for(const [first,second] of colorBands) {
+   assert.notEqual(first.background,first.cellBackground,'A single color line has visible shading')
+   assert.notEqual(second.background,second.cellBackground)
+ }
+ assert.deepEqual(await orderRows.evaluateAll(lines=>lines.map(line=>getComputedStyle(line).backgroundColor)),
+   colorBands[0].map(line=>line.background),'MD order quantities use the same color bands')
+ for(let column=1;column<colorBands.length;column++) {
+   assert.equal(colorBands[column].length,colorBands[column-1].length)
+   colorBands[column].forEach((line,index)=>{
+     const previous=colorBands[column-1][index]
+     assert.ok(Math.abs(previous.right-line.left)<1,'같은 컬러 행의 배경은 열 사이 빈틈 없이 이어진다')
+     assert.equal(line.background,previous.background)
+   })
+ }
  assert.ok((await reRequest.boundingBox()).y>(await priceRows.last().boundingBox()).y)
  await confirmPrice.click()
  const priceHeart=priceCell.getByRole('img',{name:'단가 확정',exact:true})
@@ -416,6 +523,9 @@ try{
  await priceRows.last().getByTitle('아이보리 단가 (위안)').locator('..').hover()
  assert.equal(await opacity(ivoryReRequest),'1')
  await ivoryReRequest.click()
+ assert.equal(await priceDestination.locator('[aria-pressed=true]').count(),0)
+ await destinationButton('CHINA (김웅사장님)').click()
+ await sendChina.click()
  const repeatPending=priceCell.getByRole('status').filter({hasText:'재요청중'})
  await repeatPending.waitFor()
  assert.equal(await priceHeart.count(),0)
@@ -435,7 +545,13 @@ try{
  await page.getByRole('button',{name:'단가 회신 반영',exact:true}).click()
  await confirmPrice.waitFor()
  assert.deepEqual(await priceRows.allTextContents(),['16','0'])
- const geometry=()=>row.locator(':scope > td').evaluateAll(cells=>cells.map(cell=>({x:Math.round(cell.getBoundingClientRect().x),width:Math.round(cell.getBoundingClientRect().width),height:Math.round(cell.getBoundingClientRect().height)})))
+ const geometry=()=>row.locator(':scope > td').evaluateAll(cells=>{
+   const rowLeft=cells[0].parentElement.getBoundingClientRect().left
+   return cells.map(cell=>{
+     const {left,width,height}=cell.getBoundingClientRect()
+     return {x:Math.round(left-rowLeft),width:Math.round(width),height:Math.round(height)}
+   })
+ })
  const ownerGeometry=await geometry()
  const names=await row.locator('input,textarea').evaluateAll(fields=>fields.map(field=>field.value))
  const colorColumn=row.locator(':scope > td').nth(3)
@@ -468,6 +584,9 @@ try{
  assert.equal(await panel.evaluate(el=>el.parentElement===document.body&&getComputedStyle(el).position==='fixed'),true)
  assert.deepEqual(await geometry(),ownerGeometry,'입력창을 열어도 기획안 표의 행 크기와 위치를 유지한다')
  const panelBox=await panel.boundingBox()
+ const desktopHeight=await page.evaluate(()=>document.documentElement.clientHeight)
+ assert.ok(Math.abs(panelBox.y+panelBox.height/2-Math.max(desktopHeight*0.44,12+panelBox.height/2))<1,
+   'The desktop panel is centered slightly above the viewport midpoint')
  for(const trigger of await triggers.all()) {
    const triggerBox=await trigger.boundingBox()
    assert.ok(triggerBox.x+triggerBox.width<=panelBox.x||triggerBox.x>=panelBox.x+panelBox.width||
@@ -477,20 +596,21 @@ try{
  assert.equal(await fabric.getByLabel('Fabric 값').getAttribute('readonly'),'')
  assert.equal(await fabric.getByRole('button',{name:'확정',exact:true}).isDisabled(),true)
  await fabric.evaluate(form=>form.requestSubmit());assert.equal(await page.getByTestId('writes').textContent(),'0')
+ const fabricTriggerY=(await fabricTrigger.boundingBox()).y
+ await panel.press('Escape')
+ const lowerRow=await page.addStyleTag({content:'main { margin-top: 260px; }'})
+ assert.ok((await fabricTrigger.boundingBox()).y>=fabricTriggerY+250)
+ await fabricTrigger.click()
+ const lowerPanel=await panel.boundingBox()
+ assert.ok(Math.abs(lowerPanel.y-panelBox.y)<1,'Opening the same panel from a lower row keeps its screen position')
+ assert.ok(Math.abs(lowerPanel.x-panelBox.x)<1&&Math.abs(lowerPanel.width-panelBox.width)<1)
+ await lowerRow.evaluate(node=>node.remove())
  const documentButton=row.getByRole('button',{name:'스펙 문서',exact:true})
  assert.equal(await documentButton.count(),1)
  const informationRows=row.locator('.draft-sheet-information .draft-color-lines')
  const [rowsBox,documentBox]=await Promise.all([informationRows.boundingBox(),documentButton.boundingBox()])
- assert.ok(Math.abs(rowsBox.y+rowsBox.height/2-documentBox.y-documentBox.height/2)<1,'스펙 문서 버튼을 컬러 행 전체 높이의 가운데에 둔다')
- const informationCellBox=await row.locator(':scope > td').nth(4).boundingBox()
- const fabricBox=await fabricTrigger.boundingBox()
- const buttonGap=documentBox.x-fabricBox.x-fabricBox.width
- assert.ok(buttonGap>=0&&buttonGap<=16,'스펙 문서 버튼을 Fabric 버튼 바로 옆에 둔다')
- assert.ok(informationCellBox.x+informationCellBox.width-documentBox.x-documentBox.width<=48,'INFORMATION 열 오른쪽 여백을 줄인다')
- const colorBackgrounds=await informationRows.locator('.draft-color-line').evaluateAll(lines=>lines.map(line=>getComputedStyle(line).backgroundColor))
- const documentBackground=await documentButton.evaluate(button=>getComputedStyle(button.parentElement).backgroundColor)
- assert.notEqual(colorBackgrounds[0],colorBackgrounds[1])
- assert.equal(documentBackground,colorBackgrounds[0],'버튼 영역에는 컬러 행의 교차색을 적용하지 않는다')
+ assert.ok(documentBox.y+documentBox.height<=rowsBox.y,'공통 스펙 문서 버튼은 색상별 size·Fabric 행 위에 있다')
+ assert.equal(await documentButton.evaluate(button=>Boolean(button.closest('.draft-color-pad'))),true)
  await documentButton.click()
  const specDocument=panel.getByRole('form',{name:'공통 스펙 문서'})
  const documentInput=specDocument.getByLabel('스펙 문서 값')
@@ -690,10 +810,23 @@ try{
  await documentInput.fill('임시 공통 문서')
  await specDocument.getByRole('button',{name:'임시 저장',exact:true}).click()
  await specDocument.getByText('임시 저장됨',{exact:true}).waitFor()
+ const savedDocumentButton=documentButton.and(row.locator('[aria-description="임시 저장됨"]'))
+ await savedDocumentButton.waitFor()
+ await panel.press('Escape')
+ assert.deepEqual(await cornerMarker(savedDocumentButton),orderMarker,'스펙 문서 창을 닫아도 목록에 임시 저장 표시가 남는다')
+ await page.getByRole('button',{name:'다른 직원으로 전환'}).click()
+ assert.equal(await savedDocumentButton.count(),0)
+ await page.reload()
+ await savedDocumentButton.waitFor()
+ assert.deepEqual(await cornerMarker(savedDocumentButton),orderMarker,'새로고침 후 편집창을 열기 전에도 표시된다')
+ await savedDocumentButton.click()
+ await specDocument.getByText('임시 저장됨',{exact:true}).waitFor()
+ assert.equal(await documentInput.inputValue(),'임시 공통 문서')
  assert.deepEqual(await cornerMarker(documentButton),orderMarker)
  await specDocument.getByRole('button',{name:'확정',exact:true}).click()
  await modifyDocument.waitFor()
  assert.equal(await specDocument.getByRole('button',{name:'임시 저장',exact:true}).count(),0)
+ assert.equal((await cornerMarker(row.getByRole('button',{name:'스펙 확정',exact:true}))).content,'none')
  await page.reload()
  await fabricTrigger.click()
  await fabric.getByText('임시 저장됨',{exact:true}).waitFor()
@@ -877,7 +1010,7 @@ try{
  assert.equal(await ivoryHtml.getByRole('img').count(),0)
  assert.equal(await ivoryHtml.locator('.draft-visual-image-temporary, .draft-visual-image-pending').count(),0)
  const draftHtml='<p>아이보리 상세 HTML</p><script>document.body.dataset.previewScript = "ran"</script>'
- const context=page.context()
+ const openPages=page.context().pages().length
  const videoHost='https://cdn2.auchee.com'
  const embedUrl=videoHost+'/embed/atelier-preview-fixture.html'
  const videoPath='/video/atelier-preview-fixture.mp4'
@@ -889,13 +1022,14 @@ try{
    <script src="${origin+previewScriptPath}"></script><iframe src="${origin+previewFramePath}"></iframe>
    <div><iframe src="${embedUrl}" title="검증 영상" width="320" height="180"></iframe></div>`)
  assert.equal(await blackInput.inputValue(),'')
- const [previewTab]=await Promise.all([context.waitForEvent('page'),
-   ivoryHtml.getByRole('button',{name:'미리보기',exact:true}).click()])
- const htmlFrame=previewTab.frameLocator('iframe[title="아이보리 HTML 미리보기"]')
+ const basicPreview=ivoryHtml.getByRole('button',{name:'미리보기',exact:true})
+ await basicPreview.click()
+ const previewDialog=page.getByRole('dialog',{name:'아이보리 HTML 미리보기',exact:true})
+ const htmlFrame=previewDialog.frameLocator('iframe[title="아이보리 HTML 미리보기"]')
  await htmlFrame.getByText('아이보리 상세 HTML').waitFor()
- assert.equal(await previewTab.title(),'아이보리 HTML 미리보기')
- assert.equal(await previewTab.evaluate(()=>window.opener===null),true)
- assert.equal(await previewTab.locator('iframe').getAttribute('sandbox'),'')
+ assert.equal(page.context().pages().length,openPages)
+ assert.equal(await previewDialog.locator('iframe').getAttribute('sandbox'),'')
+ assert.equal(await previewDialog.locator('iframe').getAttribute('referrerpolicy'),'no-referrer')
  for(const name of ['절대 주소 이미지','상대 주소 이미지','포함된 이미지']) {
    const width=await htmlFrame.getByRole('img',{name}).evaluate(image=>image.decode().then(()=>image.naturalWidth,()=>0))
    assert.equal(width,16,`${name} renders inside the preview`)
@@ -921,8 +1055,12 @@ try{
  assert.equal(await htmlFrame.locator('body').getAttribute('data-preview-script'),null)
  assert.equal(await htmlFrame.locator('body').getAttribute('data-external-script'),null)
  assert.equal(await htmlFrame.locator('body').getAttribute('data-image-handler'),null)
- assert.equal(await ivoryHtml.locator('iframe').count(),0,'The editor has no inline preview')
- await previewTab.close()
+ await previewDialog.getByRole('button',{name:'HTML 미리보기 닫기'}).click()
+ await previewDialog.waitFor({state:'detached'})
+ assert.equal(await panel.isVisible(),true)
+ assert.equal(await basicPreview.evaluate(button=>document.activeElement===button),true)
+ assert.ok((await ivoryInput.inputValue()).includes(draftHtml))
+ assert.equal(await ivoryHtml.locator('iframe').count(),0,'Closing the dialog removes the preview frame')
  await ivoryInput.fill(draftHtml)
  await expectCopy(ivoryHtml,'아이보리 HTML',draftHtml)
  const temporaryHtmlMarker=ivoryHtml.locator('.draft-html-temporary-marker')
@@ -980,12 +1118,16 @@ try{
  assert.ok(nameBox.x<copyBox.x&&copyBox.x<previewBox.x&&
    Math.abs(nameBox.y+nameBox.height/2-copyBox.y-copyBox.height/2)<=1&&copyBox.y===previewBox.y,
    'Vendor name, copy, and preview share a single row')
- const [vendorPreviewTab]=await Promise.all([context.waitForEvent('page'),musinsaPreview.click()])
- const vendorPreviewFrame=vendorPreviewTab.frameLocator('iframe[title="아이보리 무신사 HTML 미리보기"]')
+ await musinsaPreview.click()
+ const vendorPreviewDialog=page.getByRole('dialog',{name:'아이보리 무신사 HTML 미리보기',exact:true})
+ const vendorPreviewFrame=vendorPreviewDialog.frameLocator('iframe[title="아이보리 무신사 HTML 미리보기"]')
  await vendorPreviewFrame.getByText('무신사 하단',{exact:true}).waitFor()
+ assert.equal(page.context().pages().length,openPages)
  assert.deepEqual(await vendorPreviewFrame.locator('p').allTextContents(),['무신사 상단','아이보리 상세 HTML','무신사 하단'])
  assert.equal(await vendorPreviewFrame.locator('body').getAttribute('data-preview-script'),null)
- await vendorPreviewTab.close()
+ await vendorPreviewDialog.getByRole('button',{name:'HTML 미리보기 닫기'}).press('Escape')
+ await vendorPreviewDialog.waitFor({state:'detached'})
+ assert.equal(await panel.isVisible(),true)
  await musinsaName.click()
  assert.equal(await ivoryHtml.getByRole('textbox').count(),1,'A vendor name does not expand a code field')
  const [sourceHtmlBox,vendorListBox,generateButtonBox]=await Promise.all([
@@ -1005,6 +1147,13 @@ try{
  await page.setViewportSize({width:390,height:850})
  await visualHtml.click()
  assert.equal(await ivoryInput.inputValue(),draftHtml)
+ await basicPreview.click()
+ await previewDialog.waitFor()
+ const mobilePreview=await previewDialog.boundingBox()
+ assert.ok(mobilePreview.x>=0&&mobilePreview.x+mobilePreview.width<=390&&
+   mobilePreview.y>=0&&mobilePreview.y+mobilePreview.height<=850)
+ await previewDialog.getByRole('button',{name:'HTML 미리보기 닫기'}).click()
+ await previewDialog.waitFor({state:'detached'})
  await generateVendorCode(ivoryHtml).click()
  const [mobileSource,mobileOutput]=await Promise.all([ivoryInput.boundingBox(),ivoryVendors.boundingBox()])
  assert.ok(mobileOutput.y>=mobileSource.y+mobileSource.height,'On mobile, the vendor list is below the editor')
@@ -1263,6 +1412,18 @@ try{
  await layoutDialog.waitFor({state:'hidden'})
  assert.deepEqual(await columnHeaders.allTextContents(),defaultHeaders)
 
+ await page.setViewportSize({width:2600,height:950})
+ await openLayout()
+ await showColumn('SAMPLE').uncheck()
+ await applyLayout.click()
+ await layoutDialog.waitFor({state:'hidden'})
+ await assertCompactColumns()
+ await openLayout()
+ await showColumn('SAMPLE').check()
+ await applyLayout.click()
+ await layoutDialog.waitFor({state:'hidden'})
+ await page.setViewportSize({width:1800,height:950})
+
  await headerFor('BRAND').press('Shift+ArrowRight')
  assert.deepEqual((await columnHeaders.allTextContents()).slice(0,2),['SAMPLE','BRAND'])
  await headerFor('BRAND').press('Shift+ArrowLeft')
@@ -1326,6 +1487,144 @@ try{
  assert.equal(await draftCard.count(),0)
  assert.equal(await mdRetail.inputValue(),'43,002','Switching views preserves unsaved table input')
  assert.deepEqual(await columnHeaders.allTextContents(),defaultHeaders.filter(header=>header!=='BRAND'))
+
+ await page.setViewportSize({width:1000,height:760})
+ await page.goto(origin+'/?sticky-header=1')
+ const scrollViewport=page.locator('[data-brand-page-scroll]')
+ const sheetHeader=board.locator('thead')
+ await sheetHeader.waitFor()
+ const headerTop=(await sheetHeader.boundingBox()).y
+ const viewportTop=(await scrollViewport.boundingBox()).y
+ assert.ok(headerTop > viewportTop,'The header initially stays in its normal position below the controls')
+ await scrollViewport.evaluate(node=>{node.scrollTop=250})
+ await page.waitForFunction(()=>{
+   const viewport=document.querySelector('[data-brand-page-scroll]').getBoundingClientRect()
+   const header=document.querySelector('.draft-board-table thead').getBoundingClientRect()
+   return Math.abs(viewport.top-header.top)<1
+ })
+ await scrollViewport.evaluate(node=>{node.scrollTop=560})
+ await board.evaluate(node=>{node.scrollLeft=330})
+ await page.waitForFunction(()=>{
+   const viewport=document.querySelector('[data-brand-page-scroll]').getBoundingClientRect()
+   const table=document.querySelector('.draft-board-table')
+   const header=table.tHead.getBoundingClientRect()
+   const cells=Array.from(table.tBodies[0].rows[0].cells).filter(cell=>!cell.hidden)
+   const x=document.querySelector('.draft-board-scroll').getBoundingClientRect().left+40
+   return Math.abs(viewport.top-header.top)<1 && Array.from(table.tHead.rows[0].cells).every((cell,index)=>
+     Math.abs(cell.getBoundingClientRect().left-cells[index].getBoundingClientRect().left)<1) &&
+     document.elementFromPoint(x,header.top+10)?.closest('thead')===table.tHead
+ })
+ assert.ok(await board.evaluate(node=>node.scrollLeft>0),'Horizontal scrolling is retained while the header is pinned')
+ await scrollViewport.evaluate(node=>{
+   const table=node.querySelector('.draft-board-table')
+   node.scrollTop+=table.getBoundingClientRect().bottom-node.getBoundingClientRect().top-table.tHead.getBoundingClientRect().height/2
+ })
+ await page.waitForFunction(()=>{
+   const table=document.querySelector('.draft-board-table')
+   const header=table.tHead.getBoundingClientRect()
+   const viewport=document.querySelector('[data-brand-page-scroll]').getBoundingClientRect()
+   return header.top<viewport.top && Math.abs(header.bottom-table.getBoundingClientRect().bottom)<1
+ })
+ await scrollViewport.evaluate(node=>{node.scrollTop=0})
+ await page.waitForFunction(top=>Math.abs(document.querySelector('.draft-board-table thead').getBoundingClientRect().top-top)<1,headerTop)
+ await page.goto(origin,{waitUntil:'domcontentloaded'})
+ await priceCell.getByRole('button',{name:'단가 요청',exact:true}).click()
+ await destinationButton('KOREA').click()
+ await manualConfirmation.getByText(/컬러별 단가를 기획안에 직접 입력해 저장합니다/).waitFor()
+ assert.equal(await priceDialog.getByRole('combobox',{name:'통화',includeHidden:true}).count(),0)
+ await continueManual.click()
+ assert.equal(await priceDialog.getByRole('combobox',{name:'통화'}).inputValue(),'KRW')
+ await destinationButton('CHINA (외부 업체)').click()
+ await manualConfirmation.press('Escape')
+ await manualConfirmation.waitFor({state:'detached'})
+ assert.equal(await destinationButton('KOREA').getAttribute('aria-pressed'),'true')
+ await destinationButton('CHINA (외부 업체)').click()
+ await continueManual.click()
+ assert.equal(await priceDialog.getByRole('combobox',{name:'통화'}).inputValue(),'CNY')
+ assert.equal(await sendChina.count(),0)
+ await priceDialog.getByRole('textbox',{name:'업체명 (선택)'}).fill('외부 업체 A')
+ await priceDialog.getByRole('textbox',{name:'블랙 단가'}).fill('23.75')
+ await destinationButton('CHINA (외부 업체)').click()
+ await continueManual.click()
+ assert.equal(await priceDialog.getByRole('textbox',{name:'블랙 단가'}).inputValue(),'23.75')
+ const manualSave=priceDialog.getByRole('button',{name:'단가 기록 저장',exact:true})
+ assert.equal(await manualSave.isDisabled(),true)
+ await priceDialog.getByRole('textbox',{name:'아이보리 단가'}).fill('0')
+ await manualSave.click()
+ const manualPriceButton=priceCell.getByRole('button',{name:'단가 기록',exact:true})
+ await manualPriceButton.waitFor()
+ assert.equal(await priceCell.getByRole('button',{name:'단가 계산중'}).count(),0)
+ assert.deepEqual(await priceRows.allTextContents(),['23.75','0'])
+ await page.reload()
+ await manualPriceButton.click()
+ assert.equal(await priceDialog.getByRole('textbox',{name:'업체명 (선택)'}).inputValue(),'외부 업체 A')
+ assert.equal(await priceDialog.getByRole('textbox',{name:'블랙 단가'}).inputValue(),'23.75')
+ await priceDialog.getByRole('button',{name:'닫기',exact:true}).click()
+ await page.getByRole('button',{name:'다른 직원으로 전환'}).click()
+ await manualPriceButton.click()
+ await priceDialog.getByText('23.75 CNY',{exact:true}).waitFor()
+ assert.equal(await manualSave.count(),0)
+ await priceDialog.getByRole('button',{name:'닫기',exact:true}).click()
+ await page.getByRole('button',{name:'작성자로 전환'}).click()
+ await manualPriceButton.click()
+ assert.equal(await destinationButton('CHINA (외부 업체)').getAttribute('aria-pressed'),'true')
+ assert.equal(await destinationButton('KOREA').evaluate(button=>getComputedStyle(button.parentElement.parentElement.parentElement).borderTopWidth),'1px')
+ await destinationButton('제조국 추가').click()
+ await priceDialog.getByRole('textbox',{name:'제조국 이름'}).fill('베트남')
+ await priceDialog.getByRole('button',{name:'공용 제조국 추가',exact:true}).click()
+ await manualConfirmation.getByText('베트남',{exact:true}).waitFor()
+ await continueManual.click()
+ await destinationButton('베트남').waitFor()
+ assert.equal(await destinationButton('베트남').getAttribute('aria-pressed'),'true')
+ assert.equal(await sendChina.count(),0)
+ await priceDialog.getByRole('textbox',{name:'블랙 단가'}).fill('44.25')
+ await priceDialog.getByRole('textbox',{name:'아이보리 단가'}).fill('53')
+ await manualSave.click()
+ await priceDialog.waitFor({state:'hidden'})
+ assert.equal(priceDestinations.length,1)
+ await page.reload()
+ await manualPriceButton.click()
+ assert.equal(await destinationButton('베트남').getAttribute('aria-pressed'),'true')
+ assert.equal(await priceDialog.getByRole('textbox',{name:'블랙 단가'}).inputValue(),'44.25')
+ const longCountry='베트남 하노이 의류 생산 협력 공장 단가 기록용 제조처 이름'
+ await destinationButton('베트남 수정').click()
+ await priceDialog.getByRole('textbox',{name:'제조국 이름'}).fill(longCountry)
+ await priceDialog.getByRole('button',{name:'이름 저장',exact:true}).click()
+ await destinationButton(longCountry).waitFor()
+ assert.equal(await destinationButton(longCountry).evaluate(button=>getComputedStyle(button).whiteSpace),'nowrap')
+ assert.ok(await destinationButton(longCountry).evaluate(button=>button.scrollWidth<=button.clientWidth+1),'The desktop popup fits the full country name')
+ const chinaIcons=await Promise.all(['수정','삭제'].map(action=>destinationButton(`CHINA (김웅사장님) ${action}`).boundingBox()))
+ const longIcons=await Promise.all(['수정','삭제'].map(action=>destinationButton(`${longCountry} ${action}`).boundingBox()))
+ assert.deepEqual(longIcons.map(box=>box.x),chinaIcons.map(box=>box.x),'Edit and delete icons share aligned columns')
+ assert.ok((await destinationButton(longCountry).boundingBox()).y>(await destinationButton('KOREA').boundingBox()).y)
+ await page.setViewportSize({width:390,height:850})
+ await destinationButton(longCountry).scrollIntoViewIfNeeded()
+ const mobileDelete=await destinationButton(`${longCountry} 삭제`).boundingBox()
+ assert.ok(mobileDelete.x>=0&&mobileDelete.x+mobileDelete.width<=390)
+ await destinationButton(`${longCountry} 삭제`).click()
+ await priceDialog.getByText(/회사 공용 선택 목록에서/).waitFor()
+ await priceDialog.getByRole('button',{name:'제조처 삭제',exact:true}).click()
+ await destinationButton(longCountry).waitFor({state:'detached'})
+ assert.deepEqual(await priceRows.allTextContents(),['44.25','53'])
+ await page.setViewportSize({width:1000,height:760})
+ await destinationButton('CHINA (김웅사장님) 수정').click()
+ await priceDialog.getByRole('textbox',{name:'제조국 이름'}).fill('CHINA 주 공장')
+ await priceDialog.getByRole('button',{name:'이름 저장',exact:true}).click()
+ await destinationButton('CHINA 주 공장').click()
+ await chinaConfirmation.getByText('CHINA 주 공장',{exact:true}).waitFor()
+ await chinaConfirmation.getByRole('button',{name:'취소',exact:true}).click()
+ await destinationButton('CHINA 주 공장 삭제').click()
+ await priceDialog.getByRole('button',{name:'제조처 삭제',exact:true}).click()
+ await destinationButton('CHINA 주 공장').waitFor({state:'detached'})
+ await destinationButton('제조국 추가').click()
+ await priceDialog.getByRole('textbox',{name:'제조국 이름'}).fill('CHINA (김웅사장님)')
+ await priceDialog.getByRole('button',{name:'공용 제조국 추가',exact:true}).click()
+ await chinaConfirmation.getByText('CHINA (김웅사장님)',{exact:true}).waitFor()
+ await chinaConfirmation.getByRole('button',{name:'취소',exact:true}).click()
+ await page.reload()
+ await manualPriceButton.click()
+ assert.equal(await destinationButton(longCountry).count(),0)
+ await destinationButton('CHINA (김웅사장님)').waitFor()
  assert.deepEqual(errors,[])
- console.log('draft-sheet-readonly: saved content, permissions, column dragging and visibility, and responsive card view passed')
+ console.log('draft-sheet-readonly: saved content, permissions, column dragging and visibility, sticky header, and responsive card view passed')
 }finally{await browser?.close();await server?.close()}

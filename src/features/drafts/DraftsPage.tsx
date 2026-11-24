@@ -24,6 +24,7 @@ import {
 import { receiveColorSample, resolveColorSampleRounds, setColorSampleDone } from '@/lib/drafts/draft-flow'
 import { registerDraftSampleStage } from '@/lib/drafts/sample-registration'
 import { draftToInput, attachSampleWorkOrderFile, latestFilledSampleWorkOrder, legacyWorkOrderFields } from '@/lib/drafts/sample-work-order'
+import { normalizeDraftManualPrice } from '@/lib/drafts/manual-price'
 import { receiveSample, registerNextReceivedSample } from '@/lib/drafts/sample-receipt'
 import { writeColorSpec } from '@/lib/drafts/color-spec'
 import { useAuth } from '@/lib/supabase/auth'
@@ -46,8 +47,10 @@ import { DraftBoardView } from './DraftBoardView'
 import { useDraftSheetLayout } from './draft-sheet-layout'
 import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
 import { useDraftPriceRequests } from './useDraftPriceRequests'
+import { useDraftPriceDestinations } from './use-draft-price-destinations'
 import { useDraftTeamWork } from './use-draft-team-work'
 import { draftVisualBoardKey, useDraftVisualBoard } from './use-draft-visual-board'
+import { useDraftSpecDocumentTemporary } from './use-draft-spec-document-temporary'
 import {
   formatReleaseGroupLabel,
   isUnassignedReleaseFolder,
@@ -100,7 +103,7 @@ function emptyMessage(
 export function CompanyDraftsPage() {
   useRenderWatch('CompanyDraftsPage')
   const { brands, brandById } = useCompanyBrandScope()
-  const { profile } = useAuth()
+  const { profile, session } = useAuth()
   const workAccess = useBasicWorkAccess()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -133,6 +136,8 @@ export function CompanyDraftsPage() {
     queryFn: () => getCompanyProductDrafts(companyId),
   })
   const prices = useDraftPriceRequests('planning')
+  const priceDestinations = useDraftPriceDestinations(companyId, profileId,
+    profile?.status === 'active' && profile.id === session?.user.id)
   const priceByDraft = useMemo(() => {
     const byDraft = new Map<string, { latest: DraftPriceRequest; reply?: DraftPriceRequest }>()
     for (const request of prices.requests) {
@@ -389,6 +394,9 @@ export function CompanyDraftsPage() {
   }, [boardFilter, folderDrafts, scheduleByDraft])
   const teamWork = useDraftTeamWork(profileId, visible, !showingCompleted)
   const visualBoard = useDraftVisualBoard(profileId, visible, !showingCompleted)
+  const editableVisible = useMemo(() => showingCompleted ? [] : visible.filter(draft => canWriteDraft(workAccess.access, draft)),
+    [showingCompleted, visible, workAccess.access])
+  const specDocumentTemporarySources = useDraftSpecDocumentTemporary(profileId, editableVisible)
 
   const scheduleDraft = scheduleDraftId
     ? (ownerDrafts.find((draft) => draft.id === scheduleDraftId) ??
@@ -675,6 +683,7 @@ export function CompanyDraftsPage() {
                     visualBoard={visualBoard.forDraft(draft.id)}
                     readOnly={!canWriteDraft(workAccess.access,draft)}
                     informationEditorId={profile?.id}
+                    specDocumentTemporarySource={specDocumentTemporarySources.get(draft.id)}
                     schedule={schedule}
                     brand={brand}
                     releaseFolders={(draft.brandId && releaseFoldersByBrand.get(draft.brandId)) || emptyList<Season>()}
@@ -682,9 +691,25 @@ export function CompanyDraftsPage() {
                     price={{
                       ...price, loading: prices.query.isPending, error: priceListError,
                       retry: () => { void prices.query.refetch() },
+                      destinations: {
+                        ...priceDestinations,
+                        add: name => priceDestinations.add(draft.id, name),
+                        change: (option, name) => priceDestinations.change(draft.id, option, name),
+                      },
                       request: () => prices.change({
                         action: 'request', draftId: draft.id, revision: currentDraft(draft.id)?.updatedAt ?? draft.updatedAt, previousId: price?.latest.id ?? null,
                       }),
+                      saveManual: async (record) => {
+                        await saveDraftChange(draft.id, (current) => {
+                          const manualPrice = normalizeDraftManualPrice({ ...record, savedAt: new Date().toISOString() })
+                          if (!manualPrice || current.colors.length !== Object.keys(manualPrice.amounts).length ||
+                            current.colors.some(color => !Object.hasOwn(manualPrice.amounts, color.id))) {
+                            throw new Error('현재 컬러와 입력한 단가를 다시 확인해 주세요.')
+                          }
+                          const input = draftToInput(current)
+                          return { ...input, specs: { ...input.specs, manualPrice } }
+                        }, 'draft_price_manual_save')
+                      },
                       confirm: async (reply) => {
                         await saveDraftChange(draft.id, (current) => {
                           const amounts = reply.amounts

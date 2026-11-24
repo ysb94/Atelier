@@ -6,9 +6,12 @@ import { DraftBoardView } from '@/features/drafts/DraftBoardView'
 import { useDraftSheetLayout } from '@/features/drafts/draft-sheet-layout'
 import { useDraftTeamWork } from '@/features/drafts/use-draft-team-work'
 import { draftVisualBoardKey, useDraftVisualBoard } from '@/features/drafts/use-draft-visual-board'
+import { useDraftSpecDocumentTemporary } from '@/features/drafts/use-draft-spec-document-temporary'
+import { useDraftPriceDestinations } from '@/features/drafts/use-draft-price-destinations'
 import { resolveReleaseSchedule } from '@/features/drafts/release-schedule-preview'
 import { emptyDraftInput, newColorRow } from '@/lib/drafts/empty-draft'
 import { normalizeColorSpecs, writeColorSpec, type SaveColorSpec } from '@/lib/drafts/color-spec'
+import { normalizeDraftManualPrice } from '@/lib/drafts/manual-price'
 import { newSampleWorkOrder } from '@/lib/drafts/sample-work-order'
 import type { Brand, ProductDraft } from '@/lib/types'
 import type { DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
@@ -17,8 +20,10 @@ import { saveDraftColors, saveDraftReleaseFolder, type DraftColorEdit } from '@/
 import '@/index.css'
 
 const temporaryKey = 'atelier-fixture-information-temporary'
+const manualPriceKey = 'atelier-fixture-manual-price'
 const withoutProposer = window.location.hash === '#without-proposer'
 const savedRelease = window.location.hash === '#saved-release'
+const stickyHeader = new URLSearchParams(window.location.search).has('sticky-header')
 const brand: Brand = {
   id: 'fixture-brand', slug: 'mas', name: 'MAS', nameKo: '마스', description: '',
   color: '#b21c29', styleCount: 0, foundedYear: 2026, createdAt: '', updatedAt: '',
@@ -52,6 +57,7 @@ function Fixture() {
   const [previousPriceReply, setPreviousPriceReply] = useState<DraftPriceRequest>()
   const [readOnly,setReadOnly]=useState(false)
   const accountId = readOnly ? 'fixture-viewer' : 'fixture-owner'
+  const priceDestinations = useDraftPriceDestinations('fixture-company', accountId, true)
   const sheetLayout = useDraftSheetLayout(accountId)
   const [phase,setPhase]=useState('review')
   const [writes,setWrites]=useState(0)
@@ -63,7 +69,8 @@ function Fixture() {
       imageUrl:'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="gray"/></svg>'),
       colors:[{...newColorRow(),id:'black',name:'블랙',orderQty:12},{...newColorRow(),id:'ivory',name:'아이보리',orderQty:8}],
       sampleWorkOrders:[{...newSampleWorkOrder(),id:'sample',url:'sample.pdf',shippedAt:'2026-10-01T00:00:00Z',receivedAt:'2026-10-02T00:00:00Z',passed:false}],
-      specs:{...base.specs,nameConfirmed:true,colorsConfirmed:true,colorNamesConfirmed:true,proposer:withoutProposer?undefined:{id:'proposer',name:'제안 직원'},
+      specs:{...base.specs,manualPrice:normalizeDraftManualPrice(JSON.parse(sessionStorage.getItem(manualPriceKey) ?? 'null')),
+        nameConfirmed:true,colorsConfirmed:true,colorNamesConfirmed:true,proposer:withoutProposer?undefined:{id:'proposer',name:'제안 직원'},
         releaseSchedule:savedRelease?{seasonId:'group',targetDate:'2026-11-27',certainty:'confirmed'}:undefined,
         coating:{...base.specs.coating,value:'기존 공통 코팅',note:'상품 공통 스펙 본문'},
         colorImageChoices:{black:'Image',ivory:'None'},
@@ -76,6 +83,7 @@ function Fixture() {
   const shown={...draft,sampleWorkOrders:phase==='new'?[]:draft.sampleWorkOrders,specs:{...draft.specs,colorSampleRounds:phase==='review'?draft.specs.colorSampleRounds:[]}}
   const teamWork=useDraftTeamWork(readOnly?'fixture-viewer':'fixture-owner',[draft])
   const visualBoard=useDraftVisualBoard('fixture-owner',[draft])
+  const specDocumentTemporarySources = useDraftSpecDocumentTemporary(accountId, readOnly ? [] : [draft])
   const write=async()=>{setWrites(n=>n+1)}
   const saveColors = async (rows: DraftColorEdit[], revision: string) => {
     setDraft(await saveDraftColors(draft, rows, revision))
@@ -99,7 +107,9 @@ function Fixture() {
     clearTemporary(revision)
     await write()
   }
-  return <main className="p-6"><button onClick={()=>setReadOnly(v=>!v)}>{readOnly?'작성자로 전환':'다른 직원으로 전환'}</button><select aria-label="검증 단계" value={phase} onChange={event=>setPhase(event.target.value)}><option value="review">샘플 검토</option><option value="new">최초 지시서</option><option value="color-upload">컬러 지시서</option></select><output data-testid="writes">{writes}</output><output data-testid="opened">{opened}</output>
+  return <main data-brand-page-scroll={stickyHeader ? '' : undefined} className={stickyHeader ? 'mt-16 h-[60vh] overflow-auto p-6' : 'p-6'}>
+    {stickyHeader && <style>{'.draft-sheet-row { height: 1100px; }'}</style>}
+    <button onClick={()=>setReadOnly(v=>!v)}>{readOnly?'작성자로 전환':'다른 직원으로 전환'}</button><select aria-label="검증 단계" value={phase} onChange={event=>setPhase(event.target.value)}><option value="review">샘플 검토</option><option value="new">최초 지시서</option><option value="color-upload">컬러 지시서</option></select><output data-testid="writes">{writes}</output><output data-testid="opened">{opened}</output>
     <output data-testid="saved-spec">{savedSpec}</output>
     <button type="button" onClick={() => setPriceRequest(current => current && {
       ...current, answeredAt: current.round === 1 ? '2026-11-02T10:00:00Z' : '2026-11-02T15:00:30Z',
@@ -108,6 +118,7 @@ function Fixture() {
     <DraftBoardView accountId={accountId} layout={sheetLayout} label="기획안 목록" renderRows={mode => <DraftSheetRow mode={mode} draft={shown} layout={sheetLayout} readOnly={readOnly} brand={brand} schedule={savedRelease?resolveReleaseSchedule(shown,releaseSeasonMap,[],{}):{group:{id:'group',brandId:'fixture-brand',name:'11월 출시',releaseTiming:''},targetDate:'2026-11-03',certainty:'confirmed',brandId:null,isPreview:false}}
       releaseFolders={releaseFolders} onChangeReleaseFolder={async seasonId => { setDraft(await saveDraftReleaseFolder(draft, seasonId)) }}
       informationEditorId="fixture-owner" informationTemporaryStore={temporaryStore} teamWork={teamWork.forDraft(draft.id)} visualBoard={visualBoard.forDraft(draft.id)}
+      specDocumentTemporarySource={specDocumentTemporarySources.get(draft.id)}
       onSharedPhotoChange={async saved => {
         if (!saved) return
         setDraft(current => ({ ...current, specs: { ...current.specs,
@@ -118,6 +129,11 @@ function Fixture() {
       price={{
         latest: priceRequest, reply: priceRequest?.answeredAt ? priceRequest : previousPriceReply,
         loading: false, error: '', retry: () => {},
+        destinations: {
+          ...priceDestinations,
+          add: name => priceDestinations.add(draft.id, name),
+          change: (option, name) => priceDestinations.change(draft.id, option, name),
+        },
         request: async () => {
           if (priceRequest?.answeredAt) setPreviousPriceReply(priceRequest)
           const round = (priceRequest?.round ?? 0) + 1
@@ -132,7 +148,14 @@ function Fixture() {
         confirm: async reply => setDraft(current => ({
           ...current, specs: { ...current.specs, confirmedPriceRequestId: reply.id },
         })),
+        saveManual: async record => {
+          const manualPrice = { ...record, savedAt: new Date().toISOString() }
+          sessionStorage.setItem(manualPriceKey, JSON.stringify(manualPrice))
+          setDraft(current => ({ ...current, specs: { ...current.specs, manualPrice } }))
+        },
       }}
-      onOpen={()=>setOpened(n=>n+1)} onSchedule={()=>{void write()}} onSaveColors={saveColors} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={saveSpec} onSaveSpecDocument={saveDocument} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/>} /></main>
+      onOpen={()=>setOpened(n=>n+1)} onSchedule={()=>{void write()}} onSaveColors={saveColors} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={saveSpec} onSaveSpecDocument={saveDocument} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/>} />
+    {stickyHeader && <div aria-hidden="true" className="h-[550px]" />}
+  </main>
 }
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={new QueryClient()}><Fixture /></QueryClientProvider>)

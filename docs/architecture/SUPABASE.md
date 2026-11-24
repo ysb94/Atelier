@@ -2060,9 +2060,9 @@ staging이 없는 동안에는 되돌릴 수단을 작업 전에 확보한다.
   혼입 위험은 낮다.
 - 디자인 파일 매니저 R2 루트는 현재 ATELIER 별칭 `masmarulez`다.
   `brandStorageRoot(slug)`로 표시하고, 기존 파일은 `type/...` 경로를 유지한다.
-  기존 최상위 폴더 `Prod_Images`·`all`·`common`·`product`·`renew`도
-  Masmarulez 허용 경로에 포함한다.
-  서버에서 발견한 임의 최상위 폴더를 자동으로 허용하지 않는다.
+  이 공유 저장소에서는 Worker가 조회할 수 있는 이름(한글 완성형·영문·숫자·밑줄·하이픈)으로
+  최상위 폴더를 추가한다. `logs`·`static`·`masmarulez`는 예약 이름이다.
+  파일 목록에는 요청한 폴더의 항목만 표시한다.
   Worker가 `GET /list?type=&prefix=` 를 아직 지키지 않으므로 비-ATELIER 브랜드
   파일 작업은 열지 않는다. 전체 버킷 쓰기로 우회하지 않는다.
 - 파일 매니저 `localStorage` 키(`masmarulezGridSort` 등)는 브라우저 UI 설정이다.

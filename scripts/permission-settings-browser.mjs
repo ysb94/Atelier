@@ -1,9 +1,77 @@
 import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 
+async function verifyPermissionMatrix(page, origin) {
+  const url = origin + '/settings/permissions'
+  const tab = page.getByRole('tab', { name: '한눈에 보기', exact: true })
+  const table = page.getByRole('table', { name: '직원별 권한과 업무 담당 현황', exact: true })
+  const row = table.getByRole('row', { name: /자재요청 조르기 수신자/ })
+  const nudgeSection = table.getByRole('row', { name: /기획 · 자재요청/ })
+  await page.goto(url)
+  await row.waitFor()
+  assert.equal(await tab.getAttribute('aria-selected'), 'true', '전체 관리자는 비교표가 기본으로 열림')
+  assert.deepEqual(await table.getByRole('columnheader').allTextContents(), ['권한·업무 담당', '검증 직원물류팀', '화면 검수디자인팀'], '재직 직원만 이름 순으로 표시')
+  assert.deepEqual(await row.getByRole('cell').allTextContents(), ['지정됨', '미지정'], '조르기 수신 설정과 미지정이 다른 직원 열에 표시')
+  const approval = table.getByRole('row', { name: /야근 승인자.*디자인팀/ })
+  assert.deepEqual(await approval.getByRole('cell').allTextContents(), ['지정됨', '미지정'])
+  const substitute = table.getByRole('row', { name: /야근 대체 승인자.*디자인팀/ })
+  assert.deepEqual(await substitute.getByRole('cell').allTextContents(), ['미지정', '지정됨'])
+
+  await page.getByRole('textbox', { name: '권한·담당 검색', exact: true }).fill('조르기')
+  await page.getByRole('textbox', { name: '직원 이름 검색', exact: true }).fill('화면 검수')
+  assert.deepEqual(await row.getByRole('cell').allTextContents(), ['미지정'])
+  await page.getByRole('checkbox', { name: '지정된 항목만', exact: true }).check()
+  assert.equal(await row.count(), 0, '지정된 항목 필터는 현재 표시 중인 직원으로 판정')
+  await page.getByRole('checkbox', { name: '지정된 항목만', exact: true }).uncheck()
+  await page.getByRole('textbox', { name: '직원 이름 검색', exact: true }).fill('')
+  await page.getByRole('textbox', { name: '권한·담당 검색', exact: true }).fill('')
+
+  const originalViewport = page.viewportSize()
+  try {
+    await page.setViewportSize({ width: 360, height: 760 })
+    const scroll = page.getByRole('region', { name: '권한 표 스크롤', exact: true })
+    const geometry = await scroll.evaluate(region => {
+      const corner = region.querySelector('thead th')
+      const before = corner.getBoundingClientRect()
+      const horizontalOverflow = region.scrollWidth > region.clientWidth
+      region.scrollLeft = region.scrollWidth
+      region.scrollTop = 100
+      const after = corner.getBoundingClientRect()
+      return { horizontalOverflow, moved: region.scrollLeft > 0 && region.scrollTop > 0,
+        deltas: [Math.abs(before.left - after.left), Math.abs(before.top - after.top)] }
+    })
+    assert.ok(geometry.horizontalOverflow && geometry.moved, '모바일 비교표의 가로·세로 스크롤')
+    assert.ok(geometry.deltas.every(delta => delta <= 1), '기능 열과 직원 머리글이 스크롤 중에도 고정')
+  } finally { await page.setViewportSize(originalViewport) }
+  assert.deepEqual(await page.evaluate(() => window.__permissionsFixture.audit), [], '비교표 필터는 지정 내역을 쓰지 않음')
+
+  await page.goto(url + '?matrix=loading')
+  await nudgeSection.getByText('불러오는 중…', { exact: true }).waitFor()
+  assert.equal(await row.count(), 0)
+  await page.goto(url + '?matrix=error')
+  await nudgeSection.getByText('설정을 불러오지 못했습니다.', { exact: true }).waitFor()
+  assert.equal(await row.count(), 0)
+  await page.goto(url + '?matrix=unavailable')
+  await nudgeSection.getByText('현재 계정의 조회 범위에서 확인할 수 없습니다.', { exact: true }).waitFor()
+  assert.equal(await row.count(), 0)
+  assert.ok(!(await page.evaluate(() => window.__permissionsFixture.matrixCalls)).includes('material_nudge_recipients'), '기획 조회 권한이 없으면 수신자 표 조회 안 함')
+
+  await page.goto(url + '?matrix=denied')
+  await page.getByRole('status').getByText('회사 전체 권한 지정 관리 계정에서 볼 수 있습니다.', { exact: true }).waitFor()
+  assert.equal(await table.count(), 0)
+  assert.ok(!(await page.evaluate(() => window.__permissionsFixture.matrixCalls)).includes('material_nudge_recipients'), '서버가 권한을 위임 범위로 응답하면 수신자 표 조회 안 함')
+  await page.goto(url + '?identity=approvers')
+  await page.getByRole('table', { name: '부서별 승인자 목록', exact: true }).waitFor()
+  assert.equal(await tab.count(), 0, '승인자 지정 전용 계정에는 비교표 미노출')
+  assert.equal(await table.count(), 0)
+  console.log('permission-matrix-browser: 재직 직원 순서·조르기/승인자 점·필터·모바일 고정·조회 상태·접근 경계 통과')
+}
+
 export async function verifyPermissionSettings(page,origin) {
+  await verifyPermissionMatrix(page, origin)
   await page.goto(origin+'/settings/permissions')
   await page.getByRole('heading',{name:'권한·담당자 설정',exact:true}).waitFor()
+  await page.getByRole('tab',{name:'기능별 담당자',exact:true}).click()
   await page.getByRole('row',{name:/검증 직원.*업무 접수.*물류팀/}).waitFor()
   const original = await page.evaluate(()=>window.__permissionsFixture.grants())
   await page.getByLabel('지정할 직원',{exact:true}).selectOption('other-user')
@@ -43,6 +111,8 @@ export async function verifyPermissionSettings(page,origin) {
   await page.getByRole('status').getByText('권한 지정 관리 또는 승인자 지정 권한이 필요합니다.',{exact:true}).waitFor()
   assert.equal(await page.getByLabel('지정할 직원',{exact:true}).count(),0)
   await page.goto(origin+'/settings/permissions?permissions-error')
+  await page.getByRole('alert').getByText('권한 목록을 불러오지 못했습니다.',{exact:true}).waitFor()
+  await page.getByRole('tab',{name:'기능별 담당자',exact:true}).click()
   await page.getByRole('alert').getByText(/권한 지정 내역 조회 실패/).waitFor()
   assert.equal(await page.getByRole('button',{name:'지정 내용 확인',exact:true}).isDisabled(),true,'조회 오류를 미지정 성공 상태로 사용하지 않음')
   await page.goto(origin+'/settings/permissions?identity=partner')
@@ -50,12 +120,19 @@ export async function verifyPermissionSettings(page,origin) {
   assert.deepEqual(await page.getByLabel('지정할 권한',{exact:true}).locator('option').evaluateAll(options=>options.map(option=>option.value)),['partner.edit'],'업체 담당자는 업체 편집 담당자만 지정')
   assert.deepEqual(await page.getByLabel('권한 범위 종류',{exact:true}).locator('option').evaluateAll(options=>options.map(option=>option.value)),['partner'])
   assert.equal(await page.getByRole('tab',{name:'야근·출퇴근 정정 승인자',exact:true}).count(),0)
+  assert.equal(await page.getByRole('tab',{name:'한눈에 보기',exact:true}).count(),0,'업체 담당자에게 회사 전체 비교표 미노출')
   await page.goto(origin+'/settings/permissions')
+  await page.getByRole('tab',{name:'기능별 담당자',exact:true}).click()
   await page.getByText('전체 승인·담당 업무 목록',{exact:true}).click()
   await page.getByRole('button',{name:'채팅 메시지 운영 설정',exact:true}).click()
   assert.equal(await page.getByLabel('지정할 권한',{exact:true}).inputValue(),'chat.moderate','담당자 목록 선택은 기존 지정 양식에 연결')
   assert.equal(await page.evaluate(()=>window.__permissionsFixture.audit.length),0,'기능 선택만으로 지정 내역을 쓰지 않음')
   await page.goto(origin+'/settings/permissions?permissions-legacy')
+  const pendingMatrix = page.getByRole('table', { name: '직원별 권한과 업무 담당 현황', exact: true })
+  const pendingGrant = pendingMatrix.getByRole('row', { name: /업무 접수·배정·진행 관리.*물류팀/ })
+  await pendingGrant.waitFor()
+  assert.deepEqual(await pendingGrant.getByRole('cell').allTextContents(), ['적용 대기', '미지정'], '기존 로그인 모드의 저장 권한은 적용 대기 점으로 구분')
+  await page.getByRole('tab',{name:'기능별 담당자',exact:true}).click()
   await page.getByText('전체 승인·담당 업무 목록',{exact:true}).click()
   const catalog=page.getByRole('table',{name:'승인자·기능별 담당자 설정 목록',exact:true})
   await catalog.waitFor()

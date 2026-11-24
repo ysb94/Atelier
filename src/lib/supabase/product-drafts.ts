@@ -12,6 +12,7 @@ import { normalizeColorSpecs } from '@/lib/drafts/color-spec'
 import { emptyDraftInput, MAX_DRAFT_COLORS, newColorRow } from '@/lib/drafts/empty-draft'
 import { normalizeDraftBrandId, parseDraftNo } from '@/lib/drafts/company-draft'
 import { sanitizeColorWorkOrder, normalizeColorSampleRounds, normalizeColorSampleDone } from '@/lib/drafts/draft-flow'
+import { normalizeDraftManualPrice } from '@/lib/drafts/manual-price'
 import {
   legacyWorkOrderFields,
   normalizeSampleWorkOrders,
@@ -212,6 +213,8 @@ function normalizeSpecs(raw: ProductDraft['specs'] | null | undefined, colors: D
     base.proposer = { id: raw.proposer.id, name: raw.proposer.name.trim() }
   }
   if (typeof raw?.confirmedPriceRequestId === 'string') base.confirmedPriceRequestId = raw.confirmedPriceRequestId
+  const manualPrice = normalizeDraftManualPrice(raw?.manualPrice)
+  if (manualPrice) base.manualPrice = manualPrice
   if (typeof raw?.openChannelTargetId === 'string') base.openChannelTargetId = raw.openChannelTargetId
   const colorImageChoices: Record<string, DraftColorImageChoice> = {}
   for (const { id } of colors) {

@@ -2,25 +2,32 @@ import type { DraftSampleWorkOrder } from '../types'
 import { latestFilledSampleWorkOrder, newSampleWorkOrder } from './sample-work-order'
 
 const PROMOTION_DESTINATION = 'PROMOTION [중국]'
+export const CHINA_TEAM_DESTINATION = { value: '중국', label: 'CHINA (김웅사장님)' } as const
+export const CHINA_EXTERNAL_DESTINATION = { value: 'CN-EXT', label: 'CHINA (외부 업체)' } as const
 export const SAMPLE_DESTINATIONS = [
-  { value: '중국', label: 'CHINA' },
+  CHINA_TEAM_DESTINATION,
+  CHINA_EXTERNAL_DESTINATION,
   { value: '한국', label: 'KOREA' },
   { value: PROMOTION_DESTINATION, label: PROMOTION_DESTINATION },
 ] as const
 
 export function sampleCountry(country: string) {
-  if (/^promotion\s*\[(중국|china)\]$/i.test(country.trim())) return { code: 'PROMO', label: PROMOTION_DESTINATION }
-  if (/중국|china/i.test(country)) return { code: 'CN', label: '중국' }
-  if (/한국|국내|korea/i.test(country)) return { code: 'KO', label: '한국' }
-  return { code: country.trim() || '국가 미정', label: country.trim() || '국가 미정' }
+  const value = country.trim()
+  if (value === CHINA_EXTERNAL_DESTINATION.value || value === CHINA_EXTERNAL_DESTINATION.label) {
+    return { code: CHINA_EXTERNAL_DESTINATION.value, label: CHINA_EXTERNAL_DESTINATION.label }
+  }
+  if (/^promotion\s*\[(중국|china)\]$/i.test(value)) return { code: 'PROMO', label: PROMOTION_DESTINATION }
+  if (/중국|china/i.test(value)) return { code: 'CN', label: CHINA_TEAM_DESTINATION.label }
+  if (/한국|국내|korea/i.test(value)) return { code: 'KO', label: 'KOREA' }
+  return { code: value || '국가 미정', label: value || '국가 미정' }
 }
 
 export function isSampleDestination(value: string) {
   const { code } = sampleCountry(value)
-  return code === 'CN' || code === 'KO' || code === 'PROMO'
+  return code === 'CN' || code === CHINA_EXTERNAL_DESTINATION.value || code === 'KO' || code === 'PROMO'
 }
 
-/** 차수의 진행처를 우선한다. KOREA와 PROMOTION은 기획안에만 기록한다. */
+/** 차수의 진행처를 우선한다. 외부 업체·KOREA·PROMOTION은 기획안에 기록한다. */
 export function sampleSentToChinaTeam(orderCountry: string | undefined, draftCountry: string) {
   const country = orderCountry?.trim() || draftCountry.trim()
   if (!country) return true

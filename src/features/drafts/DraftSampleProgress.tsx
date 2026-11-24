@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { DraftSampleWorkOrder } from '@/lib/types'
 import { sampleElapsedDays, sampleHistoryDay, sampleTripSpanDays } from '@/lib/drafts/sample-work-order'
-import { canReceiveSample, sampleCountry, sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
+import { CHINA_EXTERNAL_DESTINATION, canReceiveSample, sampleCountry, sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
 import { colorSampleLabel, sampleOrderLabel } from '@/lib/drafts/sample-registration'
 import './draft-sample-progress.css'
 
@@ -49,13 +49,17 @@ export function DraftSampleProgress({ orders, kind = 'sample', joined = false, o
       return <section key={order.id} aria-label={label} className="draft-sample-round">
         <div className="draft-sample-route">
           <div className="draft-sample-heading">
-            <span className="draft-sample-country" title={country.label}>{country.code}<span aria-hidden="true"> | </span></span>
+            <span className="draft-sample-country" title={country.label}>
+              {country.code === 'CN' || country.code === CHINA_EXTERNAL_DESTINATION.value ? country.label : country.code}
+              <span aria-hidden="true"> | </span>
+            </span>
             <a href={order.url!} download={order.name} title="작업지시서 내려받기">{label} {sampleHistoryDay(order.shippedAt).slice(2) || '등록일 기록 없음'}</a>
             {registered !== null && <span className="draft-sample-registered-elapsed" title={order.receivedAt ? '작업지시서 등록부터 실물 수령까지 걸린 일수' : '작업지시서 등록 후 경과일'}>({registered}일{order.receivedAt ? '' : ' 경과'})</span>}
           </div>
           {!order.receivedAt && <p className="draft-sample-dispatch">{country.code === 'CN'
             ? order.shipped ? `${sampleHistoryDay(order.returnedAt).slice(2) || '날짜 기록 없음'} 중국 발송 완료` : '중국팀 제작·발송 대기'
-            : country.code === 'PROMO' ? '프로모션 샘플 · 기록용' : '국내 샘플'}</p>}
+            : country.code === 'PROMO' ? '프로모션 샘플 · 기록용'
+              : country.code === CHINA_EXTERNAL_DESTINATION.value ? '외부 업체 샘플 · 기록용' : '국내 샘플'}</p>}
           {current && !order.passed && !order.receivedAt && <Button type="button" size="sm" variant="outline" className="draft-sample-receive" disabled={readOnly || saving || busy || !canReceiveSample(order, originCountry)}
             title="실물을 받은 뒤 수령일을 기록하세요." onClick={() => void run(() => onReceive(order.id))}>{busy ? '저장 중' : '수령 확인'}</Button>}
         </div>
