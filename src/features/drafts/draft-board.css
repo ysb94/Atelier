@@ -137,10 +137,9 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-status-badge:disabled{opacity:1;cursor:default}
 .draft-sheet-status-badge:not(:disabled){cursor:pointer}
 .draft-sheet-action.is-done{background:#eef5ee;border-color:#cbdccc;color:#43734e}
-.draft-sheet-action.is-pending{background:#c60920;border-color:#c60920;color:#fff}
-.draft-information-action.is-done{background:var(--color-primary);border-color:var(--color-primary);color:var(--color-primary-foreground)}
-.draft-information-action.is-editing{position:relative}
-.draft-information-action.is-editing::before,.draft-md-order-quantity.is-temporary::before,.draft-md-unconfirmed::before,.draft-visual-image-pending::before,.draft-visual-image-temporary::before{position:absolute;top:0;left:0;width:6px;height:6px;background:var(--color-primary);clip-path:polygon(0 0,100% 0,0 100%);content:'';pointer-events:none}
+.draft-information-action.is-done,.draft-sheet-status-badge.is-done,.draft-sheet-image-cell .draft-sheet-name-confirm.is-done{background:var(--color-primary);border-color:var(--color-primary);color:var(--color-primary-foreground)}
+.draft-information-action.is-editing,.draft-sheet-status-badge.is-pending{position:relative}
+.draft-information-action.is-editing::before,.draft-md-order-quantity.is-temporary::before,.draft-md-unconfirmed::before,.draft-visual-image-pending::before,.draft-visual-image-temporary::before,.draft-sheet-status-badge.is-pending::before{position:absolute;top:0;left:0;width:6px;height:6px;background:var(--color-primary);clip-path:polygon(0 0,100% 0,0 100%);content:'';pointer-events:none}
 .draft-visual-image-pending::before,.draft-visual-image-temporary::before{z-index:1;width:18px;height:18px}
 .draft-sheet-brand-actions{display:flex;align-items:center;gap:5px;width:100%;margin-top:5px}
 .draft-sheet-edit{display:inline-grid;place-items:center;width:24px;height:24px;border:1px solid var(--color-border);border-radius:5px;background:var(--color-card);color:var(--color-muted-foreground);cursor:pointer}
@@ -149,7 +148,6 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-edit-anchor>.draft-sheet-edit{position:sticky;inset-inline-end:4px;pointer-events:auto}
 .draft-sheet-image-cell{display:flex;align-items:center;flex-direction:column;gap:0;width:100%;max-width:162px;margin-inline:auto}
 .draft-sheet-image-cell .draft-sheet-name-confirm{align-self:flex-start;margin-top:3px;min-height:24px;padding:3px 9px;border-color:var(--color-border);border-radius:6px;background:var(--color-card);color:var(--color-muted-foreground);font-size:12px;font-weight:500}
-.draft-sheet-image-cell .draft-sheet-name-confirm.is-done{background:#eef5ee;border-color:#cbdccc;color:#43734e}
 .draft-sheet-photo{width:150px;height:148px;padding:8px;display:grid;place-items:center;border:0;border-radius:10px;background:#f6f6f4;cursor:zoom-in}
 .draft-sheet-photo.is-editor{cursor:pointer}
 .draft-sheet-photo:disabled{cursor:default;color:#a9adb0}
