@@ -448,7 +448,7 @@ try{
  assert.equal(await dispatchPreview.evaluate(element=>{
    const heading=element.parentElement.querySelector('.draft-sample-heading')
    return parseFloat(getComputedStyle(element).fontSize)/parseFloat(getComputedStyle(heading).fontSize)
- }),0.75)
+ }),1.125)
  assert.equal(await dispatchPreview.evaluate(element=>{
    const probe=document.createElement('span')
    probe.style.color='var(--color-blue-700)'
