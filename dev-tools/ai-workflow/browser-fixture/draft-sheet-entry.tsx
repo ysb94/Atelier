@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query'
 import { DraftSheetRow } from '@/features/drafts/DraftSheetRow'
 import { DraftBoardView } from '@/features/drafts/DraftBoardView'
 import { DraftFolderBar } from '@/features/drafts/DraftFolderBar'
+import { DraftFolderOpeningDate } from '@/features/drafts/DraftFolderOpeningDate'
 import { useDraftSheetLayout } from '@/features/drafts/draft-sheet-layout'
 import { useDraftTeamWork } from '@/features/drafts/use-draft-team-work'
 import { draftVisualBoardKey, useDraftVisualBoard } from '@/features/drafts/use-draft-visual-board'
@@ -13,10 +14,11 @@ import { emptyDraftInput, newColorRow } from '@/lib/drafts/empty-draft'
 import { normalizeColorSpecs, reopenDraftInformation, writeColorSpec, type ReopenDraftInformation, type SaveColorSpec } from '@/lib/drafts/color-spec'
 import { normalizeDraftManualPrice } from '@/lib/drafts/manual-price'
 import { newSampleWorkOrder } from '@/lib/drafts/sample-work-order'
-import type { Brand, ProductDraft } from '@/lib/types'
+import type { Brand, ProductDraft, Season } from '@/lib/types'
 import type { DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
 import type { DraftInformationTemporary, DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
 import { saveDraftColors, saveDraftReleaseFolder, type DraftColorEdit } from '@/lib/supabase/product-drafts'
+import { listSeasons, saveSeasonOpening } from '@/lib/supabase/seasons'
 import '@/index.css'
 
 const temporaryKey = 'atelier-fixture-information-temporary'
@@ -29,8 +31,8 @@ const brand: Brand = {
   color: '#b21c29', styleCount: 0, foundedYear: 2026, createdAt: '', updatedAt: '',
 }
 const releaseFolders = [
-  { id: 'group', name: '11월 출시', releaseTiming: '' },
-  { id: 'group-dec', name: '12월 출시', releaseTiming: '' },
+  { id: 'group', brandId: brand.id, name: '11월 출시', releaseTiming: '' },
+  { id: 'group-dec', brandId: brand.id, name: '12월 출시', releaseTiming: '' },
 ]
 function temporaryRows(): DraftInformationTemporary[] {
   return JSON.parse(sessionStorage.getItem(temporaryKey) ?? '[]')
@@ -53,6 +55,9 @@ function Fixture() {
   const [priceRequest, setPriceRequest] = useState<DraftPriceRequest>()
   const [previousPriceReply, setPreviousPriceReply] = useState<DraftPriceRequest>()
   const [readOnly,setReadOnly]=useState(false)
+  const [orderTest, setOrderTest] = useState(false)
+  const folderKey = ['seasons', brand.id] as const
+  const folders = useQuery({ queryKey: folderKey, queryFn: () => listSeasons(brand.id), enabled: orderTest })
   const accountId = readOnly ? 'fixture-viewer' : 'fixture-owner'
   const priceDestinations = useDraftPriceDestinations('fixture-company', accountId, true)
   const sheetLayout = useDraftSheetLayout(accountId)
@@ -83,8 +88,15 @@ function Fixture() {
     : phase === 'review' ? draft.specs.colorSampleRounds : []
   const shown = {
     ...draft,
+    seasonId: orderTest ? 'group' : draft.seasonId,
     sampleWorkOrders: phase === 'new' ? [] : draft.sampleWorkOrders,
-    specs: { ...draft.specs, colorSampleRounds, colorSampleDone: phase === 'color-done' ? { round: ['black'] } : draft.specs.colorSampleDone },
+    specs: { ...draft.specs, colorSampleRounds, colorSampleDone: phase === 'color-done' ? { round: ['black'] } : draft.specs.colorSampleDone,
+      ...(orderTest && {
+        colorNames: { ...draft.specs.colorNames, black: { nameEn: 'Black', nameKo: '블랙' }, ivory: { nameEn: 'Ivory', nameKo: '아이보리' } },
+        manualPrice: priceRequest ? undefined : { destination: '한국', currency: 'KRW' as const, vendor: '', savedAt: '2026-10-20T00:00:00Z',
+          amounts: Object.fromEntries(draft.colors.map(color => [color.id, 1000])) },
+      }),
+    },
   }
   const teamWork=useDraftTeamWork(readOnly?'fixture-viewer':'fixture-owner',[draft])
   const visualBoard=useDraftVisualBoard('fixture-owner',[draft])
@@ -119,6 +131,12 @@ function Fixture() {
   return <main data-brand-page-scroll={stickyHeader ? '' : undefined} className={stickyHeader ? 'mt-16 h-[60vh] overflow-auto p-6' : 'p-6'}>
     {stickyHeader && <style>{'.draft-sheet-row { height: 1100px; }'}</style>}
     <button onClick={()=>setReadOnly(v=>!v)}>{readOnly?'작성자로 전환':'다른 직원으로 전환'}</button>
+    <label><input type="checkbox" checked={orderTest} onChange={event => setOrderTest(event.currentTarget.checked)} />검증용 발주 준비</label>
+    {orderTest && <DraftFolderOpeningDate opening={folders.data?.find(folder => folder.id === 'group')?.opening}
+      editable={!readOnly} onSave={async (next, expected) => {
+        const opening = await saveSeasonOpening('group', brand.id, next, expected)
+        cache.setQueryData<Season[]>(folderKey, current => current?.map(folder => folder.id === 'group' ? { ...folder, opening } : folder))
+      }} />}
     <select aria-label="검증 단계" value={phase} onChange={event=>setPhase(event.target.value)}>
       <option value="review">샘플 검토</option>
       <option value="new">최초 지시서</option>
@@ -135,7 +153,7 @@ function Fixture() {
       amounts: { ivory: 0, black: 14 + current.round },
     })}>단가 회신 반영</button>
     <DraftBoardView accountId={accountId} layout={sheetLayout} label="기획안 목록" renderRows={mode => <DraftSheetRow mode={mode} draft={shown} layout={sheetLayout} readOnly={readOnly} brand={brand}
-      releaseFolders={releaseFolders} onChangeReleaseFolder={async seasonId => { setDraft(await saveDraftReleaseFolder(draft, seasonId)) }}
+      releaseFolders={orderTest ? folders.data ?? releaseFolders : releaseFolders} onChangeReleaseFolder={async seasonId => { setDraft(await saveDraftReleaseFolder(draft, seasonId)) }}
       informationEditorId="fixture-owner" informationTemporaryStore={temporaryStore} teamWork={teamWork.forDraft(draft.id)} visualBoard={visualBoard.forDraft(draft.id)}
       specDocumentTemporarySource={specDocumentTemporarySources.get(draft.id)}
       onSharedPhotoChange={async saved => {

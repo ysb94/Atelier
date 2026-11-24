@@ -132,9 +132,9 @@ function MdPriceInput({ label, value, disabled, onChange }: {
     }} />
 }
 
-export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, priceDestinationName, chinaTeamOrder, children }: {
+export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, priceDestinationName, chinaTeamOrder, orderRequirements, children }: {
   draft: ProductDraft; readOnly: boolean; hidden: boolean; actorId?: string; teamWork: DraftTeamWork; priceDestinationName?: string
-  chinaTeamOrder: boolean; children?: ReactNode
+  chinaTeamOrder: boolean; orderRequirements: string; children?: ReactNode
 }) {
   const catalog = useContext(DraftMdOptionsContext)
   const [editingArrival, setEditingArrival] = useState(false)
@@ -192,6 +192,7 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
   const { arrival } = quantity.value
 
   function confirmQuantities() {
+    if (orderRequirements) return
     let expectedArrival = arrival
     if (!expectedArrival) {
       const expectedDay = new Date(`${ORDER_DATE.format(new Date())}T00:00:00Z`)
@@ -240,6 +241,7 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
         <div className="draft-md-order">
           <div className="draft-color-pad justify-center">
             <DraftTeamActions label="MD 수량" confirmText="수량 확정" showSave={false} className="draft-md-quantity-actions"
+              confirmBlockedReason={orderRequirements ? `수량 확정 전에 완료해 주세요. ${orderRequirements}` : undefined}
               locked={quantity.locked} confirmed={quantityConfirmed} busy={quantity.busy} editing={quantity.editing}
               conflict={quantity.conflict} onEdit={quantity.startEdit} onSave={() => setConfirmingQuantity(true)} onReset={quantity.reset} />
           </div>
@@ -391,7 +393,7 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
       {confirmingQuantity && !readOnly && !hidden && <DraftOrderConfirmationDialog
         draft={draft} actorId={actorId} quantities={quantityPayload(quantity.value).quantities}
         destinationName={priceDestinationName} chinaTeamOrder={chinaTeamOrder}
-        locked={quantity.locked || quantity.conflict || quantityConfirmed}
+        locked={quantity.locked || quantity.conflict || quantityConfirmed || Boolean(orderRequirements)}
         onBack={() => setConfirmingQuantity(false)} onConfirm={() => {
           setConfirmingQuantity(false)
           confirmQuantities()

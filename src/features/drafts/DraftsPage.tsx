@@ -31,6 +31,7 @@ import { useAuth } from '@/lib/supabase/auth'
 import { useBasicWorkAccess, canWriteDraft } from '@/lib/supabase/basic-work-access'
 import { draftPriceError, type DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
 import { saveDraftColors, saveDraftReleaseFolder } from '@/lib/supabase/product-drafts'
+import { saveSeasonOpening } from '@/lib/supabase/seasons'
 import {
   type ProductDraft,
   type ProductDraftInput,
@@ -41,6 +42,7 @@ import { draftDetailPath, draftNewPath } from '@/lib/workspace/company-paths'
 import { cn, formatNumber, emptyList } from '@/lib/utils'
 import { DraftBrandScopeBar, countScheduleRows } from './DraftBrandScopeBar'
 import { DraftFolderBar, DraftFolderHeading } from './DraftFolderBar'
+import { DraftFolderOpeningDate } from './DraftFolderOpeningDate'
 import { matchesDraftFolder } from './draft-folder-filter'
 import { DraftSheetRow, type DraftConfirmFlag } from './DraftSheetRow'
 import { DraftBoardView } from './DraftBoardView'
@@ -558,6 +560,21 @@ export function CompanyDraftsPage() {
             value={showingCompleted ? 'completed' : 'drafts'}
             onChange={(view) => setCompletedFolderId(view === 'completed' ? activeFolder.id : null)}
             ariaLabel={`${activeFolder.label} 목록 보기`}
+          />
+          <DraftFolderOpeningDate
+            key={`${profileId}:${activeFolder.id}`}
+            opening={seasonMap.get(activeFolder.id)?.opening}
+            editable={Boolean(workAccess.access?.legacyEdit || workAccess.access?.operator || canWriteDraft(workAccess.access, null, activeFolder.brandId))}
+            onSave={async (next, expected) => {
+              const queryKey = ['seasons', activeFolder.brandId] as const
+              try {
+                const opening = await saveSeasonOpening(activeFolder.id, activeFolder.brandId, next, expected)
+                await queryClient.cancelQueries({ queryKey })
+                queryClient.setQueryData<Season[]>(queryKey, current => current?.map(season => season.id === activeFolder.id ? { ...season, opening } : season))
+              } finally {
+                await queryClient.invalidateQueries({ queryKey })
+              }
+            }}
           />
         </div>
       ) : null}

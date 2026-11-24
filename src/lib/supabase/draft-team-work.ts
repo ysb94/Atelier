@@ -40,9 +40,13 @@ export async function saveDraftTeamWork<S extends DraftTeamSection>(
   draftId: string, section: S, payload: DraftTeamValues[S], confirmed: boolean, revision: string | null,
 ) {
   return diagnosticOperation('app', 'save-draft-team-work', trace => trace.run('save', async context => {
-    const { data, error } = await tracedQuery(getSupabase().rpc('save_draft_team_work', {
-      p_draft_id: draftId, p_section: section, p_payload: payload, p_confirmed: confirmed, p_revision: revision,
-    }), context)
+    const client = getSupabase()
+    const request = section === 'md-quantity' && confirmed
+      ? client.rpc('confirm_draft_order_quantity', { p_draft_id: draftId, p_payload: payload, p_revision: revision })
+      : client.rpc('save_draft_team_work', {
+        p_draft_id: draftId, p_section: section, p_payload: payload, p_confirmed: confirmed, p_revision: revision,
+      })
+    const { data, error } = await tracedQuery(request, context)
     if (error) throw error
     const row = data?.[0] as DraftTeamRecord<S> | undefined
     if (!row) throw new Error('기획안 팀 정보를 저장하지 못했습니다.')

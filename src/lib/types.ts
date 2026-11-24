@@ -88,6 +88,8 @@ export const LEGACY_SEASON_STATUS_MAP: Record<string, SeasonStatus> = {
  * 실제로는 "26.03 말 SS", "1학기 신학기"처럼 출시 묶음이다.
  * code는 URL·가져오기 호환용으로 앱이 만든다.
  */
+export type SeasonOpening = { date: string | null; confirmed: boolean }
+
 export type Season = {
   id: string
   brandId: string
@@ -97,6 +99,7 @@ export type Season = {
   name: string
   /** 출시 예정 자유 문구. 예: 26.03 말, 일정 미정 */
   releaseTiming: string
+  opening?: SeasonOpening
   year: number
   status: SeasonStatus
 }

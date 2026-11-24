@@ -23,7 +23,7 @@ const fixtureClient={
  resolveId(source,importer) {
    const modulePath = importer?.replaceAll('\\','/') ?? ''
    if ((/\/lib\/supabase\/client(?:\.ts)?$/.test(source.replaceAll('\\','/')) &&
-       /\/(product-drafts|profiles|styles|code-usage-targets|code-usage-target-folders)\.ts$/.test(modulePath)) ||
+       /\/(product-drafts|profiles|seasons|styles|code-usage-targets|code-usage-target-folders)\.ts$/.test(modulePath)) ||
        (source === './client' && /\/(attendance-exemptions|draft-information-temporary|draft-price-requests|draft-visual-content|draft-team-work)\.ts$/.test(modulePath))) return '\0draft-color-client'
  },
  load(id) {
@@ -196,6 +196,23 @@ try{
      json:rows.map(number=>({id:number,style_no:number,name:number}))})
  })
  const teamRows=new Map()
+ let folderOpening={opening_date:null,opening_date_confirmed:false}
+ await page.route('**/rest/v1/seasons?*',route=>{
+   const request=route.request()
+   const params=new URL(request.url()).searchParams
+   assert.equal(params.get('brand_id'),'eq.fixture-brand')
+   if(request.method()==='PATCH') {
+     assert.equal(params.get('id'),'eq.group')
+     assert.equal(params.get('opening_date'),folderOpening.opening_date===null?'is.null':`eq.${folderOpening.opening_date}`)
+     assert.equal(params.get('opening_date_confirmed'),`eq.${folderOpening.opening_date_confirmed}`)
+     folderOpening=request.postDataJSON()
+     return route.fulfill({json:[folderOpening]})
+   }
+   return route.fulfill({json:[
+     {id:'group',brand_id:'fixture-brand',code:'NOV',name:'11월 출시',release_timing:'',year:2026,status:'active',...folderOpening},
+     {id:'group-dec',brand_id:'fixture-brand',code:'DEC',name:'12월 출시',release_timing:'',year:2026,status:'active',opening_date:null,opening_date_confirmed:false},
+   ]})
+ })
  const priceDestinations=[]
  await page.route('**/rpc/list_draft_price_destinations',route=>route.fulfill({
    json:{data:priceDestinations.filter(row=>!row.removed||row.preset_key),error:null},
@@ -260,12 +277,21 @@ try{
    return route.fulfill({json:temporary.flatMap(row=>row.field==='specDoc'&&row.edits.specDoc
      ? [{draft_id:'fixture',source:row.edits.specDoc.source}] : [])})
  })
- await page.route('**/rpc/save_draft_team_work',route=>{
-   const {p_draft_id,p_section,p_payload,p_confirmed,p_revision}=route.request().postDataJSON()
+ const saveTeamRecord=(route,p_section,p_confirmed)=>{
+   const {p_draft_id,p_payload,p_revision}=route.request().postDataJSON()
    if(p_revision!==(teamRows.get(p_section)?.revision??null)) return route.fulfill({json:{data:null,error:{code:'40001'}}})
    const saved={draft_id:p_draft_id,section:p_section,payload:p_payload,confirmed:p_confirmed,revision:crypto.randomUUID()}
    teamRows.set(p_section,saved)
    return route.fulfill({json:{data:[saved],error:null}})
+ }
+ await page.route('**/rpc/save_draft_team_work',route=>{
+   const {p_section,p_confirmed}=route.request().postDataJSON()
+   assert.ok(p_section!=='md-quantity'||!p_confirmed,'Order confirmation must use the checked endpoint')
+   return saveTeamRecord(route,p_section,p_confirmed)
+ })
+ await page.route('**/rpc/confirm_draft_order_quantity',route=>{
+   assert.equal(folderOpening.opening_date_confirmed,true)
+   return saveTeamRecord(route,'md-quantity',true)
  })
  let visualContent=[], resumeVisualStatus
  let visualStatusPause
@@ -504,12 +530,28 @@ try{
  await ivoryOrder.fill('8')
  const openOrderConfirmation=mdCell.getByRole('button',{name:'MD 수량 확정',exact:true})
  const orderDialog=page.getByRole('dialog',{name:'PL-TEST 발주 수량 확인',exact:true})
+ const orderPreparation=page.getByRole('checkbox',{name:'검증용 발주 준비',exact:true})
+ assert.equal(await openOrderConfirmation.isDisabled(),true)
+ assert.match(await openOrderConfirmation.getAttribute('aria-description'),/컬러.*단가 확정.*폴더 지정/)
+ await orderPreparation.check()
+ const folderSchedule=page.getByRole('group',{name:'폴더 오픈 일정',exact:true})
+ const openingDate=folderSchedule.getByLabel('오픈 예정일',{exact:true})
+ await openingDate.fill('2026-12-01')
+ await folderSchedule.getByRole('button',{name:'오픈 예정일 임시 저장',exact:true}).click()
+ await folderSchedule.getByRole('status').filter({hasText:'임시 저장'}).waitFor()
+ assert.deepEqual(folderOpening,{opening_date:'2026-12-01',opening_date_confirmed:false})
+ assert.equal(await openOrderConfirmation.isDisabled(),true)
+ assert.match(await openOrderConfirmation.getAttribute('aria-description'),/폴더 오픈 예정일 확정/)
+ await folderSchedule.getByRole('button',{name:'오픈 예정일 확정',exact:true}).click()
+ await folderSchedule.getByRole('button',{name:'오픈 예정일 수정',exact:true}).waitFor()
+ assert.equal(await openingDate.getAttribute('aria-description'),'확정됨')
+ await page.waitForFunction(()=>getComputedStyle(document.querySelector('input[aria-description="확정됨"][type=date]')).backgroundColor==='rgb(198, 9, 32)')
  assert.equal(styleNumberReads,0)
  await openOrderConfirmation.click()
  await orderDialog.getByRole('cell',{name:'M0002',exact:true}).waitFor()
  const orderPreviewRows=orderDialog.locator('tbody tr')
- assert.deepEqual(await orderPreviewRows.nth(0).getByRole('cell').allInnerTexts(),['M0002','Meeting sample\n회의용 기획안 블랙','1,000'])
- assert.deepEqual(await orderPreviewRows.nth(1).getByRole('cell').allInnerTexts(),['M0004','Meeting sample\n회의용 기획안 아이보리','8'])
+ assert.deepEqual(await orderPreviewRows.nth(0).getByRole('cell').allInnerTexts(),['M0002','Meeting sample Black\n회의용 기획안 블랙','1,000'])
+ assert.deepEqual(await orderPreviewRows.nth(1).getByRole('cell').allInnerTexts(),['M0004','Meeting sample Ivory\n회의용 기획안 아이보리','8'])
  assert.equal(await orderDialog.getByText('중국팀 발주 연동 예정',{exact:true}).count(),0)
  await orderDialog.getByText('이 목록으로 발주를 저장하시겠습니까?',{exact:true}).waitFor()
  assert.equal(teamRows.get('md-quantity').confirmed,false,'Opening the preview does not confirm the order')
@@ -518,6 +560,7 @@ try{
  await openOrderConfirmation.click()
  await orderDialog.getByRole('button',{name:'발주 저장',exact:true}).click()
  await mdCell.getByRole('button',{name:'MD 수량 수정',exact:true}).waitFor()
+ await orderPreparation.uncheck()
  assert.deepEqual(teamRows.get('md-quantity').payload,{quantities:{black:'1000',ivory:'8'},arrival:'2026-11-23'})
  assert.equal(teamRows.get('md-quantity').confirmed,true)
  assert.equal((await cornerMarker(blackOrder.locator('..'))).content,'none')
@@ -709,16 +752,6 @@ try{
  await page.getByRole('dialog').getByRole('button',{name:'닫기',exact:true}).click()
  await page.getByRole('button',{name:'단가 회신 반영',exact:true}).click()
  assert.equal(await mdCountry.textContent(),'CHINA (김웅사장님)')
- registeredStyleNumbers=Array.from({length:9999},(_,index)=>`M${String(index+1).padStart(4,'0')}`)
- await mdCell.getByRole('button',{name:'MD 수량 수정',exact:true}).click()
- await openOrderConfirmation.click()
- await orderDialog.getByText('중국팀 발주 연동 예정',{exact:true}).waitFor()
- await orderDialog.getByText(/철회 승낙을 받아야 취소할 수 있습니다/).waitFor()
- await orderDialog.getByRole('cell',{name:'M10000',exact:true}).waitFor()
- await orderDialog.getByRole('cell',{name:'M10001',exact:true}).waitFor()
- await orderDialog.getByRole('button',{name:'수량 확정',exact:true}).click()
- await mdCell.getByRole('button',{name:'MD 수량 수정',exact:true}).waitFor()
- registeredStyleNumbers=['M0001','M0003']
  const reRequest=priceCell.getByRole('button',{name:'단가 재요청',exact:true})
  const confirmPrice=priceCell.getByRole('button',{name:'확정',exact:true})
  await reRequest.waitFor()
@@ -761,7 +794,23 @@ try{
    })
  }
  assert.ok((await reRequest.boundingBox()).y>(await priceRows.last().boundingBox()).y)
+ await orderPreparation.check()
+ await folderSchedule.getByRole('button',{name:'오픈 예정일 수정',exact:true}).waitFor()
+ assert.equal(await openingDate.inputValue(),'2026-12-01','Folder open date after reload')
+ await mdCell.getByRole('button',{name:'MD 수량 수정',exact:true}).click()
+ assert.equal(await openOrderConfirmation.isDisabled(),true)
+ assert.match(await openOrderConfirmation.getAttribute('aria-description'),/단가 확정/)
  await confirmPrice.click()
+ registeredStyleNumbers=Array.from({length:9999},(_,index)=>`M${String(index+1).padStart(4,'0')}`)
+ await openOrderConfirmation.click()
+ await orderDialog.getByText('중국팀 발주 연동 예정',{exact:true}).waitFor()
+ await orderDialog.getByText(/철회 승낙을 받아야 취소할 수 있습니다/).waitFor()
+ await orderDialog.getByRole('cell',{name:'M10000',exact:true}).waitFor()
+ await orderDialog.getByRole('cell',{name:'M10001',exact:true}).waitFor()
+ await orderDialog.getByRole('button',{name:'수량 확정',exact:true}).click()
+ await mdCell.getByRole('button',{name:'MD 수량 수정',exact:true}).waitFor()
+ registeredStyleNumbers=['M0001','M0003']
+ await orderPreparation.uncheck()
  const priceHeart=priceCell.getByRole('img',{name:'단가 확정',exact:true})
  await priceHeart.waitFor()
  assert.ok((await priceHeart.boundingBox()).y<(await priceRows.first().boundingBox()).y)
@@ -1484,13 +1533,15 @@ try{
  assert.equal(await mdCell.getByRole('textbox',{name:'흰색 발주 수량',exact:true}).inputValue(),'')
  assert.equal(await amdCell.getByRole('textbox',{name:'흰색 사방넷 번호',exact:true}).isEnabled(),true)
  assert.equal(await amdCell.getByRole('button',{name:'흰색 AMD 번호 저장',exact:true}).isDisabled(),true)
- assert.equal(await mdCell.getByRole('button',{name:'MD 수량 확정',exact:true}).isEnabled(),true)
+ assert.equal(await openOrderConfirmation.isDisabled(),true)
  assert.equal(await blackOrder.inputValue(),'1,000','A new color only invalidates confirmation for the previous color set')
+ await orderPreparation.check()
  await openOrderConfirmation.click()
  await orderDialog.getByRole('cell',{name:'M0005',exact:true}).waitFor()
  assert.deepEqual(await orderPreviewRows.nth(2).getByRole('cell').allInnerTexts(),['M0005','Meeting sample White\n회의용 기획안 흰색','—'])
  await orderDialog.press('Escape')
  await orderDialog.waitFor({state:'detached'})
+ await orderPreparation.uncheck()
  await assertOrderAlignment()
  assert.equal(await colorForm.count(),0)
  assert.deepEqual(Object.keys(colorPayload).sort(),['p_colors','p_draft_id','p_expected_updated_at'])

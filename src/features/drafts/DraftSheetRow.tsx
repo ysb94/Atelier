@@ -161,9 +161,17 @@ function colorImageConfigured(choice?: DraftColorImageChoice, photoUrl?: string 
   return choice === 'None' || (choice === 'Image' && Boolean(photoUrl))
 }
 
+function colorNamesComplete(names: typeof EMPTY_COLOR_NAMES) {
+  return Boolean(names.nameEn.trim() && names.nameKo.trim())
+}
+
+function colorSetupComplete(names: typeof EMPTY_COLOR_NAMES, choice?: DraftColorImageChoice, photoUrl?: string | null) {
+  return colorNamesComplete(names) && colorImageConfigured(choice, photoUrl)
+}
+
 function ColorSetupDot({ names, choice, photoUrl }: { names: typeof EMPTY_COLOR_NAMES; choice?: DraftColorImageChoice; photoUrl?: string | null }) {
-  const namesComplete = Boolean(names.nameEn.trim() && names.nameKo.trim())
-  const configured = namesComplete && colorImageConfigured(choice, photoUrl)
+  const namesComplete = colorNamesComplete(names)
+  const configured = colorSetupComplete(names, choice, photoUrl)
   const label = !namesComplete ? '영문·한글명 입력 필요' : configured ? `이미지 설정 ${choice}` : choice === 'Image' ? '이미지 미첨부' : '이미지 미선택'
   return (
     <span
@@ -791,7 +799,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   mode?: DraftBoardMode
   layout?: DraftSheetLayout
   draft: ProductDraft; brand: Brand | undefined
-  releaseFolders: Pick<Season, 'id' | 'name' | 'releaseTiming'>[]
+  releaseFolders: Pick<Season, 'id' | 'name' | 'releaseTiming' | 'opening' | 'brandId'>[]
   onChangeReleaseFolder: (seasonId: string | null) => Promise<void>
   price?: DraftPriceControls
   teamWork: DraftTeamWork
@@ -895,6 +903,21 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
     : latestPriceRequest ? CHINA_TEAM_DESTINATION : undefined
   const priceDestination = editingPriceDestination ?? savedPriceDestination
   const priceDestinationName = priceDestination && draftPriceDestinationLabel(priceDestination, price?.destinations?.rows)
+  const confirmedOrderAmounts = !editingPriceDestination && !price?.loading && !price?.error
+    ? savedManualPrice?.amounts ?? (latestPriceRequest?.answeredAt && latestPriceRequest.id === draft.specs.confirmedPriceRequestId
+      ? latestPriceRequest.amounts : undefined)
+    : undefined
+  const orderFolder = draft.brandId ? releaseFolders.find(folder => folder.id === draft.seasonId && folder.brandId === draft.brandId) : undefined
+  const orderRequirements = [
+    nameConfirmed && named ? null : '네임 확정',
+    hasColor && draft.colors.every(color => colorSetupComplete(draftColorNames(color.name, draft.specs.colorNames?.[color.id]),
+      draft.specs.colorImageChoices?.[color.id], draft.specs.colorPhotoUrls?.[color.id])) ? null : '컬러 이름 왼쪽 빨간 표시',
+    hasColor && confirmedOrderAmounts && Object.keys(confirmedOrderAmounts).length === draft.colors.length &&
+      draft.colors.every(color => typeof confirmedOrderAmounts[color.id] === 'number') ? null : '단가 확정',
+    draft.brandId ? null : '브랜드 지정',
+    orderFolder ? orderFolder.opening?.confirmed && orderFolder.opening.date ? null : '폴더 오픈 예정일 확정'
+      : '브랜드 출시 폴더 지정',
+  ].filter(Boolean).join(', ')
   function colorSampleDone(colorId: string) {
     return colorId in pendingDone ? pendingDone[colorId] : doneColorIds.has(colorId)
   }
@@ -1107,7 +1130,8 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
         current?.anchor === anchor && current.field === field ? null : { anchor, colorId, field, visualTrigger: field })} />,
     amd: <DraftAmdCell key={editorKey} colors={draft.colors} hidden={hidden.has('amd')} readOnly={readOnly} teamWork={teamWork} />,
     md: <DraftMdTeamCell key={editorKey} draft={draft} hidden={hidden.has('md')} readOnly={readOnly} actorId={informationEditorId}
-      teamWork={teamWork} priceDestinationName={priceDestinationName} chinaTeamOrder={priceDestination?.value === CHINA_TEAM_DESTINATION.value} />,
+      teamWork={teamWork} priceDestinationName={priceDestinationName} chinaTeamOrder={priceDestination?.value === CHINA_TEAM_DESTINATION.value}
+      orderRequirements={orderRequirements} />,
     ect: <td hidden={hidden.has('ect')} />,
   }
 

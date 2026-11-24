@@ -86,9 +86,11 @@ export function useDraftTeamSection<S extends DraftTeamSection>(
       const savedRevision = await work.save(section, payload, confirmed, edit ? edit.revision : revision)
       setEdit(current => current && current !== edit ? { ...current, revision: savedRevision } : undefined)
     } catch (failure) {
-      const code = (failure as { code?: string })?.code
+      const { code, message } = (failure ?? {}) as { code?: string; message?: string }
       setError(code === '42501' ? '기획안을 편집할 권한이 없습니다.'
         : code === '40001' ? '다른 화면에서 먼저 저장했습니다.'
+          : section === 'md-quantity' && code === 'P0001' && message ? message
+          : section === 'md-quantity' && code === 'PGRST202' ? '공유 DB 적용 후 발주 수량을 확정할 수 있습니다.'
           : ['22023', '22007', '22008'].includes(code ?? '') ? '컬러 구성 또는 입력값을 다시 확인해 주세요.'
             : '저장하지 못했습니다. 입력값을 유지했습니다.')
     } finally {
