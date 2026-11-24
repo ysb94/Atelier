@@ -261,7 +261,7 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
             aria-label="등록 및 오픈 유형">
             <div className={`draft-md-arrival${specialRelease ? ' has-release' : ''}`}>
               {specialRelease && releaseType && <strong className="draft-md-release-notice" title={releasePeriod || undefined}>
-                * {[partnerName || release.partner, releaseType.label].filter(Boolean).join(' ')}{releasePeriod ? ` / ${releasePeriod}` : ''} *
+                * {[partnerName || release.partner, releaseType.label].filter(Boolean).join(' ')}{releasePeriod && <> / <span className="whitespace-nowrap">{releasePeriod}</span></>} *
               </strong>}
               {editingArrival && !quantityLocked ? (
                 <label>예상입고일 : <Input type="date" autoFocus value={arrival} onBlur={() => setEditingArrival(false)}
@@ -304,7 +304,7 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
                 </MdField>}
               </div>
               {specialRelease && <div className="draft-md-release-fields">
-                <div className="draft-md-release-field">
+                <div className="draft-md-release-field draft-md-release-period">
                   <span>기간</span>
                   <div className="draft-md-select">
                     <Button type="button" variant="outline" size="sm" aria-label="발매 기간" aria-expanded={editingPeriod}

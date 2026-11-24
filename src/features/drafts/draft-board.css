@@ -241,13 +241,14 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-md-arrival button:not(:disabled){cursor:pointer}
 .draft-md-arrival input{width:108px;height:22px;border-radius:4px;padding:0 4px;box-shadow:none;font-size:12px}
 .draft-md-arrival.has-release{display:grid;grid-template-columns:minmax(0,1fr);justify-items:start}
-.draft-md-release-notice{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-primary)}
+.draft-md-release-notice{min-width:0;overflow-wrap:anywhere;color:var(--color-primary)}
 .draft-md-release-partner>span:first-child{color:var(--color-muted-foreground)}
 .draft-md-release-fields{display:grid;gap:2px;margin-top:2px}
 .draft-md-release-field{display:grid;grid-template-columns:52px 104px;gap:6px;align-items:center;min-height:22px;padding-inline-start:12px;font-size:12px}
 .draft-md-release-field>span:first-child{text-align:center}
-.draft-md-release-field .draft-md-period-button{display:block;width:104px;height:20px;border-color:#dedede;border-radius:3px;padding:0 6px;box-shadow:none;text-align:center;font-size:12px;font-weight:400}
-.draft-md-release-field .draft-md-period-button{overflow:hidden;padding-right:24px;text-overflow:ellipsis}
+.draft-md-release-period{grid-template-columns:52px minmax(0,1fr)}
+.draft-md-release-period .draft-md-select{width:max-content;min-width:104px;max-width:100%}
+.draft-md-release-field .draft-md-period-button{display:block;width:100%;height:auto;min-height:20px;border-color:#dedede;border-radius:3px;padding:0 24px 0 6px;box-shadow:none;text-align:center;font-size:12px;font-weight:400;white-space:normal}
 .draft-md-release-fields .draft-md-select::after{right:8px}
 .draft-md-period-panel{position:absolute;z-index:4;top:calc(100% + 4px);right:0;display:grid;width:190px;gap:6px;padding:8px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-card);box-shadow:0 6px 16px #0002}
 .draft-md-period-panel label{display:grid;grid-template-columns:38px minmax(0,1fr);align-items:center;gap:4px}
