@@ -5,19 +5,16 @@ export const ATELIER_STORAGE_ROOT = 'masmarulez'
 
 const ATELIER_SLUGS = new Set(['atelier', 'masmarulez'])
 
-/** Worker의 type 목록 중 Masmarulez가 이미 쓰는 최상위 폴더만 허용한다. */
-export const R2_BROWSE_TYPES = new Set([
-  'embed',
-  'image',
-  'spin360',
-  'video',
-  'logs',
-  'Prod_Images',
-  'all',
-  'common',
-  'product',
-  'renew',
-])
+// Worker가 숨기는 루트와 파일 업로드 대신 정적 파일 조회로 처리하는 경로.
+const reservedRoots = new Set([ATELIER_STORAGE_ROOT, 'logs', 'static'])
+
+export function topLevelFolderNameError(name: string): string | null {
+  if (reservedRoots.has(name)) return '시스템에서 사용하는 이름입니다. 다른 폴더 이름을 입력하세요.'
+  if (!/^[A-Za-z0-9가-힣_-]+$/.test(name)) {
+    return '최상위 폴더 이름에는 한글, 영문, 숫자, 밑줄(_), 하이픈(-)만 사용할 수 있습니다.'
+  }
+  return null
+}
 
 export type BrandFileCapability = {
   slug: string
@@ -62,20 +59,14 @@ export function brandFileCapability(slug?: string | null): BrandFileCapability {
   }
 }
 
-export function storageKeyFirstSegment(key: string) {
-  return key.replace(/^\/+/, '').split('/')[0] ?? ''
-}
-
-/** ATELIER는 기존 type/ 키와 masmarulez/ 키만, 다른 브랜드는 자기 루트만 허용한다. */
 export function isKeyAllowedForBrand(key: string, slug?: string | null) {
-  const capability = brandFileCapability(slug)
-  if (!capability.canOperate) return false
-  const first = storageKeyFirstSegment(key)
-  if (!first) return false
-  if (isAtelierBrandSlug(capability.slug)) {
-    return first === ATELIER_STORAGE_ROOT || R2_BROWSE_TYPES.has(first)
-  }
-  return first === capability.root
+  if (!brandFileCapability(slug).canOperate || key.includes('\\')) return false
+  const parts = key.replace(/\/$/, '').split('/')
+  if (parts.some((part) => !part || part === '.' || part === '..')) return false
+  const [root] = parts
+  // 이미 저장한 masmarulez/... 키는 그대로 참조하되 가상 루트 자체는 조작하지 않는다.
+  if (root === ATELIER_STORAGE_ROOT) return parts.length > 1
+  return topLevelFolderNameError(root) === null
 }
 
 export function assertKeyAllowedForBrand(key: string, slug?: string | null) {
@@ -88,9 +79,11 @@ export function filterItemsForBrand<T extends { key?: string; name?: string }>(
   type: string,
   slug?: string | null,
 ): T[] {
+  const prefix = `${type}/`
+  const legacyPrefix = `${ATELIER_STORAGE_ROOT}/${prefix}`
   return items.filter((item) => {
     const key = item.key || `${type}/${item.name || ''}`
-    return isKeyAllowedForBrand(key, slug)
+    return (key.startsWith(prefix) || key.startsWith(legacyPrefix)) && isKeyAllowedForBrand(key, slug)
   })
 }
 

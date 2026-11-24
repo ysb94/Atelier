@@ -285,7 +285,7 @@ export function DesignFileManagerPage() {
           status={manager.sidebarStatus}
           selectType={manager.selectBrowseType}
           selectFolder={manager.selectFolder}
-          refresh={() => void manager.refreshServerFiles(true)}
+          refresh={() => void (manager.activeBrowseType ? manager.refreshServerFiles(true) : manager.loadBrowseTypes())}
           menu={(event, type, folder) =>
             menu(event, undefined, type, folder)
           }
