@@ -45,7 +45,6 @@ import { matchesDraftFolder } from './draft-folder-filter'
 import { DraftSheetRow, type DraftConfirmFlag } from './DraftSheetRow'
 import { DraftBoardView } from './DraftBoardView'
 import { useDraftSheetLayout } from './draft-sheet-layout'
-import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
 import { useDraftPriceRequests } from './useDraftPriceRequests'
 import { useDraftPriceDestinations } from './use-draft-price-destinations'
 import { useDraftTeamWork } from './use-draft-team-work'
@@ -56,7 +55,6 @@ import {
   isUnassignedReleaseFolder,
   resolveReleaseSchedule,
   seasonToPreviewGroup,
-  type PreviewReleaseAssignment,
   type PreviewReleaseGroup,
 } from './release-schedule-preview'
 
@@ -111,11 +109,6 @@ export function CompanyDraftsPage() {
   const [boardFilter, setBoardFilter] = useState<BoardFilter>('all')
   const [myOnly, setMyOnly] = useState(false)
   const [completedFolderId, setCompletedFolderId] = useState<string | null>(null)
-  const [tempGroups, setTempGroups] = useState<PreviewReleaseGroup[]>([])
-  const [assignments, setAssignments] = useState<
-    Record<string, PreviewReleaseAssignment>
-  >({})
-  const [scheduleDraftId, setScheduleDraftId] = useState<string | null>(null)
   const folderParam = searchParams.get('folder')
   const requestedFolder = folderParam ?? searchParams.get('season') ?? 'all'
   const brandScope = (searchParams.get('scope') ?? 'all') as DraftBrandScope
@@ -273,9 +266,8 @@ export function CompanyDraftsPage() {
     for (const season of seasons) {
       if (!isUnassignedReleaseFolder(season)) byId.set(season.id, seasonToPreviewGroup(season))
     }
-    for (const group of tempGroups) byId.set(group.id, group)
     return [...byId.values()]
-  }, [seasons, tempGroups])
+  }, [seasons])
 
   const ownerAllDrafts = useMemo(
     () =>
@@ -303,11 +295,11 @@ export function CompanyDraftsPage() {
     const map = new Map(
       ownerAllDrafts.map((draft) => [
         draft.id,
-        resolveReleaseSchedule(draft, seasonMap, tempGroups, assignments),
+        resolveReleaseSchedule(draft, seasonMap, [], {}),
       ]),
     )
     return map
-  }, [assignments, ownerAllDrafts, seasonMap, tempGroups])
+  }, [ownerAllDrafts, seasonMap])
 
   const allScopeCounts = useMemo(
     () => countScheduleRows(ownerAllDrafts, scheduleByDraft),
@@ -398,20 +390,6 @@ export function CompanyDraftsPage() {
     [showingCompleted, visible, workAccess.access])
   const specDocumentTemporarySources = useDraftSpecDocumentTemporary(profileId, editableVisible)
 
-  const scheduleDraft = scheduleDraftId
-    ? (ownerDrafts.find((draft) => draft.id === scheduleDraftId) ??
-      drafts.find((draft) => draft.id === scheduleDraftId) ??
-      null)
-    : null
-  const scheduleDraftResolved = scheduleDraft
-    ? resolveReleaseSchedule(
-        scheduleDraft,
-        seasonMap,
-        tempGroups,
-        assignments,
-      )
-    : null
-
   const loading =
     draftsQuery.isLoading || seasonQueries.loading
 
@@ -451,69 +429,6 @@ export function CompanyDraftsPage() {
       },
       { replace: true },
     )
-  }
-
-  function closeScheduleDialog() {
-    setScheduleDraftId(null)
-  }
-
-  async function applySchedule(
-    draftId: string,
-    value: {
-      brandId: string
-      group: PreviewReleaseGroup
-      targetDate: string | null
-      certainty: PreviewReleaseAssignment['certainty']
-    },
-  ) {
-    let seasonId = value.group.id
-    if (seasonId.startsWith('temp-')) {
-      const season = await createSeason(value.brandId, {
-        name: value.group.name,
-        releaseTiming: value.group.releaseTiming,
-      })
-      seasonId = season.id
-      queryClient.setQueryData<Season[]>(
-        ['seasons', value.brandId],
-        (current) =>
-          current?.some((item) => item.id === season.id)
-            ? current
-            : [...(current ?? []), season],
-      )
-      await queryClient.invalidateQueries({ queryKey: ['seasons', value.brandId] })
-    }
-    await saveDraftChange(draftId, (current) => ({
-      ...draftToInput(current),
-      brandId: value.brandId,
-      seasonId,
-      specs: {
-        ...current.specs,
-        releaseSchedule: { seasonId, targetDate: value.targetDate, certainty: value.certainty },
-      },
-    }))
-    setTempGroups((prev) => prev.filter((group) => group.id !== value.group.id))
-    setAssignments((prev) => {
-      if (!prev[draftId]) return prev
-      const next = { ...prev }
-      delete next[draftId]
-      return next
-    })
-    closeScheduleDialog()
-  }
-
-  async function clearSchedule(draftId: string) {
-    await saveDraftChange(draftId, (current) => ({
-      ...draftToInput(current),
-      seasonId: null,
-      specs: { ...current.specs, releaseSchedule: undefined },
-    }))
-    setAssignments((prev) => {
-      if (!prev[draftId]) return prev
-      const next = { ...prev }
-      delete next[draftId]
-      return next
-    })
-    closeScheduleDialog()
   }
 
   async function changeReleaseFolder(draft: ProductDraft, seasonId: string | null) {
@@ -670,7 +585,6 @@ export function CompanyDraftsPage() {
           </div>}
         </>}
         renderRows={mode => visible.map(draft => {
-                const schedule = scheduleByDraft.get(draft.id)
                 const brand = draft.brandId ? brandById.get(draft.brandId) : undefined
                 const price = priceByDraft.get(draft.id)
                 return (
@@ -684,7 +598,6 @@ export function CompanyDraftsPage() {
                     readOnly={!canWriteDraft(workAccess.access,draft)}
                     informationEditorId={profile?.id}
                     specDocumentTemporarySource={specDocumentTemporarySources.get(draft.id)}
-                    schedule={schedule}
                     brand={brand}
                     releaseFolders={(draft.brandId && releaseFoldersByBrand.get(draft.brandId)) || emptyList<Season>()}
                     onChangeReleaseFolder={(seasonId) => changeReleaseFolder(draft, seasonId)}
@@ -727,7 +640,6 @@ export function CompanyDraftsPage() {
                     }}
                     onOpen={() => navigate(draftDetailPath(draft.id))}
                     onNextSample={() => navigate(`${draftDetailPath(draft.id)}#next-sample`)}
-                    onSchedule={() => setScheduleDraftId(draft.id)}
                     onSaveColors={async (rows, revision) => {
                       await queueDraftSave(draft.id, 'draft_save_colors', (current, context) =>
                         saveDraftColors(current, rows, revision, context))
@@ -881,27 +793,6 @@ export function CompanyDraftsPage() {
         })}
       />
 
-      <DraftReleaseScheduleDialog
-        open={Boolean(scheduleDraft)}
-        draft={scheduleDraft}
-        draftLabel={
-          scheduleDraft
-            ? `${scheduleDraft.draftNo} · ${scheduleDraft.nameKo || scheduleDraft.nameEn || '이름 미정'}`
-            : ''
-        }
-        brands={brands}
-        groups={previewGroups}
-        initial={scheduleDraftResolved}
-        onClose={closeScheduleDialog}
-        onApply={async (value) => {
-          if (!scheduleDraft) return
-          await applySchedule(scheduleDraft.id, value)
-        }}
-        onClear={async () => {
-          if (!scheduleDraft) return
-          await clearSchedule(scheduleDraft.id)
-        }}
-      />
     </div>
   )
 }

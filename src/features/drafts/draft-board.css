@@ -174,7 +174,6 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-brand-cell .draft-sheet-brand-info{margin-bottom:4px}
 .draft-sheet-brand-cell .draft-sheet-product-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .draft-sheet-brand-cell .draft-sheet-name-confirm{grid-area:3/2;justify-self:start;margin-top:2px}
-.draft-sheet-brand-cell .draft-sheet-release{grid-area:4/2}
 .draft-sheet-product-name.is-en{font-weight:600}
 .draft-sheet-product-name:hover,.draft-sheet-product-name:focus{outline:none;background:#fff;box-shadow:0 0 0 1px #e5c3c6}
 .draft-sheet-product-name:disabled{opacity:.7}
@@ -222,12 +221,6 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-color-tools .draft-sheet-color-heart{color:#ec526a}
 .draft-sheet-color-tools .draft-sheet-color-heart.is-confirmed{color:#c60920}
 .draft-sheet-info,.draft-sheet-info .draft-sheet-specs{display:flex;align-items:center;flex-wrap:nowrap;gap:5px}
-.draft-sheet-release{align-self:stretch;margin-top:5px;color:var(--color-muted-foreground);font-size:11px}
-.draft-sheet-release summary{cursor:pointer}
-.draft-sheet-schedule{margin-top:4px;font-size:11px;color:#6f7f91}
-.draft-sheet-schedule-button{display:inline-flex;padding:3px 6px;border:1px solid #d7e2ee;border-radius:6px;background:#f6f9fc;color:#386b9f;font:inherit;font-size:11px;white-space:nowrap;cursor:pointer}
-.draft-sheet-schedule-button:hover{background:#eaf1f8}
-.draft-sheet-schedule-button:disabled{opacity:.65;cursor:default}
 
 .draft-sheet-row>td.draft-sheet-md-cell{position:relative;padding:0;color:#4a4a4a}
 .draft-sheet-md-cell::before{position:absolute;inset-block:0;left:93px;border-left:1px solid #efeeee;content:'';pointer-events:none}

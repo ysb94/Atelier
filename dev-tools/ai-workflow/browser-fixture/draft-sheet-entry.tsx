@@ -9,7 +9,6 @@ import { useDraftTeamWork } from '@/features/drafts/use-draft-team-work'
 import { draftVisualBoardKey, useDraftVisualBoard } from '@/features/drafts/use-draft-visual-board'
 import { useDraftSpecDocumentTemporary } from '@/features/drafts/use-draft-spec-document-temporary'
 import { useDraftPriceDestinations } from '@/features/drafts/use-draft-price-destinations'
-import { resolveReleaseSchedule } from '@/features/drafts/release-schedule-preview'
 import { emptyDraftInput, newColorRow } from '@/lib/drafts/empty-draft'
 import { normalizeColorSpecs, writeColorSpec, type SaveColorSpec } from '@/lib/drafts/color-spec'
 import { normalizeDraftManualPrice } from '@/lib/drafts/manual-price'
@@ -33,9 +32,6 @@ const releaseFolders = [
   { id: 'group', name: '11월 출시', releaseTiming: '' },
   { id: 'group-dec', name: '12월 출시', releaseTiming: '' },
 ]
-const releaseSeasonMap = new Map(releaseFolders.map(folder => [folder.id, {
-  ...folder, code: folder.id, brandId: brand.id, year: 2026, status: 'active' as const,
-}]))
 function temporaryRows(): DraftInformationTemporary[] {
   return JSON.parse(sessionStorage.getItem(temporaryKey) ?? '[]')
 }
@@ -120,7 +116,7 @@ function Fixture() {
       ...current, answeredAt: current.round === 1 ? '2026-11-02T10:00:00Z' : '2026-11-02T15:00:30Z',
       amounts: { ivory: 0, black: 14 + current.round },
     })}>단가 회신 반영</button>
-    <DraftBoardView accountId={accountId} layout={sheetLayout} label="기획안 목록" renderRows={mode => <DraftSheetRow mode={mode} draft={shown} layout={sheetLayout} readOnly={readOnly} brand={brand} schedule={savedRelease?resolveReleaseSchedule(shown,releaseSeasonMap,[],{}):{group:{id:'group',brandId:'fixture-brand',name:'11월 출시',releaseTiming:''},targetDate:'2026-11-03',certainty:'confirmed',brandId:null,isPreview:false}}
+    <DraftBoardView accountId={accountId} layout={sheetLayout} label="기획안 목록" renderRows={mode => <DraftSheetRow mode={mode} draft={shown} layout={sheetLayout} readOnly={readOnly} brand={brand}
       releaseFolders={releaseFolders} onChangeReleaseFolder={async seasonId => { setDraft(await saveDraftReleaseFolder(draft, seasonId)) }}
       informationEditorId="fixture-owner" informationTemporaryStore={temporaryStore} teamWork={teamWork.forDraft(draft.id)} visualBoard={visualBoard.forDraft(draft.id)}
       specDocumentTemporarySource={specDocumentTemporarySources.get(draft.id)}
@@ -159,7 +155,7 @@ function Fixture() {
           setDraft(current => ({ ...current, specs: { ...current.specs, manualPrice } }))
         },
       }}
-      onOpen={()=>setOpened(n=>n+1)} onSchedule={()=>{void write()}} onSaveColors={saveColors} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={saveSpec} onSaveSpecDocument={saveDocument} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/>} />
+      onOpen={()=>setOpened(n=>n+1)} onSaveColors={saveColors} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={saveSpec} onSaveSpecDocument={saveDocument} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/>} />
     {stickyHeader && <div aria-hidden="true" className="h-[550px]" />}
   </main>
 }

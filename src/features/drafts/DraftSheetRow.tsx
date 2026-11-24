@@ -22,7 +22,7 @@ import type { DraftInformationTemporaryStore } from '@/lib/supabase/draft-inform
 import type { DraftColorEdit } from '@/lib/supabase/product-drafts'
 import { DRAFT_STATUS_LABEL, type Brand, type DraftColorImageChoice, type DraftColorRow, type DraftSpecs, type ProductDraft, type Season } from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
-import { RELEASE_CERTAINTY_LABEL, formatReleaseGroupLabel, formatTargetDate, type ResolvedReleaseSchedule } from './release-schedule-preview'
+import { formatReleaseGroupLabel } from './release-schedule-preview'
 import './draft-board.css'
 import { DraftSampleProgress } from './DraftSampleProgress'
 import { DraftColorSampleProgress } from './DraftColorSampleProgress'
@@ -771,11 +771,11 @@ function DraftReleaseFolderSelect({ draft, folders, readOnly, onChange }: {
   </>
 }
 
-export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout = DEFAULT_DRAFT_SHEET_LAYOUT, schedule, brand, releaseFolders, onChangeReleaseFolder, price, teamWork, visualBoard, informationEditorId, informationTemporaryStore, specDocumentTemporarySource, onOpen, onNextSample, onSchedule, onSaveColors, onSharedPhotoChange, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout = DEFAULT_DRAFT_SHEET_LAYOUT, brand, releaseFolders, onChangeReleaseFolder, price, teamWork, visualBoard, informationEditorId, informationTemporaryStore, specDocumentTemporarySource, onOpen, onNextSample, onSaveColors, onSharedPhotoChange, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
   readOnly?: boolean
   mode?: DraftBoardMode
   layout?: DraftSheetLayout
-  draft: ProductDraft; schedule: ResolvedReleaseSchedule | undefined; brand: Brand | undefined
+  draft: ProductDraft; brand: Brand | undefined
   releaseFolders: Pick<Season, 'id' | 'name' | 'releaseTiming'>[]
   onChangeReleaseFolder: (seasonId: string | null) => Promise<void>
   price?: DraftPriceControls
@@ -783,7 +783,6 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   visualBoard: DraftVisualBoardRow
   onOpen: () => void
   onNextSample?: () => void
-  onSchedule: () => void
   onSaveColors: (colors: DraftColorEdit[], revision: string) => Promise<void>
   onRenameProduct: (field: 'nameKo' | 'nameEn', name: string) => Promise<void>
   onSharedPhotoChange: (saved?: { colorId: string; photo: string }) => Promise<void>
@@ -927,13 +926,6 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
         {named ? '네임확정' : '네임 미정'}
       </SheetConfirmButton>
       {mode === 'card' && <div className="draft-sheet-brand-actions">{editButton}</div>}
-      {mode === 'table' && schedule?.group && (
-        <details className="draft-sheet-release">
-          <summary>출시 일정</summary>
-          <div className="draft-sheet-schedule">{formatReleaseGroupLabel(schedule.group)}{schedule.certainty ? ` · ${RELEASE_CERTAINTY_LABEL[schedule.certainty]}` : ''}{schedule.targetDate ? ` · ${formatTargetDate(schedule.targetDate)}` : ''}{schedule.isPreview ? ' · 미리보기' : ''}</div>
-          <button type="button" className="draft-sheet-schedule-button" disabled={readOnly} onClick={onSchedule}>일정 수정</button>
-        </details>
-      )}
     </div>
   const sampleContent = <>
       {(registeredDay || sampleAssignee) && <p className="draft-sheet-registered flex flex-wrap items-baseline gap-x-3">
