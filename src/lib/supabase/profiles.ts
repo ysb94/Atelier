@@ -307,17 +307,12 @@ export type PersonnelTitle = {
   sortOrder: number
 }
 
-/** 재직 중인 직원의 이름·직책·소속. 이메일 등 다른 프로필 칸은 없다. */
-export async function listOrgChartMembers(): Promise<OrgChartMember[]> {
-  const [{ data, error }, { data: exempt, error: exemptError }] = await Promise.all([
+/** 재직 중인 직원의 조직도 표시 항목만 조회한다. */
+export async function listOrgChartPeople(): Promise<OrgChartMember[]> {
+  const rows = await diagnosticQuery<OrgChartMemberRow[]>('app', 'org_chart_people',
     getSupabase().rpc('list_org_chart_members'),
-    listAttendanceExemptions().then(data => ({ data, error: null })),
-  ])
-  if (error) throw toStoreError(error)
-  if (exemptError) throw toStoreError(exemptError)
-  const exemptIds = new Set((exempt ?? []) as string[])
-  return ((data ?? []) as OrgChartMemberRow[]).map((row) => ({
-    attendanceExempt: exemptIds.has(row.id),
+  )
+  return (rows ?? []).map((row) => ({
     id: row.id,
     displayName: row.display_name,
     position: row.position,
@@ -325,6 +320,12 @@ export async function listOrgChartMembers(): Promise<OrgChartMember[]> {
     departmentId: row.department_id,
     hireDate: row.hire_date,
   }))
+}
+
+export async function listOrgChartMembers(): Promise<OrgChartMember[]> {
+  const [people, exempt] = await Promise.all([listOrgChartPeople(), listAttendanceExemptions()])
+  const exemptIds = new Set(exempt)
+  return people.map(person => ({ ...person, attendanceExempt: exemptIds.has(person.id) }))
 }
 
 /** 개발자 계정과 운영지원팀만 다른 직원의 부서·직책·직급·입사일을 바꾼다. */

@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import fs from 'node:fs/promises'
 import {createServer} from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -9,7 +8,8 @@ import {createWorkTestDb,ids,departments} from './work-request-test-db.mjs'
 
 const db=await createWorkTestDb(),root=process.cwd(),events=new Set(),objects=new Map()
 const origin='http://127.0.0.1:5196'
-let queue=Promise.resolve(),browser,server,failNextSave=false
+const proposerOnly=process.argv.includes('--draft-proposer-only')
+let queue=Promise.resolve(),browser,server,failNextSave=false,failPlannerExemptions=false
 const rpcNames=new Set(['get_my_basic_work_access','begin_work_request','save_work_request','delete_work_request','send_work_request_message','set_active_work_request','list_work_requests','begin_work_request_file','finish_work_request_file','finish_work_request_delete','save_product_draft'])
 async function localApi(req,res){
  const route=req.url.split('?')[0].split('/').pop()
@@ -23,7 +23,10 @@ async function localApi(req,res){
    let data
    if(route==='rpc'){
     if(body.name==='list_org_chart_members'){await db.exec('reset role');data=(await db.query("select p.id,p.display_name,p.department_id,p.position,p.job_grade,p.hire_date,d.name as department_name from public.profiles p left join public.departments d on d.id=p.department_id where p.company_id='e0000000-0000-4000-8000-000000000001' and p.status='active'")).rows}
-    else if(body.name==='list_company_attendance_exempt')data=[]
+    else if(body.name==='list_company_attendance_exempt'){
+     if(actor===ids.planner&&failPlannerExemptions)throw Error('출퇴근 제외 조회 실패 검증')
+     data=[]
+    }
     else {if(!rpcNames.has(body.name))throw Error('Unsupported test RPC '+body.name);if(body.name==='save_work_request'&&failNextSave){failNextSave=false;throw Error('저장 실패 재시도 검증')}const names=Object.keys(body.args);if(names.some(name=>!/^p_[a-z_]+$/.test(name)))throw Error('Invalid argument');data=(await db.query(`select public.${body.name}(${names.map((name,i)=>name+'=>$'+(i+1)).join(',')}) as data`,Object.values(body.args))).rows[0].data}
    }else if(route==='table'){
     if(!['brands','product_drafts','draft_colors','draft_options','seasons','styles'].includes(body.table))throw Error('Unsupported table '+body.table)
@@ -54,6 +57,8 @@ try{
  const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage(),errors=[]
  await context.route('**/*',route=>route.request().url().startsWith(origin+'/')?route.continue():route.abort())
  page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(15000)
+ async function command(actor,name,args){const response=await page.request.post(origin+'/__work-test/rpc',{headers:{'X-Test-Actor':actor},data:{name,args}});const result=await response.json();assert.equal(result.error,null,JSON.stringify(result.error));return result.data}
+ if(!proposerOnly){
  const managerPage=await context.newPage();managerPage.on('pageerror',error=>errors.push(error.message))
  await managerPage.goto(origin+'/work-requests/design?actor=manager')
  await managerPage.getByRole('button',{name:'작업 요청 하기',exact:true}).waitFor()
@@ -75,7 +80,6 @@ try{
  await page.goto(origin+'/work-requests/design?actor=manager')
  await page.getByText('브라우저 실제 저장 요청',{exact:true}).first().waitFor()
  // Change queue stages through the same production RPC adapter, then inspect production screens.
- async function command(actor,name,args){const response=await page.request.post(origin+'/__work-test/rpc',{headers:{'X-Test-Actor':actor},data:{name,args}});const result=await response.json();assert.equal(result.error,null,JSON.stringify(result.error));return result.data}
  let snapshot=await command(ids.manager,'list_work_requests',{p_owner:'design'}),revision=snapshot.requests.find(r=>r.id===requestId).revision
  revision=await command(ids.manager,'save_work_request',{p_id:requestId,p_revision:revision,p_patch:{status:'accepted',assignee:ids.design,collaborators:[],confirmedDueDate:'2030-01-02',managerPriority:'normal'},p_command:crypto.randomUUID()})
  await page.goto(origin+'/work-requests/design?actor=design&requestId='+requestId)
@@ -95,7 +99,8 @@ try{
  await page.screenshot({path:'.tmp/work-requests-live-desktop.png',fullPage:true})
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:'.tmp/work-requests-live-mobile.png',fullPage:true})
  await page.setViewportSize({width:1440,height:1000})
- await page.goto(origin+'/drafts/new?actor=planner')
+ }
+ await page.goto(origin+'/drafts/new?actor=planner',{waitUntil:'domcontentloaded',timeout:120000})
  await page.getByRole('textbox',{name:'한글명',exact:true}).fill('작성자 계정 검증 기획안')
  const brandSelect=page.getByRole('combobox',{name:'브랜드 선택',exact:true})
  const destination=page.getByRole('combobox',{name:'샘플 진행처 선택',exact:true})
@@ -111,9 +116,16 @@ try{
  assert.equal(await brandMark.count(),0)
  await brandSelect.selectOption({label:'ATELIER'})
  await destination.selectOption({label:'PROMOTION [중국]'})
- await page.locator('summary[aria-label="제안자 선택 (선택 사항)"]').click()
- await page.getByRole('textbox',{name:'제안자 이름 검색'}).fill('design')
+ const proposerPicker=page.getByRole('button',{name:'제안자 선택 (선택 사항)',exact:true})
+ const proposerSearch=page.getByRole('textbox',{name:'제안자 이름 검색',exact:true})
+ failPlannerExemptions=true
+ await proposerPicker.click()
+ await proposerSearch.fill('design')
+ await page.getByRole('button',{name:'design',exact:true}).waitFor()
+ await proposerSearch.evaluate(input=>input.blur())
+ assert.equal(await proposerPicker.getAttribute('aria-expanded'),'true','Losing focus without an outside interaction keeps the choices open')
  await page.getByRole('button',{name:'design',exact:true}).click()
+ failPlannerExemptions=false
  await page.getByText('제안자 design',{exact:true}).waitFor()
  const photo=page.getByRole('button',{name:'사진 선택',exact:true})
  const [photoBox,brandBox]=await Promise.all([photo.boundingBox(),brandMark.boundingBox()])
@@ -132,7 +144,24 @@ try{
  await brandMark.waitFor()
  await page.getByText('제안자 design',{exact:true}).waitFor()
  assert.equal(await destination.inputValue(),'PROMOTION [중국]')
- assert.match(await page.locator('summary[aria-label="제안자 선택 (선택 사항)"]').textContent(),/design/)
+ assert.match(await proposerPicker.textContent(),/design/)
+ await proposerPicker.click()
+ await proposerSearch.press('Escape')
+ assert.equal(await proposerPicker.getAttribute('aria-expanded'),'false')
+ await proposerPicker.click()
+ await proposerSearch.fill('md')
+ await page.getByRole('button',{name:'md',exact:true}).click()
+ await page.getByText('제안자 md',{exact:true}).waitFor()
+ await page.getByRole('button',{name:'저장',exact:true}).click()
+ await page.getByText(/저장됨$/).waitFor()
+ await page.reload()
+ await page.getByText('제안자 md',{exact:true}).waitFor()
+ await proposerPicker.click()
+ await page.getByRole('button',{name:'미지정',exact:true}).click()
+ await page.getByRole('button',{name:'저장',exact:true}).click()
+ await page.getByText(/저장됨$/).waitFor()
+ await page.reload()
+ await page.getByText('제안자 미지정',{exact:true}).waitFor()
  await page.getByRole('combobox',{name:'직원 계정 전환'}).selectOption('planner2')
  await page.waitForFunction(()=>[...document.querySelectorAll('button')].find(button=>button.textContent?.trim()==='저장')?.disabled===true)
  assert.equal(await page.getByRole('button',{name:'삭제',exact:true}).count(),0)
@@ -142,6 +171,7 @@ try{
  await page.getByRole('combobox',{name:'직원 계정 전환'}).selectOption('planner')
  await page.getByRole('button',{name:'저장',exact:true}).waitFor({state:'visible'})
  assert.equal(await page.getByRole('textbox',{name:'한글명',exact:true}).inputValue(),'작성자 계정 검증 기획안')
+ if(!proposerOnly){
  await page.goto(origin+'/work-requests/design?actor=planner&mode=new')
  await page.locator('#work-request-title').fill('저장 실패 후 재시도 요청')
  await page.locator('input[type=date]').first().fill('2030-01-03')
@@ -155,6 +185,9 @@ try{
  await page.waitForURL(/requestId=/)
  const afterRetry=await command(ids.planner,'list_work_requests',{p_owner:'design'})
  assert.equal(afterRetry.requests.filter(request=>request.values.title==='저장 실패 후 재시도 요청').length,1)
+ }
  assert.deepEqual(errors,[])
- console.log('work-requests-browser: real create/reload/attachment, two-window realtime refresh, same-department account switch, private chat, completion review/result confirmation, My home hub, desktop/mobile and draft creator/read-only/operator transition passed (local PostgreSQL, no production writes)')
+ console.log(proposerOnly
+  ? 'Draft proposer browser: create, edit, clear, search focus, failed attendance lookup independence, and saved reload passed (local PostgreSQL)'
+  : 'work-requests-browser: real create/reload/attachment, two-window realtime refresh, same-department account switch, private chat, completion review/result confirmation, My home hub, desktop/mobile and draft creator/read-only/operator transition passed (local PostgreSQL, no production writes)')
 }catch(error){console.error('work-requests-browser:',{message:error.message});if(browser){const pages=browser.contexts().flatMap(c=>c.pages());for(const page of pages)await page.screenshot({path:'.tmp/work-requests-browser-failure.png',fullPage:true}).catch(()=>{})}process.exitCode=1}finally{for(const stream of events)stream.end();await browser?.close();await server?.close();await db.close()}
