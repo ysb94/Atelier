@@ -179,7 +179,11 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-brand-cell .draft-sheet-names{grid-area:2/2;gap:2px;margin:0;padding-inline:0}
 .draft-sheet-brand-cell .draft-sheet-brand-info{margin-bottom:4px}
 .draft-sheet-brand-cell .draft-sheet-product-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.draft-sheet-brand-cell .draft-sheet-name-confirm{grid-area:3/2;justify-self:start;margin-top:2px}
+.draft-sheet-brand-status{display:contents}
+.draft-sheet-brand-cell .draft-sheet-brand-status{display:flex;grid-area:3/2;align-items:center;gap:6px;min-width:0;margin-top:2px}
+.draft-sheet-brand-cell .draft-sheet-name-confirm{flex:none;align-self:center;margin-top:0}
+.draft-sheet-sample-summary{display:grid;min-width:0;gap:1px;color:var(--color-muted-foreground);font-size:10px;line-height:11px}
+.draft-sheet-sample-summary strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-card-foreground);font-weight:600}
 .draft-sheet-product-name.is-en{font-weight:600}
 .draft-sheet-product-name:hover,.draft-sheet-product-name:focus{outline:none;background:#fff;box-shadow:0 0 0 1px #e5c3c6}
 .draft-sheet-product-name:disabled{opacity:.7}

@@ -288,6 +288,8 @@ try{
  assert.deepEqual(await page.getByRole('columnheader').allTextContents(),
    ['BRAND','SAMPLE','PRICE','COLOR','INFORMATION','VISUAL TEAM','AMD','MD TEAM','e.c.t'])
  assert.equal(await row.locator(':scope > td').count(),9)
+ const sampleSummary=row.locator('.draft-sheet-brand-cell .draft-sheet-sample-summary')
+ assert.equal(await sampleSummary.getAttribute('title'),'1차 컬러샘플 · 수령 대기')
  const cellHeights=await row.getByRole('cell').evaluateAll(cells=>cells.map(cell=>Math.round(cell.getBoundingClientRect().height)))
  assert.equal(new Set(cellHeights).size,1,'Every column ends at the same planning row boundary')
  assert.ok(cellHeights[0]<=240,`A two-color draft fits within a compact row, got ${cellHeights[0]}px`)
@@ -780,8 +782,9 @@ try{
  await row.locator('button.draft-sheet-photo').click()
  await row.getByRole('button',{name:'PL-TEST 기획안 조회'}).click();assert.equal(await page.getByTestId('opened').textContent(),'3')
  await page.screenshot({path:'.tmp/draft-sheet-readonly-desktop.png',fullPage:true})
- for(const [phase,label]of [['new','샘플 작업지시서'],['color-upload','다음샘플']]){
+ for(const [phase,label,summary]of [['new','샘플 작업지시서','샘플 · 등록 전'],['color-upload','다음샘플','1차 샘플 · 수령 완료']]){
    await page.getByLabel('검증 단계').selectOption(phase)
+   assert.equal(await sampleSummary.getAttribute('title'),summary)
    await row.getByRole('button',{name:label,exact:true}).click()
    assert.equal(await page.getByTestId('writes').textContent(),'0')
  }
@@ -1361,6 +1364,10 @@ try{
  assert.ok(photoBox.x+photoBox.width<ownerBox.x&&Math.abs(photoBox.y-ownerBox.y)<=4&&ownerBox.x<brandBox.x,
    'Photo and metadata start at the same height, with the brand logo on the right')
  const nameConfirmBox=await brandCell.getByText('네임확정',{exact:true}).boundingBox()
+ const sampleSummaryBox=await sampleSummary.boundingBox()
+ assert.ok(sampleSummaryBox.x>=nameConfirmBox.x+nameConfirmBox.width&&
+   sampleSummaryBox.y>=nameConfirmBox.y-1&&sampleSummaryBox.y+sampleSummaryBox.height<=nameConfirmBox.y+nameConfirmBox.height+1,
+   'The sample summary fits to the right of the name confirmation')
  assert.ok(nameConfirmBox.x>=ownerBox.x&&nameConfirmBox.y+nameConfirmBox.height<=photoBox.y+photoBox.height,
    `The name confirmation fits beside the photo: ${JSON.stringify({nameConfirmBox,photoBox,ownerBox})}`)
  const folderWrites=[]

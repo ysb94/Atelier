@@ -14,7 +14,8 @@ import {
 } from '@/lib/drafts/color-spec'
 import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
 import { colorSampleLineStatus, resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
-import { CHINA_TEAM_DESTINATION, sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
+import { CHINA_TEAM_DESTINATION, sampleCountry, sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
+import { colorSampleLabel, sampleOrderLabel } from '@/lib/drafts/sample-registration'
 import { currentDraftManualPrice, draftPriceDestinationLabel, type DraftPriceDestinationChoice } from '@/lib/drafts/manual-price'
 import { sheetRegisteredDay } from '@/lib/drafts/sample-work-order'
 import { readFileAsDataUrl } from '@/lib/images'
@@ -807,6 +808,20 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   const colorRounds = resolveColorSampleRounds(draft)
   const sampleReady = sampleReadyForNextStage(latestOrder) || colorRounds.length > 0
   const latestColorRound = colorRounds[colorRounds.length - 1]
+  const orderRegisteredAt = Date.parse(latestOrder?.shippedAt ?? '')
+  const colorRegisteredAt = Date.parse(latestColorRound?.shippedAt ?? '')
+  const currentColorRound = latestColorRound && !(orderRegisteredAt > colorRegisteredAt) ? latestColorRound : undefined
+  const currentSample = currentColorRound ?? latestOrder
+  const sampleLabel = currentColorRound ? colorSampleLabel(currentColorRound.round)
+    : latestOrder ? sampleOrderLabel(latestOrder, orders) : '샘플'
+  let sampleStatus = '등록 전'
+  if (currentSample) {
+    const shipped = currentSample.returnedAt || ('shipped' in currentSample && currentSample.shipped)
+    const china = sampleCountry(currentSample.originCountry || draft.originCountry).code === 'CN'
+    if (currentSample.receivedAt) sampleStatus = '수령 완료'
+    else if (currentSample.passed) sampleStatus = '이전 기록'
+    else sampleStatus = china && !shipped ? '발송 대기' : '수령 대기'
+  }
   const colorSampleStarted = Boolean(latestColorRound?.url.trim())
   const colorSampleReceived = Boolean(latestColorRound?.receivedAt)
   const doneColorIds = new Set(latestColorRound ? draft.specs.colorSampleDone?.[latestColorRound.id] ?? [] : [])
@@ -915,16 +930,21 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
         <button type="button" className="draft-sheet-product-name" aria-label={`${draft.draftNo} 한글명`} title={draft.nameKo.trim()} onClick={onOpen}>{draft.nameKo.trim()}</button>
         <button type="button" className="draft-sheet-product-name is-en" aria-label={`${draft.draftNo} 영문명`} title={draft.nameEn.trim()} onClick={onOpen}>{draft.nameEn.trim()}</button>
       </div>
-      <SheetConfirmButton
-        className="draft-sheet-name-confirm"
-        label="네임확정"
-        confirmed={nameConfirmed}
-        canToggle={!readOnly && named}
-        blockedTitle="한글명 또는 영문명을 먼저 입력해 주세요"
-        onToggle={(next) => onToggleConfirm('nameConfirmed', next)}
-      >
-        {named ? '네임확정' : '네임 미정'}
-      </SheetConfirmButton>
+      <div className="draft-sheet-brand-status">
+        <SheetConfirmButton
+          className="draft-sheet-name-confirm"
+          label="네임확정"
+          confirmed={nameConfirmed}
+          canToggle={!readOnly && named}
+          blockedTitle="한글명 또는 영문명을 먼저 입력해 주세요"
+          onToggle={(next) => onToggleConfirm('nameConfirmed', next)}
+        >
+          {named ? '네임확정' : '네임 미정'}
+        </SheetConfirmButton>
+        {mode === 'table' && <span className="draft-sheet-sample-summary" title={`${sampleLabel} · ${sampleStatus}`}>
+          <strong>{sampleLabel}</strong><span>{sampleStatus}</span>
+        </span>}
+      </div>
       {mode === 'card' && <div className="draft-sheet-brand-actions">{editButton}</div>}
     </div>
   const sampleContent = <>
