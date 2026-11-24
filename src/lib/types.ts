@@ -254,6 +254,7 @@ export type DraftColorRow = {
 }
 
 export type DraftColorImageChoice = 'Image' | 'None'
+export type DraftColorNames = { nameEn: string; nameKo: string }
 
 /** 기획안에서 중국팀으로 보내는 샘플 작업 지시서 한 차수 */
 export type DraftSampleWorkOrder = {
@@ -338,6 +339,7 @@ export type DraftSpecs = Record<DraftSpecKey, DraftSpec> & {
   openChannelTargetId?: string | null
   confirmedPriceRequestId?: string
   manualPrice?: DraftManualPrice
+  colorNames?: Record<string, DraftColorNames>
   colorImageChoices?: Record<string, DraftColorImageChoice>
   colorPhotoUrls?: Record<string, string>
   releaseSchedule?: { seasonId: string; targetDate: string | null; certainty: 'tentative' | 'confirmed' }

@@ -79,7 +79,33 @@ try {
   assert.deepEqual(await parent(), { ...before, specs: {
     ...before.specs, colorImageChoices: { [white]: 'Image' }, colorPhotoUrls: { [white]: photo },
   } })
+  await db.exec('reset role')
+  await db.exec(await readFile('supabase/migrations/20261124130417_draft_bilingual_color_names.sql', 'utf8'))
+  await actor(author)
+  const saveNames = (stamp, colors) => scalar('select public.save_draft_colors_with_names($1,$2,$3)::text',
+    [draft, stamp, JSON.stringify(colors)])
+  const namesStamp = await revision()
+  const bilingual = [{ id: white, nameEn: ' Ivory ', nameKo: ' 아이보리 ' }, { id: black, nameEn: 'Black', nameKo: '' }]
+  await actor(other)
+  await assert.rejects(saveNames(namesStamp, bilingual), { code: '42501' })
+  await actor(author)
+  await assert.rejects(saveNames(namesStamp, [{ id: white, nameEn: ' ', nameKo: '' }]), { code: '22023' })
+  const namesBefore = await parent()
+  assert.equal(await saveNames(namesStamp, bilingual), await revision())
+  assert.deepEqual((await read()).map(row => [row.id, row.name]), [[white, '아이보리'], [black, 'Black']])
+  const colorNames = { [white]: { nameEn: 'Ivory', nameKo: '아이보리' }, [black]: { nameEn: 'Black', nameKo: '' } }
+  assert.deepEqual(await parent(), { ...namesBefore, specs: { ...namesBefore.specs, colorNames } })
+  await assert.rejects(saveNames(namesStamp, bilingual), { code: '40001' })
+
+  const fullSave = async colors => scalar('select public.save_product_draft($1,null,$2,$3,$4,\'[]\')', [
+    company, draft, { nameKo: '기획안 전체 저장', expectedUpdatedAt: await revision(), specs: namesBefore.specs }, JSON.stringify(colors),
+  ])
+  await fullSave([{ id: white, name: '아이보리' }, { id: black, name: 'Black' }])
+  assert.deepEqual((await parent()).specs.colorNames, colorNames, 'An older full save preserves names it does not send')
+  await fullSave([{ id: white, name: '아이보리' }])
+  assert.deepEqual((await parent()).specs.colorNames, { [white]: colorNames[white] }, 'Removing a color prunes only its names')
   console.log('Draft colors SQL: add, reorder, delete, photo changes, revision conflicts and attachment preservation passed')
+  console.log('Draft bilingual color names SQL: partial draft names, atomic save, permission checks and legacy preservation passed')
 } finally {
   await db.close()
 }
