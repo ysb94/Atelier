@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { DraftTeamRecord, DraftTeamValues } from '@/lib/supabase/draft-team-work'
 import type { DraftColorRow } from '@/lib/types'
+import { cn } from '@/lib/utils'
 import type { DraftTeamWork } from './use-draft-team-work'
 
 const EMPTY_CODES = { sabangnet: '', barcode: '' }
@@ -28,15 +29,19 @@ function AmdNumbers({ name, fields, locked, saving, onSave, onReset }: {
   }
 
   return <>
-    {fields.map((field, index) => <label key={field.placeholder} className="draft-amd-entry">
-      <Input className="draft-team-control" aria-label={field.label} placeholder={field.placeholder} autoComplete="off"
-        inputMode={field.numeric ? 'numeric' : undefined} maxLength={80} disabled={locked || conflict} value={values[index]}
-        onChange={event => {
-          const value = event.currentTarget.value
-          setEdit(current => ({ original: current?.original ?? saved,
-            values: (current?.values ?? saved).map((previous, position) => position === index ? value : previous) }))
-        }} />
-    </label>)}
+    {fields.map((field, index) => {
+      const isSaved = Boolean(field.value && values[index] === field.value)
+      return <label key={field.placeholder} className="draft-amd-entry">
+        <Input className={cn('draft-team-control', isSaved && 'border-primary bg-primary text-primary-foreground disabled:bg-primary disabled:opacity-100')}
+          aria-label={field.label} aria-description={isSaved ? '저장됨' : undefined} placeholder={field.placeholder} autoComplete="off"
+          inputMode={field.numeric ? 'numeric' : undefined} maxLength={80} disabled={locked || conflict} value={values[index]}
+          onChange={event => {
+            const value = event.currentTarget.value
+            setEdit(current => ({ original: current?.original ?? saved,
+              values: (current?.values ?? saved).map((previous, position) => position === index ? value : previous) }))
+          }} />
+      </label>
+    })}
     <Button type="button" size="sm" variant="outline" className="draft-team-control draft-amd-save"
       aria-label={`${name} ${conflict ? '최신값 불러오기' : '저장'}`} disabled={locked || (!conflict && !changed)}
       onClick={conflict ? () => { setEdit(undefined); onReset() } : () => void save()}>
