@@ -420,11 +420,13 @@ export function DraftEditPage() {
   }
 
   const savedSamples = filledSampleWorkOrders(form.sampleWorkOrders).slice().sort((left, right) => left.round - right.round)
+  const latestSavedSample = savedSamples.at(-1)
+  const canRegisterNextSample = sampleReadyForNextStage(latestSavedSample)
   const savedColorSamples = resolveColorSampleRounds(form)
   useEffect(() => {
-    if (location.hash !== '#next-sample') return
+    if (location.hash !== '#next-sample' || !canRegisterNextSample) return
     document.getElementById('next-sample')?.scrollIntoView({ block: 'start' })
-  }, [location.hash, loaded?.id])
+  }, [location.hash, loaded?.id, canRegisterNextSample])
   async function saveSampleAttachment(nextForm: ProductDraftInput) {
     if (saveMutation.isPending) throw new Error('기획안 저장이 끝난 뒤 다시 등록해 주세요.')
     const saved = await saveMutation.mutateAsync(nextForm)
@@ -823,12 +825,12 @@ export function DraftEditPage() {
               ))}
               <RegisteredColorSampleCards rounds={savedColorSamples} originCountry={form.originCountry} readOnly={!editable} saving={saveMutation.isPending}
                 onRegister={replaceSavedColorSampleFile} onCountry={updateSavedColorSampleCountry} />
-              {savedSamples.length > 0 && (
+              {canRegisterNextSample && (
                 <div id="next-sample">
                   <SampleWorkOrderRegistration originCountry={form.originCountry}
-                    nextRound={(latestFilledSampleWorkOrder(form.sampleWorkOrders)?.round ?? 1) + 1}
+                    nextRound={(latestSavedSample?.round ?? 1) + 1}
                     nextColorRound={Math.max(0, ...savedColorSamples.map(round => round.round)) + 1}
-                    latestIsFinal={savedSamples.at(-1)?.sampleStage === 'final'}
+                    latestIsFinal={latestSavedSample?.sampleStage === 'final'}
                     finalCount={savedSamples.filter((order) => order.sampleStage === 'final').length}
                     readOnly={!editable} saving={saveMutation.isPending}
                     onRegister={async (stage, file, country) => {
@@ -903,7 +905,7 @@ export function DraftEditPage() {
                 }
               }}
             />
-            {sampleReadyForNextStage(latestFilledSampleWorkOrder(workOrders)) ? <Button type="button" size="sm" variant="outline" onClick={() => { setEditorPart('basic'); window.requestAnimationFrame(() => document.getElementById('next-sample')?.scrollIntoView({ block: 'start' })) }}>다음 샘플 진행</Button> : null}
+            {canRegisterNextSample ? <Button type="button" size="sm" variant="outline" onClick={() => { setEditorPart('basic'); window.requestAnimationFrame(() => document.getElementById('next-sample')?.scrollIntoView({ block: 'start' })) }}>다음 샘플 진행</Button> : null}
           </div>
 
           <div className="space-y-1.5">
@@ -916,9 +918,7 @@ export function DraftEditPage() {
             </div>
             <div className="space-y-2">
               {form.colors.map((color, index) => {
-                const showColorWorkOrder =
-                  sampleReadyForNextStage(latestFilledSampleWorkOrder(workOrders)) ||
-                  Boolean(color.sampleWorkOrderUrl)
+                const showColorWorkOrder = canRegisterNextSample || Boolean(color.sampleWorkOrderUrl)
                 const colorFileName = colorWorkOrderFileName(color)
                 return (
                   <div key={color.id} className="space-y-1">

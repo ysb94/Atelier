@@ -162,6 +162,36 @@ try{
  await page.getByText(/저장됨$/).waitFor()
  await page.reload()
  await page.getByText('제안자 미지정',{exact:true}).waitFor()
+ const draftId=new URL(page.url()).pathname.split('/').at(-1)
+ const nextSample=page.locator('#next-sample')
+ const sampleCard=round=>page.getByRole('region',{name:`등록된 ${round}차 샘플`,exact:true})
+ async function uploadSample(round, container){
+  await container.getByLabel(`${round}차 샘플 작업지시서 파일`,{exact:true})
+   .setInputFiles({name:`sample-${round}.pdf`,mimeType:'application/pdf',buffer:Buffer.from(`sample ${round}`)})
+  await container.getByRole('button',{name:'등록',exact:true}).click()
+  await sampleCard(round).getByRole('link',{name:`sample-${round}.pdf`,exact:true}).waitFor()
+ }
+ async function setSampleState(round, fields){
+  await queue
+  await db.exec('reset role')
+  const {rows}=await db.query(`update public.product_drafts
+    set sample_work_orders=jsonb_set(sample_work_orders, array[$2::text], (sample_work_orders -> $2::integer) || $3::jsonb)
+    where id=$1 returning id`,[draftId,round-1,JSON.stringify(fields)])
+  assert.equal(rows.length,1)
+  await page.reload()
+  await sampleCard(round).waitFor()
+ }
+ await uploadSample(1,page)
+ await nextSample.waitFor({state:'detached'})
+ await setSampleState(1,{shipped:true,returnedAt:'2026-11-24T01:00:00Z'})
+ assert.equal(await nextSample.count(),0,'발송 상태만으로는 다음 지시서 업로드가 열리지 않음')
+ await setSampleState(1,{receivedAt:'2026-11-24T02:00:00Z'})
+ await nextSample.getByRole('radio',{name:'2차 샘플 진행',exact:true}).waitFor()
+ await uploadSample(2,nextSample)
+ await nextSample.waitFor({state:'detached'})
+ await setSampleState(2,{receivedAt:'2026-11-24T03:00:00Z'})
+ await nextSample.getByRole('radio',{name:'3차 샘플 진행',exact:true}).waitFor()
+ assert.equal(await sampleCard(1).getByRole('link',{name:'sample-1.pdf',exact:true}).count(),1)
  await page.getByRole('combobox',{name:'직원 계정 전환'}).selectOption('planner2')
  await page.waitForFunction(()=>[...document.querySelectorAll('button')].find(button=>button.textContent?.trim()==='저장')?.disabled===true)
  assert.equal(await page.getByRole('button',{name:'삭제',exact:true}).count(),0)
