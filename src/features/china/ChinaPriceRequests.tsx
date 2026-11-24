@@ -105,7 +105,7 @@ function ChinaPricePhoto({ requestId, color, linkedPhoto, previewId, anchor, onC
     const position = () => {
       const price = priceCell.getBoundingClientRect()
       const left = Math.max(price.right, scroller.getBoundingClientRect().left) + gap
-      const width = Math.min(320, rightEdge() - left)
+      const width = Math.min(640, rightEdge() - left)
       if (width < 96) {
         popup.style.visibility = 'hidden'
         return
@@ -120,7 +120,7 @@ function ChinaPricePhoto({ requestId, color, linkedPhoto, previewId, anchor, onC
 
     // On narrow screens, reveal part of the last column in the existing horizontal scroller.
     const room = rightEdge() - priceCell.getBoundingClientRect().right - gap
-    const preferredWidth = Math.min(200, Math.floor(scroller.clientWidth / 2))
+    const preferredWidth = Math.min(400, Math.floor(scroller.clientWidth / 2))
     if (room < preferredWidth) scroller.scrollLeft += preferredWidth - room
     position()
     const observer = new ResizeObserver(position)
@@ -168,7 +168,7 @@ function ChinaPricePhoto({ requestId, color, linkedPhoto, previewId, anchor, onC
     </header>
     {useRequestPhoto && query.isPending ? <p role="status">사진을 불러오는 중입니다.</p>
       : useRequestPhoto && query.isError ? <p role="alert">{draftPriceError(query.error, '컬러 사진을 불러오지 못했습니다.')}</p>
-      : image ? <img src={image} alt={`${color.name} 컬러`} className="mx-auto max-h-[min(36vh,18rem)] w-full rounded-md bg-muted/30 object-contain" /> : <p>첨부 사진이 없습니다.</p>}
+      : image ? <img src={image} alt={`${color.name} 컬러`} className="mx-auto max-h-[min(72vh,36rem)] w-full rounded-md bg-muted/30 object-contain" /> : <p>첨부 사진이 없습니다.</p>}
   </dialog>, document.body)
 }
 

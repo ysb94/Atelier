@@ -433,6 +433,12 @@ try {
   assert.equal(await managerPricesTab.getByTitle('미확인 건수').textContent(),'1')
   await priceFilters.getByRole('button',{name:'1차 요청 (1)',exact:true}).click()
   assert.equal(await firstPriceRow.getByRole('button',{name:'Yellow 컬러 사진 크게 보기'}).count(),0)
+  const priceLayout=await priceManager.addStyleTag({content:`
+    [data-china-price-scroll] { width: 100%; overflow-x: auto }
+    [data-china-price-scroll] > table { width: 100%; min-width: 880px; table-layout: fixed }
+    [data-china-price-scroll] col:first-child { width: 160px }
+    [data-china-price-scroll] col:nth-child(n+2):nth-child(-n+4) { width: 144px }
+  `})
   const blackThumbnail=firstPriceRow.getByRole('button',{name:'Black 컬러 사진 크게 보기'})
   assert.equal(await blackThumbnail.locator('img').getAttribute('src'),draftPriceFixture.photo)
   await blackThumbnail.click()
@@ -445,6 +451,7 @@ try {
   const priceRight=await blackPrice.evaluate(input=>input.closest('td').getBoundingClientRect().right)
   const previewBounds=await colorDialog.boundingBox()
   assert.ok(previewBounds.x >= priceRight,'Preview opens to the right of the entire price column')
+  assert.equal(previewBounds.width,640,'Wide screens show the enlarged preview at full width')
   await colorDialog.getByText('Black 컬러',{exact:true}).click()
   assert.equal(await colorDialog.isVisible(),true)
   await blackPrice.click()
@@ -457,12 +464,6 @@ try {
   assert.equal(await blackThumbnail.evaluate(button=>document.activeElement===button),true)
   const desktopViewport=priceManager.viewportSize()
   await priceManager.setViewportSize({width:390,height:desktopViewport.height})
-  const narrowLayout=await priceManager.addStyleTag({content:`
-    [data-china-price-scroll] { width: 100%; overflow-x: auto }
-    [data-china-price-scroll] > table { width: 880px; table-layout: fixed }
-    [data-china-price-scroll] col:first-child { width: 160px }
-    [data-china-price-scroll] col:nth-child(n+2):nth-child(-n+4) { width: 144px }
-  `})
   await blackThumbnail.click()
   await colorDialog.waitFor()
   const narrowPriceRight=await blackPrice.evaluate(input=>input.closest('td').getBoundingClientRect().right)
@@ -470,7 +471,7 @@ try {
   assert.ok(narrowPreview.x >= narrowPriceRight && narrowPreview.x+narrowPreview.width <= 390,
     `Narrow popup left ${narrowPreview.x}, right ${narrowPreview.x+narrowPreview.width}, price edge ${narrowPriceRight}`)
   await colorDialog.getByRole('button',{name:'사진 크게 보기 닫기'}).click()
-  await narrowLayout.evaluate(style=>style.remove())
+  await priceLayout.evaluate(style=>style.remove())
   await priceManager.setViewportSize(desktopViewport)
   assert.equal(await blackPrice.inputValue(),'')
   await firstPriceRow.getByRole('button',{name:'단가 전송',exact:true}).click()
