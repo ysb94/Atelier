@@ -174,7 +174,7 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-color-name[aria-invalid=true]{box-shadow:0 0 0 1px #c60920}
 .draft-sheet-field-error{display:block;max-width:100%;font-size:10px;line-height:1.3;color:#c60920;text-align:center}
 .draft-sheet-row>td.draft-sheet-price-cell{padding-inline:7px;vertical-align:middle;text-align:center}
-.draft-sheet-row>td.draft-sheet-price-cell.has-reply{vertical-align:top}
+.draft-sheet-row>td.draft-sheet-price-cell.has-reply,.draft-sheet-row>td.draft-sheet-price-cell:has(.draft-price-manual){vertical-align:top}
 .draft-price-amounts{margin-bottom:16px}
 .draft-price-amounts .draft-color-line{justify-content:center;padding-inline:0}
 .draft-color-pad{display:flex;align-items:center;height:36px}
