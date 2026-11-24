@@ -215,7 +215,6 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-info,.draft-sheet-info .draft-sheet-specs{display:flex;align-items:center;flex-wrap:nowrap;gap:5px}
 .draft-sheet-release{align-self:stretch;margin-top:5px;color:var(--color-muted-foreground);font-size:11px}
 .draft-sheet-release summary{cursor:pointer}
-.draft-sheet-release>p{margin-top:4px;white-space:pre-wrap}
 .draft-sheet-schedule{margin-top:4px;font-size:11px;color:#6f7f91}
 .draft-sheet-schedule-button{display:inline-flex;padding:3px 6px;border:1px solid #d7e2ee;border-radius:6px;background:#f6f9fc;color:#386b9f;font:inherit;font-size:11px;white-space:nowrap;cursor:pointer}
 .draft-sheet-schedule-button:hover{background:#eaf1f8}

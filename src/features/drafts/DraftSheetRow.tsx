@@ -925,14 +925,11 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
         {named ? '네임확정' : '네임 미정'}
       </SheetConfirmButton>
       {mode === 'card' && <div className="draft-sheet-brand-actions">{editButton}</div>}
-      {mode === 'table' && (draft.releaseIssue.trim() || schedule?.group) && (
+      {mode === 'table' && schedule?.group && (
         <details className="draft-sheet-release">
-          <summary>발매 이슈</summary>
-          <p>{draft.releaseIssue.trim() || '등록된 이슈 없음'}</p>
-          {schedule?.group && <>
-            <div className="draft-sheet-schedule">{formatReleaseGroupLabel(schedule.group)}{schedule.certainty ? ` · ${RELEASE_CERTAINTY_LABEL[schedule.certainty]}` : ''}{schedule.targetDate ? ` · ${formatTargetDate(schedule.targetDate)}` : ''}{schedule.isPreview ? ' · 미리보기' : ''}</div>
-            <button type="button" className="draft-sheet-schedule-button" disabled={readOnly} onClick={onSchedule}>일정 수정</button>
-          </>}
+          <summary>출시 일정</summary>
+          <div className="draft-sheet-schedule">{formatReleaseGroupLabel(schedule.group)}{schedule.certainty ? ` · ${RELEASE_CERTAINTY_LABEL[schedule.certainty]}` : ''}{schedule.targetDate ? ` · ${formatTargetDate(schedule.targetDate)}` : ''}{schedule.isPreview ? ' · 미리보기' : ''}</div>
+          <button type="button" className="draft-sheet-schedule-button" disabled={readOnly} onClick={onSchedule}>일정 수정</button>
         </details>
       )}
     </div>
