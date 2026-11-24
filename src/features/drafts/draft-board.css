@@ -18,7 +18,7 @@
 .draft-folder-editor button[type=submit]{border-color:#b89952;background:#f1dfab;color:#59400e}
 .draft-folder-editor button:disabled{cursor:not-allowed;opacity:.6}
 .draft-folder-editor p{flex-basis:100%;margin:0;font-size:11px;color:#c60920}
-.draft-board-table{--draft-sheet-divider-color:color-mix(in srgb,var(--color-border) 85%,var(--color-foreground));table-layout:fixed;border-collapse:collapse;font-size:12px;line-height:1.6;color:#343a40}
+.draft-board-table{--draft-sheet-section-divider:color-mix(in srgb,var(--color-border) 85%,var(--color-foreground));--draft-sheet-divider-color:color-mix(in srgb,var(--draft-sheet-section-divider) 25%,transparent);table-layout:fixed;border-collapse:collapse;font-size:12px;line-height:1.6;color:#343a40}
 .draft-board-table th{position:sticky;top:var(--draft-sheet-header-top,0px);z-index:5;height:44px;padding:10px 16px;font-size:12px;font-weight:500;letter-spacing:.025em;text-align:left;color:white;background:#c60920}
 .draft-board-table th.draft-column-visual{background:color-mix(in srgb,var(--color-blue-900) 75%,var(--color-card))}
 .draft-board-table th:is(.draft-column-color,.draft-column-information,.draft-column-visual){padding-inline:8px 21px}
@@ -39,7 +39,11 @@
 .draft-sheet-row>td[hidden]{display:none}
 .draft-sheet-row>td.draft-sheet-brand-cell{padding:6px 16px 12px}
 .draft-sheet-row>td.draft-sheet-brand-cell:has(>.draft-sheet-edit-anchor){padding-top:28px}
-.draft-board-table th+th::before,.draft-sheet-row>td:not([hidden])~td:not([hidden])::after{position:absolute;z-index:1;inset-block:0;inset-inline-start:0;width:1px;background:var(--draft-sheet-divider-color);content:'';pointer-events:none}
+.draft-board-table th+th::before,.draft-sheet-row>td:not([hidden])~td:not([hidden])::after{position:absolute;z-index:1;inset-block:0;inset-inline-start:0;width:1px;border-inline-start:1px solid var(--draft-sheet-divider-color);content:'';pointer-events:none}
+.draft-board-table th+th:is(.draft-column-visual,.draft-column-amd,.draft-column-md)::before,
+.draft-board-table th:is(.draft-column-visual,.draft-column-amd,.draft-column-md)+th::before,
+.draft-sheet-row>td:not([hidden])~td:not([hidden]):is(.draft-sheet-visual-cell,.draft-sheet-amd-cell,.draft-sheet-md-cell)::after{border-inline-start-color:var(--draft-sheet-section-divider)}
+.draft-sheet-row>td:not([hidden]):is(.draft-sheet-visual-cell,.draft-sheet-amd-cell,.draft-sheet-md-cell):has(~td:not([hidden]))::after{position:absolute;z-index:2;inset-block:0;inset-inline:0 -1px;width:auto;border-inline-end:1px solid var(--draft-sheet-section-divider);content:'';pointer-events:none}
 .draft-sheet-row>td:is(.draft-sheet-color-cell,.draft-sheet-information-cell,.draft-sheet-visual-cell,.draft-sheet-amd-cell){--draft-color-line-background:var(--color-muted);padding-inline:0}
 .draft-sheet-row p,.draft-sheet-row dl,.draft-sheet-row dd{margin:0}
 .draft-sheet-muted{color:#8a8e94;font-size:11px}

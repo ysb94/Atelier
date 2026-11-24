@@ -301,19 +301,32 @@ try{
  const board=page.locator('.draft-board-scroll')
  assert.equal(await board.evaluate(node=>node.scrollWidth>node.clientWidth),true)
  const dividerStyles=async (columns,pseudo)=>columns.evaluateAll((cells,part)=>cells.map(cell=>{
-   const {content,backgroundColor,width}=getComputedStyle(cell,part)
-   return {content,backgroundColor,width}
+   const {content,borderInlineStartColor,borderInlineStartWidth,borderInlineEndColor,borderInlineEndWidth}=getComputedStyle(cell,part)
+   return {content,borderInlineStartColor,borderInlineStartWidth,borderInlineEndColor,borderInlineEndWidth}
  }),pseudo)
  const headerDividers=await dividerStyles(page.getByRole('columnheader'),'::before')
  const cellDividers=await dividerStyles(row.getByRole('cell'),'::after')
  assert.equal(headerDividers[0].content,'none')
  assert.equal(cellDividers[0].content,'none')
- assert.notEqual(headerDividers[1].backgroundColor,'rgba(0, 0, 0, 0)')
- for(const divider of [...headerDividers.slice(1),...cellDividers.slice(1)]) {
-   assert.deepEqual(divider,{content:'""',backgroundColor:headerDividers[1].backgroundColor,width:'1px'})
+ const lightDivider=headerDividers[1].borderInlineStartColor
+ const sectionDivider=headerDividers[5].borderInlineStartColor
+ assert.notEqual(lightDivider,sectionDivider)
+ for(const [index,divider] of headerDividers.entries()) {
+   if(index===0)continue
+   const strongBoundary=index>=5&&index<=8
+   assert.equal(divider.borderInlineStartWidth,'1px')
+   assert.equal(divider.borderInlineStartColor,strongBoundary?sectionDivider:lightDivider)
+   const cellDivider=cellDividers[index]
+   if(index===8) {
+     assert.equal(cellDividers[index-1].borderInlineEndWidth,'1px')
+     assert.equal(cellDividers[index-1].borderInlineEndColor,sectionDivider)
+   } else {
+     assert.equal(cellDivider.borderInlineStartWidth,'1px')
+     assert.equal(cellDivider.borderInlineStartColor,strongBoundary?sectionDivider:lightDivider)
+   }
  }
  async function assertCompactColumns() {
-   for (const [id, width] of [['color',128],['information',174],['visual',154],['amd',232]]) {
+   for (const [id, width] of [['color',128],['information',174],['visual',108],['amd',232]]) {
      const header=await page.locator(`th[data-column="${id}"]`).boundingBox()
      const cell=row.locator(`.draft-sheet-${id}-cell`)
      const body=await cell.boundingBox()

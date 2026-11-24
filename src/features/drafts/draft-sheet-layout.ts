@@ -6,7 +6,7 @@ export const DRAFT_SHEET_COLUMNS = {
   price: { label: 'PRICE', width: 100 },
   color: { label: 'COLOR', width: 128 },
   information: { label: 'INFORMATION', width: 174 },
-  visual: { label: 'VISUAL TEAM', width: 154 },
+  visual: { label: 'VISUAL TEAM', width: 108 },
   amd: { label: 'AMD', width: 232 },
   md: { label: 'MD TEAM', width: 490 },
   ect: { label: 'e.c.t', width: 265 },
