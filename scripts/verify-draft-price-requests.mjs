@@ -161,7 +161,7 @@ async function verify() {
     assert.deepEqual(await originalState(db), baseline, 'Requests and replies preserve existing draft cost, content and access')
     console.log('Draft price SQL: request/reply, China round history, planning latest reply, immutable snapshots, roles and company isolation passed')
     await db.exec('create table public.companies(id uuid primary key); insert into public.companies select distinct company_id from public.profiles')
-    await db.exec(await migration('20261124070856_draft_price_destinations'))
+    await db.exec(await migration('20261124102710_draft_price_destinations'))
     const readDestinations = actor => as(actor, async tx => (await tx.query('select id,name from public.draft_price_destinations')).rows)
     const addDestination = (actor, name) => as(actor, async tx => (await tx.query(
       'insert into public.draft_price_destinations(name,source_draft_id) values ($1,$2) returning id,name', [name, id],
@@ -176,7 +176,7 @@ async function verify() {
     await assert.rejects(addDestination(ids.outside, 'Cambodia'), { code: '42501' })
     await assert.rejects(addDestination(ids.requester, 'VIETNAM'), { code: '23505' })
     await assert.rejects(addDestination(ids.requester, 'CHINA (김웅사장님)'), { code: '23514' })
-    await db.exec(await migration('20261124071846_manage_draft_price_destinations'))
+    await db.exec(await migration('20261124102721_manage_draft_price_destinations'))
     const listOptions = actor => as(actor, async tx =>
       (await tx.query('select public.list_draft_price_destinations() as data')).rows[0].data)
     const changeOption = (actor, option, revision, name) => as(actor, async tx =>
