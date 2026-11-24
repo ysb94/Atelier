@@ -39,6 +39,7 @@
 .draft-sheet-row>td[hidden]{display:none}
 .draft-sheet-row>td.draft-sheet-brand-cell{padding:6px 16px 8px}
 .draft-sheet-row>td.draft-sheet-brand-cell:has(>.draft-sheet-edit-anchor){padding-top:28px}
+.draft-sheet-row>td.draft-sheet-sample-cell{padding-block-start:8px}
 .draft-board-table th+th::before,.draft-sheet-row>td:not([hidden])~td:not([hidden])::after{position:absolute;z-index:1;inset-block:0;inset-inline-start:0;width:1px;border-inline-start:1px solid var(--draft-sheet-divider-color);content:'';pointer-events:none}
 .draft-board-table th+th:is(.draft-column-visual,.draft-column-amd,.draft-column-md)::before,
 .draft-board-table th:is(.draft-column-visual,.draft-column-amd,.draft-column-md)+th::before,
