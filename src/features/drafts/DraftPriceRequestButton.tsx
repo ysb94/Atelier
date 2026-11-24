@@ -53,12 +53,15 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [destination, setDestination] = useState('')
+  const [pendingDestination, setPendingDestination] = useState<{ value: string; label: string }>()
   const [vendor, setVendor] = useState('')
   const [currency, setCurrency] = useState<CostCurrency>('CNY')
   const [manualAmounts, setManualAmounts] = useState<Record<string, string>>({})
   const active = useWorkspaceTabActivity()
   const dialog = useRef<HTMLDialogElement>(null)
+  const confirmation = useRef<HTMLDialogElement>(null)
   const titleId = useId()
+  const confirmationTitleId = useId()
   const latest = controls?.latest
   const destinations = controls?.destinations
   const reply = controls?.reply
@@ -75,16 +78,17 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   const requestedAt = waiting && latest ? new Date(latest.requestedAt) : null
   const sentAt = requestedAt && Number.isFinite(requestedAt.getTime()) ? requestedAt : null
   const ready = hasColors && missingColors.length === 0
-  const chinaSelected = destination === CHINA_TEAM_DESTINATION.value
+  const confirmingChina = pendingDestination?.value === CHINA_TEAM_DESTINATION.value
   const manualSelected = isDraftManualPriceDestination(destination)
   const sharedDestination = isSharedDraftPriceDestination(destination)
   const sharedLabel = destinations?.rows?.find(row => row.id === destination)?.name ??
     (manualPrice?.destination === destination ? manualPrice.destinationLabel : undefined)
-  const canSend = Boolean(chinaSelected && controls && ready && !readOnly && !waiting && !controls.loading && !controls.error)
+  const canSend = Boolean(confirmingChina && controls && ready && !readOnly && !waiting && !controls.loading && !controls.error)
   const canSaveManual = Boolean(manualSelected && controls?.saveManual && !readOnly && !waiting &&
     (!sharedDestination || sharedLabel) && colors.length &&
     colors.every(color => parseDraftManualAmount(manualAmounts[color.id] ?? '') !== null))
   const visible = open && active && (!readOnly || Boolean(latest || manualPrice))
+  const showingConfirmation = visible && !readOnly && Boolean(pendingDestination)
 
   useEffect(() => {
     if (!visible) return
@@ -93,12 +97,20 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
     return () => current?.close()
   }, [visible])
 
+  useEffect(() => {
+    if (!showingConfirmation) return
+    const current = confirmation.current
+    current?.showModal()
+    return () => current?.close()
+  }, [showingConfirmation])
+
   async function send() {
     if (!controls || !canSend || busy) return
     setBusy(true)
     setError('')
     try {
       await controls.request()
+      setPendingDestination(undefined)
       if (latest) setOpen(false)
     } catch (cause) {
       setError(draftPriceError(cause, '단가요청을 저장하지 못했습니다. 요청 상태를 확인하고 다시 시도해 주세요.'))
@@ -131,7 +143,13 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
 
   function openDetails(value = '') {
     selectDestination(value)
+    setPendingDestination(undefined)
     setOpen(true)
+  }
+
+  function askDestination(option: { value: string; label: string }) {
+    setError('')
+    setPendingDestination(option)
   }
 
   async function saveManual() {
@@ -212,14 +230,14 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
         className="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm overflow-y-auto rounded-xl border border-border bg-card p-5 text-left text-card-foreground shadow-xl backdrop:bg-black/40">
         <h2 id={titleId} className="font-semibold">{latest ? `${latest.draftNo} 단가요청` : '단가 요청'}</h2>
         {waiting && <p role="status" className="mt-2 text-sm text-muted-foreground">{latest?.round}차 요청이 접수되어 중국팀 회신을 기다리고 있습니다.</p>}
-        {!waiting && !readOnly && <DraftPriceDestinationPicker value={destination} onChange={selectDestination}
+        {!waiting && !readOnly && <DraftPriceDestinationPicker value={destination} onChange={askDestination}
           disabled={busy} shared={destinations?.rows ?? []} ready={Boolean(destinations?.ready)}
           error={destinations?.error} retry={destinations?.retry}
           onAdd={destinations ? async name => {
             setBusy(true)
             try {
               const row = await destinations.add(name)
-              selectDestination(row.id)
+              askDestination({ value: row.id, label: row.name })
             } finally {
               setBusy(false)
             }
@@ -247,12 +265,6 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
             })}
           </dl>
         </div>}
-        {!waiting && !readOnly && chinaSelected && <div className="mt-3 space-y-2 text-sm text-muted-foreground">
-          {!hasColors ? <p>컬러를 먼저 추가해 주세요.</p> : missingColors.length > 0 ? <>
-            <p className="break-words text-danger">미등록 컬러 · {missingColors.join(', ')}</p>
-            <p>컬러 문서에서 사진을 첨부하거나 None을 선택해 저장해 주세요.</p>
-          </> : <p>등록된 컬러의 단가를 중국팀에 {latest ? '다시 ' : ''}요청합니다.</p>}
-        </div>}
         {!waiting && !readOnly && manualSelected && <div className="mt-3 space-y-3 text-sm">
           <label className="grid gap-1.5">업체명 (선택)
             <Input value={vendor} maxLength={120} disabled={busy} onChange={event => setVendor(event.currentTarget.value)} />
@@ -275,17 +287,54 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
         </div>}
         {!manualSelected && controls?.loading && <p role="status" className="mt-2 text-sm text-muted-foreground">단가요청을 불러오는 중입니다.</p>}
         {!manualSelected && controls?.error && <p role="alert" className="mt-2 text-sm text-danger">{controls.error}</p>}
-        {error && <p role="alert" className="mt-2 text-sm text-danger">{error}</p>}
+        {error && !showingConfirmation && <p role="alert" className="mt-2 text-sm text-danger">{error}</p>}
         <div className="mt-4 flex flex-wrap justify-end gap-2">
           <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setOpen(false)}>닫기</Button>
           {!manualSelected && controls?.error && <Button type="button" size="sm" variant="outline" onClick={controls.retry}>다시 조회</Button>}
-          {canSend && <Button type="button" size="sm" disabled={busy} onClick={() => void send()}>
-            {busy ? '요청 저장 중' : '단가 요청 보내기'}
-          </Button>}
           {!waiting && !readOnly && manualSelected && <Button type="button" size="sm" disabled={busy || !canSaveManual} onClick={() => void saveManual()}>
             {busy ? '저장 중' : '단가 기록 저장'}
           </Button>}
         </div>
+        {showingConfirmation && pendingDestination && <dialog ref={confirmation} aria-labelledby={confirmationTitleId}
+          aria-describedby={`${confirmationTitleId}-description`}
+          className="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm overflow-y-auto rounded-xl border border-border bg-card p-5 text-card-foreground shadow-xl backdrop:bg-black/40"
+          onCancel={event => {
+            event.preventDefault()
+            event.stopPropagation()
+            if (!busy) {
+              setPendingDestination(undefined)
+              setError('')
+            }
+          }}>
+          <h2 id={confirmationTitleId} className="font-semibold">{confirmingChina ? '중국팀 단가 요청 확인' : '단가 수기 입력 확인'}</h2>
+          <p id={`${confirmationTitleId}-description`} className="mt-2 break-words text-sm text-muted-foreground">
+            <strong className="font-medium text-foreground">{pendingDestination.label}</strong>
+            {confirmingChina ? '의 컬러별 단가를 중국팀에 요청합니다.' : '의 컬러별 단가를 기획안에 직접 입력해 저장합니다.'}
+          </p>
+          {confirmingChina && <div className="mt-2 space-y-1 text-sm text-muted-foreground">
+            {waiting ? <p>이미 중국팀 회신을 기다리고 있습니다.</p>
+              : !hasColors ? <p>컬러를 먼저 추가해 주세요.</p>
+                : missingColors.length > 0 && <>
+                  <p className="break-words text-danger">미등록 컬러 · {missingColors.join(', ')}</p>
+                  <p>컬러 문서에서 사진을 첨부하거나 None을 선택해 저장해 주세요.</p>
+                </>}
+            {controls?.loading && <p role="status">단가요청을 불러오는 중입니다.</p>}
+            {controls?.error && <p role="alert" className="text-danger">{controls.error}</p>}
+          </div>}
+          {error && <p role="alert" className="mt-2 text-sm text-danger">{error}</p>}
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => {
+              setPendingDestination(undefined)
+              setError('')
+            }}>취소</Button>
+            {confirmingChina ? <Button type="button" size="sm" disabled={!canSend || busy} onClick={() => void send()}>
+              {busy ? '요청 저장 중' : '중국팀에 요청 보내기'}
+            </Button> : <Button type="button" size="sm" disabled={waiting || busy} onClick={() => {
+              if (pendingDestination.value !== destination) selectDestination(pendingDestination.value)
+              setPendingDestination(undefined)
+            }}>수기 입력 계속</Button>}
+          </div>
+        </dialog>}
       </dialog>, document.body,
     )}
   </>

@@ -415,7 +415,8 @@ try {
   const planningPriceDialog=page.getByRole('dialog')
   const sendChinaPriceRequest=async()=>{
     await planningPriceDialog.getByRole('button',{name:'CHINA (김웅사장님)',exact:true}).click()
-    await planningPriceDialog.getByRole('button',{name:'단가 요청 보내기',exact:true}).click()
+    await page.getByRole('dialog',{name:'중국팀 단가 요청 확인',exact:true})
+      .getByRole('button',{name:'중국팀에 요청 보내기',exact:true}).click()
   }
   await sendChinaPriceRequest()
   await planningPriceDialog.getByText('1차 요청이 접수되어 중국팀 회신을 기다리고 있습니다.').waitFor()

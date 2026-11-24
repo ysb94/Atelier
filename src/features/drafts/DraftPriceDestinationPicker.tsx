@@ -8,7 +8,7 @@ import type { SharedDraftPriceDestination } from '@/lib/supabase/draft-price-req
 
 export function DraftPriceDestinationPicker({ value, onChange, shared, disabled, onAdd, ready, error, retry }: {
   value: string
-  onChange: (value: string) => void
+  onChange: (option: { value: string; label: string }) => void
   shared: readonly SharedDraftPriceDestination[]
   disabled: boolean
   onAdd?: (name: string) => Promise<void>
@@ -21,8 +21,8 @@ export function DraftPriceDestinationPicker({ value, onChange, shared, disabled,
   const [addError, setAddError] = useState('')
   const choose = (option: { value: string; label: string }) => (
     <Button key={option.value} type="button" size="sm" variant={value === option.value ? 'default' : 'outline'}
-      aria-pressed={value === option.value} className="h-auto min-h-8 whitespace-normal text-left"
-      onClick={() => onChange(option.value)}>{option.label}</Button>
+      aria-pressed={value === option.value} aria-haspopup="dialog" className="h-auto min-h-8 whitespace-normal text-left"
+      onClick={() => onChange(option)}>{option.label}</Button>
   )
 
   return <fieldset className="mt-3 min-w-0 space-y-2" disabled={disabled}>
