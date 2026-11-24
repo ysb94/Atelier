@@ -6,6 +6,7 @@ import { DraftBoardView } from '@/features/drafts/DraftBoardView'
 import { DraftFolderBar, DraftFolderHeading } from '@/features/drafts/DraftFolderBar'
 import { FilterTabs } from '@/components/ui/filter-tabs'
 import { DraftFolderOpeningDate } from '@/features/drafts/DraftFolderOpeningDate'
+import { CHINA_EXTERNAL_DESTINATION } from '@/lib/drafts/sample-receipt'
 import { useDraftSheetLayout } from '@/features/drafts/draft-sheet-layout'
 import { useDraftTeamWork } from '@/features/drafts/use-draft-team-work'
 import { draftVisualBoardKey, useDraftVisualBoard } from '@/features/drafts/use-draft-visual-board'
@@ -89,8 +90,9 @@ function Fixture() {
     : phase === 'review' ? draft.specs.colorSampleRounds : []
   const singleName = phase === 'name-ko-only' || phase === 'name-en-only'
   const sampleOrders = draft.sampleWorkOrders ?? []
-  const sampleWorkOrders = phase === 'china-waiting'
-    ? [...sampleOrders, { ...newSampleWorkOrder(2), id: 'pending-china-sample', url: 'sample-2.pdf', originCountry: '중국', shippedAt: '2026-10-30T00:00:00Z' }]
+  const sampleDestination = phase === 'china-waiting' ? '중국' : phase === 'external-sample' ? CHINA_EXTERNAL_DESTINATION.value : null
+  const sampleWorkOrders = sampleDestination
+    ? [...sampleOrders, { ...newSampleWorkOrder(2), id: 'pending-sample', url: 'sample-2.pdf', originCountry: sampleDestination, shippedAt: '2026-10-30T00:00:00Z' }]
     : phase === 'new' ? [] : sampleOrders
   const shown = {
     ...draft,
@@ -147,6 +149,7 @@ function Fixture() {
       <option value="color-upload">컬러 지시서</option>
       <option value="color-done">첫 컬러 완료</option>
       <option value="china-waiting">중국팀 발송 대기</option>
+      <option value="external-sample">외부 업체 샘플</option>
       <option value="name-ko-only">한글명만 입력</option>
       <option value="name-en-only">영문명만 입력</option>
     </select>

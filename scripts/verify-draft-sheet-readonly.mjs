@@ -460,6 +460,14 @@ try{
  const [dispatchBox, revisionBox, receiptBox]=await Promise.all([dispatchPreview.boundingBox(),revisionPreview.boundingBox(),receiptPreview.boundingBox()])
  assert.ok(revisionBox.y+revisionBox.height<=receiptBox.y&&revisionBox.x>=dispatchBox.x+dispatchBox.width)
  assert.ok(Math.abs(revisionBox.x+revisionBox.width-receiptBox.x-receiptBox.width)<1,'SAMPLE actions share the right edge')
+ const dispatchTypography=element=>{
+   const {color,fontSize}=getComputedStyle(element)
+   return {color,fontSize}
+ }
+ const waitingTypography=await dispatchPreview.evaluate(dispatchTypography)
+ await phaseSelect.selectOption('external-sample')
+ const externalPreview=samplePreview.getByText('외부 업체 샘플 · 기록용',{exact:true})
+ assert.deepEqual(await externalPreview.evaluate(dispatchTypography),waitingTypography)
  await phaseSelect.selectOption('review')
  assert.equal(await row.getByRole('button',{name:'수정 작업지시서',exact:true}).count(),0)
  assert.equal(await confirmName.isEnabled(),true)

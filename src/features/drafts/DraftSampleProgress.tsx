@@ -42,6 +42,7 @@ export function DraftSampleProgress({ orders, kind = 'sample', joined = false, o
   return <div className={`draft-sample-progress${joined ? ' is-joined' : ''}`} aria-label={kind === 'color' ? '컬러샘플 등록·수령 이력' : '샘플 등록·수령 이력'}>
     {list.map(order => {
       const country = sampleCountry(order.originCountry || originCountry)
+      const isExternalSample = country.code === CHINA_EXTERNAL_DESTINATION.value
       const registered = order.receivedAt ? sampleTripSpanDays(order.shippedAt, order.receivedAt) : sampleElapsedDays(order.shippedAt)
       const received = sampleElapsedDays(order.receivedAt ?? null)
       const current = order.id === latest?.id
@@ -53,7 +54,7 @@ export function DraftSampleProgress({ orders, kind = 'sample', joined = false, o
         <div className={`draft-sample-route${showRevision ? ' has-revision-preview' : ''}`}>
           <div className="draft-sample-heading">
             <span className="draft-sample-country" title={country.label}>
-              {country.code === 'CN' || country.code === CHINA_EXTERNAL_DESTINATION.value ? country.label : country.code}
+              {country.code === 'CN' || isExternalSample ? country.label : country.code}
               <span aria-hidden="true"> | </span>
             </span>
             <a href={order.url!} download={order.name} title="작업지시서 내려받기">{label} {sampleHistoryDay(order.shippedAt).slice(2) || '등록일 기록 없음'}</a>
@@ -62,10 +63,10 @@ export function DraftSampleProgress({ orders, kind = 'sample', joined = false, o
               {`${order.receivedAt ? '' : '+'}${registered} day`}
             </span>}
           </div>
-          {!order.receivedAt && <p className={`draft-sample-dispatch${awaitingChinaDispatch ? ' is-china-waiting' : ''}`}>{country.code === 'CN'
+          {!order.receivedAt && <p className={`draft-sample-dispatch${awaitingChinaDispatch ? ' is-china-waiting' : isExternalSample ? ' is-external-sample' : ''}`}>{country.code === 'CN'
             ? order.shipped ? `${sampleHistoryDay(order.returnedAt).slice(2) || '날짜 기록 없음'} 중국 발송 완료` : '중국팀 제작·발송 대기'
             : country.code === 'PROMO' ? '프로모션 샘플 · 기록용'
-              : country.code === CHINA_EXTERNAL_DESTINATION.value ? '외부 업체 샘플 · 기록용' : '국내 샘플'}</p>}
+              : isExternalSample ? '외부 업체 샘플 · 기록용' : '국내 샘플'}</p>}
           {showReceipt && <div className="draft-sample-receipt-actions">
             {showRevision && <Button type="button" size="sm" variant="outline" className="draft-sample-revision-preview" disabled>수정 작업지시서</Button>}
             <Button type="button" size="sm" variant="outline" disabled={readOnly || saving || busy || !canReceiveSample(order, originCountry)}

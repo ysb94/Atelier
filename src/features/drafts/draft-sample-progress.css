@@ -25,7 +25,8 @@
 .draft-sheet-sample-cell .draft-sample-route{grid-template-columns:minmax(min-content,1fr) auto}
 .draft-sheet-sample-cell .draft-sample-heading{flex-wrap:nowrap;white-space:nowrap}
 .draft-sheet-sample-cell .draft-sample-heading>*{flex:none}
-.draft-sheet-sample-cell .draft-sample-dispatch.is-china-waiting{align-self:start;padding-inline-start:1rem;text-align:left;color:var(--color-blue-700);font-size:1.125em}
+.draft-sheet-sample-cell .draft-sample-dispatch:is(.is-china-waiting,.is-external-sample){color:var(--color-blue-700);font-size:1.125em}
+.draft-sheet-sample-cell .draft-sample-dispatch.is-china-waiting{align-self:start;padding-inline-start:1rem;text-align:left}
 .draft-sheet-sample-cell .draft-sample-revision-preview{display:inline-flex}
 .draft-sheet-sample-cell .has-revision-preview>.draft-sample-heading{grid-column:1}
 .draft-sheet-sample-cell .has-revision-preview>.draft-sample-receipt-actions{grid-row:1/span 2;align-self:start}
