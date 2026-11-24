@@ -39,23 +39,25 @@ export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, 
   useEffect(() => {
     const section = header.current
     const table = section?.closest('table')
-    if (!section || !table) return
+    const scroller = table?.closest<HTMLElement>('.draft-board-scroll')
+    if (!section || !table || !scroller) return
     const viewport = table.closest<HTMLElement>('[data-brand-page-scroll]')
-    const scrollRoot = viewport ?? window
+    const visualViewport = window.visualViewport
     let frame = 0
-    let offset = 0
+    let inset = 0
 
-    // The horizontal overflow wrapper also captures CSS sticky on the vertical axis.
-    // Move the actual header within the table so column widths and drag targets stay shared.
+    // The cells stick inside the horizontal scroller. Feed them the vertical workspace position
+    // while the unshifted section remains the reference for the table's natural header position.
     const update = () => {
       frame = 0
       const bounds = section.getBoundingClientRect()
-      const naturalTop = bounds.top - offset
-      const viewportTop = viewport ? Math.max(0, viewport.getBoundingClientRect().top + viewport.clientTop) : 0
-      const nextOffset = Math.max(0, Math.min(viewportTop, table.getBoundingClientRect().bottom - bounds.height) - naturalTop)
-      if (nextOffset === offset) return
-      offset = nextOffset
-      section.style.transform = offset ? `translateY(${offset}px)` : ''
+      const windowTop = visualViewport?.offsetTop ?? 0
+      const viewportTop = viewport ? Math.max(windowTop, viewport.getBoundingClientRect().top + viewport.clientTop) : windowTop
+      const pinnedTop = Math.min(viewportTop, table.getBoundingClientRect().bottom - bounds.height)
+      const nextInset = pinnedTop > bounds.top ? pinnedTop - scroller.getBoundingClientRect().top - scroller.clientTop : 0
+      if (nextInset === inset) return
+      inset = nextInset
+      section.style.setProperty('--draft-sheet-header-top', `${inset}px`)
     }
 
     function scheduleUpdate() {
@@ -65,18 +67,25 @@ export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, 
     const observer = new ResizeObserver(scheduleUpdate)
     observer.observe(table)
     observer.observe(section)
+    observer.observe(scroller)
     if (viewport) observer.observe(viewport)
-    const boardContent = table.closest('.draft-board-scroll')?.parentElement
+    const boardContent = scroller.parentElement
     if (boardContent && boardContent !== viewport) observer.observe(boardContent)
-    scrollRoot.addEventListener('scroll', scheduleUpdate, { passive: true })
+    viewport?.addEventListener('scroll', scheduleUpdate, { passive: true })
+    window.addEventListener('scroll', scheduleUpdate, { passive: true })
     window.addEventListener('resize', scheduleUpdate)
+    visualViewport?.addEventListener('scroll', scheduleUpdate, { passive: true })
+    visualViewport?.addEventListener('resize', scheduleUpdate)
     update()
     return () => {
-      scrollRoot.removeEventListener('scroll', scheduleUpdate)
+      viewport?.removeEventListener('scroll', scheduleUpdate)
+      window.removeEventListener('scroll', scheduleUpdate)
       window.removeEventListener('resize', scheduleUpdate)
+      visualViewport?.removeEventListener('scroll', scheduleUpdate)
+      visualViewport?.removeEventListener('resize', scheduleUpdate)
       observer.disconnect()
       cancelAnimationFrame(frame)
-      section.style.transform = ''
+      section.style.removeProperty('--draft-sheet-header-top')
     }
   }, [])
 
@@ -99,9 +108,10 @@ export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, 
     const current = drag.current
     const section = header.current
     const scroll = section?.closest<HTMLElement>('.draft-board-scroll')
-    if (!current?.active || !section || !scroll) return
+    const cell = section?.rows[0]?.cells[0]
+    if (!current?.active || !cell || !scroll) return
     const { left, right } = scroll.getBoundingClientRect()
-    const { top, bottom } = section.getBoundingClientRect()
+    const { top, bottom } = cell.getBoundingClientRect()
     const { x, y } = current
     if (x < left || x > right || y < top || y > bottom) return
 

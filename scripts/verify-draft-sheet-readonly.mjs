@@ -4,8 +4,10 @@ import path from 'node:path'
 import { build } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import {chromium} from 'playwright-core'
+import {chromium,webkit} from 'playwright-core'
 const root=process.cwd()
+const stickyHeaderOnly=process.argv.includes('--sticky-header-only')
+const useWebKit=process.argv.includes('--webkit')
 let server,browser
 const imageFixture='<svg xmlns="http://www.w3.org/2000/svg" width="16" height="12"><rect width="16" height="12" fill="red"/></svg>'
 const absoluteImagePath='/html-preview-absolute.svg'
@@ -36,6 +38,55 @@ const fixtureClient={
    })`
  },
 }
+
+async function verifyStickyHeader(page,origin){
+ await page.setViewportSize({width:1000,height:760})
+ await page.goto(origin+'/?sticky-header=1')
+ const scrollViewport=page.locator('[data-brand-page-scroll]')
+ const board=page.locator('.draft-board-scroll')
+ const firstHeader=board.locator('thead th').first()
+ await firstHeader.waitFor()
+ const headerTop=(await firstHeader.boundingBox()).y
+ const viewportTop=(await scrollViewport.boundingBox()).y
+ assert.ok(headerTop>viewportTop,'The header initially stays below the controls')
+ await scrollViewport.evaluate(node=>{node.scrollTop=250})
+ await page.waitForFunction(()=>{
+   const viewport=document.querySelector('[data-brand-page-scroll]')
+   const header=document.querySelector('.draft-board-table th').getBoundingClientRect()
+   return Math.abs(viewport.getBoundingClientRect().top+viewport.clientTop-header.top)<1
+ })
+ await scrollViewport.evaluate(node=>{node.scrollTop=560})
+ await board.evaluate(node=>{node.scrollLeft=330})
+ await page.waitForFunction(()=>{
+   const viewport=document.querySelector('[data-brand-page-scroll]')
+   const table=document.querySelector('.draft-board-table')
+   const headers=Array.from(table.tHead.rows[0].cells)
+   const header=headers[0].getBoundingClientRect()
+   const cells=Array.from(table.tBodies[0].rows[0].cells).filter(cell=>!cell.hidden)
+   const {left,right}=table.closest('.draft-board-scroll').getBoundingClientRect()
+   return Math.abs(viewport.getBoundingClientRect().top+viewport.clientTop-header.top)<1 && headers.every((cell,index)=>{
+     const bounds=cell.getBoundingClientRect()
+     return Math.abs(bounds.left-cells[index].getBoundingClientRect().left)<1&&Math.abs(bounds.top-header.top)<1
+   }) && [left+40,right-16].every(x=>document.elementFromPoint(x,header.top+10)?.closest('thead')===table.tHead)
+ })
+ assert.ok(await board.evaluate(node=>node.scrollLeft>0),'Horizontal scrolling stays independent of the pinned header')
+ await scrollViewport.evaluate(node=>{
+   const table=node.querySelector('.draft-board-table')
+   node.scrollTop+=table.getBoundingClientRect().bottom-node.getBoundingClientRect().top-table.tHead.getBoundingClientRect().height/2
+ })
+ await page.waitForFunction(()=>{
+   const table=document.querySelector('.draft-board-table')
+   const header=table.tHead.rows[0].cells[0].getBoundingClientRect()
+   const viewport=document.querySelector('[data-brand-page-scroll]').getBoundingClientRect()
+   return header.top<viewport.top && Math.abs(header.bottom-table.getBoundingClientRect().bottom)<=1
+ }).catch(async error=>{
+   const bounds=await firstHeader.evaluate(cell=>({header:cell.getBoundingClientRect().toJSON(),table:cell.closest('table').getBoundingClientRect().toJSON(),viewport:cell.closest('[data-brand-page-scroll]').getBoundingClientRect().toJSON()}))
+   throw new Error(`Pinned header table exit ${JSON.stringify(bounds)}`,{cause:error})
+ })
+ await scrollViewport.evaluate(node=>{node.scrollTop=0})
+ await page.waitForFunction(top=>Math.abs(document.querySelector('.draft-board-table th').getBoundingClientRect().top-top)<1,headerTop)
+}
+
 try{
  const bundle=await build({
    root,configFile:false,envFile:false,logLevel:'error',plugins:[react(),tailwindcss(),fixtureClient],
@@ -74,11 +125,16 @@ try{
  })
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
  const origin='http://127.0.0.1:'+server.address().port
- browser=await chromium.launch({executablePath:process.env.ATELIER_CHROMIUM_BIN||'C:/Program Files/Google/Chrome/Application/chrome.exe',
+ browser=useWebKit ? await webkit.launch({headless:true}) : await chromium.launch({executablePath:process.env.ATELIER_CHROMIUM_BIN||'C:/Program Files/Google/Chrome/Application/chrome.exe',
    headless:true,args:['--host-resolver-rules=MAP cdn2.auchee.com ~NOTFOUND']})
  const page=await browser.newPage({viewport:{width:1800,height:950},timezoneId:'UTC'}),errors=[]
  page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(15000)
  await page.route('**/*',route=>route.request().url().startsWith(origin+'/')||route.request().url().startsWith('data:')?route.continue():route.abort())
+ if(stickyHeaderOnly){
+   await verifyStickyHeader(page,origin)
+   assert.deepEqual(errors,[])
+   console.log(`draft sticky header (${useWebKit?'WebKit':'Chromium'}): alignment, stacking, horizontal scroll and table exit passed`)
+ }else{
  const mdDepartment = '919b2c44-afb6-4d7e-a5b8-b7203df9cef9'
  const visualDepartment = '7ac8b7a8-7f12-4f3e-a371-d2dac7e492f1'
  let directoryReads = 0
@@ -1531,45 +1587,7 @@ try{
  assert.equal(await mdRetail.inputValue(),'43,002','Switching views preserves unsaved table input')
  assert.deepEqual(await columnHeaders.allTextContents(),defaultHeaders.filter(header=>header!=='BRAND'))
 
- await page.setViewportSize({width:1000,height:760})
- await page.goto(origin+'/?sticky-header=1')
- const scrollViewport=page.locator('[data-brand-page-scroll]')
- const sheetHeader=board.locator('thead')
- await sheetHeader.waitFor()
- const headerTop=(await sheetHeader.boundingBox()).y
- const viewportTop=(await scrollViewport.boundingBox()).y
- assert.ok(headerTop > viewportTop,'The header initially stays in its normal position below the controls')
- await scrollViewport.evaluate(node=>{node.scrollTop=250})
- await page.waitForFunction(()=>{
-   const viewport=document.querySelector('[data-brand-page-scroll]').getBoundingClientRect()
-   const header=document.querySelector('.draft-board-table thead').getBoundingClientRect()
-   return Math.abs(viewport.top-header.top)<1
- })
- await scrollViewport.evaluate(node=>{node.scrollTop=560})
- await board.evaluate(node=>{node.scrollLeft=330})
- await page.waitForFunction(()=>{
-   const viewport=document.querySelector('[data-brand-page-scroll]').getBoundingClientRect()
-   const table=document.querySelector('.draft-board-table')
-   const header=table.tHead.getBoundingClientRect()
-   const cells=Array.from(table.tBodies[0].rows[0].cells).filter(cell=>!cell.hidden)
-   const x=document.querySelector('.draft-board-scroll').getBoundingClientRect().left+40
-   return Math.abs(viewport.top-header.top)<1 && Array.from(table.tHead.rows[0].cells).every((cell,index)=>
-     Math.abs(cell.getBoundingClientRect().left-cells[index].getBoundingClientRect().left)<1) &&
-     document.elementFromPoint(x,header.top+10)?.closest('thead')===table.tHead
- })
- assert.ok(await board.evaluate(node=>node.scrollLeft>0),'Horizontal scrolling is retained while the header is pinned')
- await scrollViewport.evaluate(node=>{
-   const table=node.querySelector('.draft-board-table')
-   node.scrollTop+=table.getBoundingClientRect().bottom-node.getBoundingClientRect().top-table.tHead.getBoundingClientRect().height/2
- })
- await page.waitForFunction(()=>{
-   const table=document.querySelector('.draft-board-table')
-   const header=table.tHead.getBoundingClientRect()
-   const viewport=document.querySelector('[data-brand-page-scroll]').getBoundingClientRect()
-   return header.top<viewport.top && Math.abs(header.bottom-table.getBoundingClientRect().bottom)<1
- })
- await scrollViewport.evaluate(node=>{node.scrollTop=0})
- await page.waitForFunction(top=>Math.abs(document.querySelector('.draft-board-table thead').getBoundingClientRect().top-top)<1,headerTop)
+ await verifyStickyHeader(page,origin)
  await page.goto(origin,{waitUntil:'domcontentloaded'})
  assert.equal(await mdCountry.textContent(),'미정')
  await priceCell.getByRole('button',{name:'단가 요청',exact:true}).click()
@@ -1702,4 +1720,5 @@ try{
  await destinationButton('CHINA (김웅사장님)').waitFor()
  assert.deepEqual(errors,[])
  console.log('draft-sheet-readonly: saved content, permissions, column dragging and visibility, sticky header, and responsive card view passed')
+ }
 }finally{await browser?.close();await server?.close()}
