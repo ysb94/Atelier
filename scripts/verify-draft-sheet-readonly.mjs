@@ -482,10 +482,16 @@ try{
  const colorBands=await row.locator(':scope > td:is(.draft-sheet-color-cell,.draft-sheet-information-cell,.draft-sheet-visual-cell,.draft-sheet-amd-cell)').evaluateAll(cells=>
    cells.map(cell=>Array.from(cell.querySelectorAll('.draft-color-line'),line=>{
      const {left,right}=line.getBoundingClientRect()
-     return {left,right,background:getComputedStyle(line).backgroundColor}
+     return {left,right,background:getComputedStyle(line).backgroundColor,cellBackground:getComputedStyle(cell).backgroundColor}
    })))
  assert.equal(colorBands.length,4)
  assert.notEqual(colorBands[0][0].background,colorBands[0][1].background)
+ for(const [first,second] of colorBands) {
+   assert.notEqual(first.background,first.cellBackground,'A single color line has visible shading')
+   assert.notEqual(second.background,second.cellBackground)
+ }
+ assert.deepEqual(await orderRows.evaluateAll(lines=>lines.map(line=>getComputedStyle(line).backgroundColor)),
+   colorBands[0].map(line=>line.background),'MD order quantities use the same color bands')
  for(let column=1;column<colorBands.length;column++) {
    assert.equal(colorBands[column].length,colorBands[column-1].length)
    colorBands[column].forEach((line,index)=>{
