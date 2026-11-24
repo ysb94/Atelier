@@ -1,10 +1,11 @@
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
-export function DraftTeamActions({ label, className, confirmText = '확정', locked, confirmed, editing, conflict, busy, onEdit, onSave, onReset }: {
+export function DraftTeamActions({ label, className, confirmText = '확정', showSave = true, locked, confirmed, editing, conflict, busy, onEdit, onSave, onReset }: {
   label: string
   className?: string
   confirmText?: string
+  showSave?: boolean
   locked: boolean
   confirmed: boolean
   editing: boolean
@@ -17,7 +18,7 @@ export function DraftTeamActions({ label, className, confirmText = '확정', loc
   return <div className={cn('draft-team-actions', className)} aria-busy={busy}>
     {conflict ? <Button type="button" variant="outline" size="sm" className="draft-team-control" disabled={locked}
       aria-label={`${label} 최신값 불러오기`} onClick={onReset}>다시 조회</Button> : <>
-      {!confirmed && <Button type="button" variant="outline" size="sm" className="draft-team-control"
+      {showSave && !confirmed && <Button type="button" variant="outline" size="sm" className="draft-team-control"
         aria-label={`${label} 저장`} disabled={locked || !editing} onClick={() => onSave(false)}>저장</Button>}
       <Button type="button" variant="outline" size="sm"
         className={cn('draft-team-control draft-team-confirm', confirmed && 'is-confirmed')}

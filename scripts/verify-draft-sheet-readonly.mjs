@@ -407,14 +407,57 @@ try{
  await mdCell.getByRole('button',{name:'예상입고일 : 26.11.23'}).waitFor()
  const blackOrder=mdCell.getByRole('textbox',{name:'블랙 발주 수량'})
  const ivoryOrder=mdCell.getByRole('textbox',{name:'아이보리 발주 수량'})
+ const cornerMarker=locator=>locator.evaluate(element=>{
+   const {content,top,left,width,height,backgroundColor,clipPath}=getComputedStyle(element,'::before')
+   return {content,top,left,width,height,backgroundColor,clipPath}
+ })
+ const isQuantityDraft=(request,color,amount)=>{
+   if(!request.url().endsWith('/rpc/save_draft_team_work'))return false
+   const {p_section,p_confirmed,p_payload}=request.postDataJSON()
+   return p_section==='md-quantity'&&!p_confirmed&&p_payload.quantities[color]===amount
+ }
+ const waitForQuantityDraft=(color,amount)=>page.waitForResponse(response=>isQuantityDraft(response.request(),color,amount))
+ assert.equal(await mdCell.getByRole('button',{name:'MD 수량 저장',exact:true}).count(),0)
  assert.equal(await blackOrder.inputValue(),'12')
  assert.equal(await ivoryOrder.inputValue(),'8')
- await blackOrder.fill('1000')
+ let releaseSave
+ const slowSave=new Promise(resolve=>{releaseSave=resolve})
+ await page.route('**/rpc/save_draft_team_work',async route=>{
+   if(isQuantityDraft(route.request(),'black','100'))await slowSave
+   await route.fallback()
+ })
+ const started=page.waitForRequest(request=>isQuantityDraft(request,'black','100'))
+ const temporaryOrder=waitForQuantityDraft('black','1000')
+ try {
+   await blackOrder.fill('100')
+   await started
+   await blackOrder.fill('1000')
+ } finally {
+   releaseSave()
+ }
  assert.equal(await blackOrder.inputValue(),'1,000')
  assert.equal(await ivoryOrder.inputValue(),'8','Order quantity is separate per color')
+ const orderMarker=await cornerMarker(blackOrder.locator('..'))
+ assert.match(orderMarker.clipPath,/^polygon\(/)
+ await temporaryOrder
+ assert.equal(teamRows.get('md-quantity').confirmed,false,'Typing only saves a temporary order')
+ const clearedOrder=waitForQuantityDraft('ivory','')
+ await ivoryOrder.clear()
+ assert.equal((await cornerMarker(ivoryOrder.locator('..'))).content,'none','An empty quantity has no temporary marker')
+ await clearedOrder
+ await ivoryOrder.fill('8')
  await mdCell.getByRole('button',{name:'MD 수량 확정',exact:true}).click()
  await mdCell.getByRole('button',{name:'MD 수량 수정',exact:true}).waitFor()
  assert.deepEqual(teamRows.get('md-quantity').payload,{quantities:{black:'1000',ivory:'8'},arrival:'2026-11-23'})
+ assert.equal(teamRows.get('md-quantity').confirmed,true)
+ assert.equal((await cornerMarker(blackOrder.locator('..'))).content,'none')
+ assert.equal(await blackOrder.getAttribute('aria-description'),'확정됨')
+ await page.mouse.move(0,0)
+ const confirmedBackground=locator=>locator.evaluate(async element=>{
+   await Promise.all(element.getAnimations().map(animation=>animation.finished))
+   return getComputedStyle(element).backgroundColor
+ })
+ assert.equal(await confirmedBackground(blackOrder),await confirmedBackground(mdCell.getByRole('button',{name:'MD 수량 수정',exact:true})))
 
  const registration=mdCell.getByRole('combobox',{name:'등록유형',exact:true})
  assert.deepEqual(await registration.locator('option').allTextContents(),['select','단품 등록','모음전 + 단품'])
@@ -803,12 +846,6 @@ try{
  const blackSizeButton=row.getByRole('button',{name:'size',exact:true}).first()
  const ivorySizeButton=row.getByRole('button',{name:'size',exact:true}).nth(1)
  assert.equal(await blackSizeButton.getAttribute('aria-description'),'기입 중')
- const cornerMarker=locator=>locator.evaluate(element=>{
-   const {content,top,left,width,height,backgroundColor,clipPath}=getComputedStyle(element,'::before')
-   return {content,top,left,width,height,backgroundColor,clipPath}
- })
- const orderMarker=await cornerMarker(blackOrder.locator('..'))
- assert.match(orderMarker.clipPath,/^polygon\(/)
  assert.equal(await blackSizeButton.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 255)')
  assert.deepEqual(await cornerMarker(blackSizeButton),orderMarker)
  assert.equal(await page.getByTestId('writes').textContent(),'0','입력만 하면 저장하지 않는다')

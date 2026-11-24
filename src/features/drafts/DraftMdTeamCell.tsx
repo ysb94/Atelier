@@ -8,6 +8,7 @@ import { RELEASE_MD_ID } from '@/lib/company/release-access'
 import { listOrgChartMembers } from '@/lib/supabase/profiles'
 import type { DraftTeamValues } from '@/lib/supabase/draft-team-work'
 import type { ProductDraft } from '@/lib/types'
+import { cn } from '@/lib/utils'
 import {
   DEFAULT_DRAFT_MD_OPTIONS, DRAFT_MD_OPTION_LABELS, DraftMdOptionsContext, initialDraftMdOptionId,
   type DraftMdOption, type DraftMdOptionField,
@@ -150,7 +151,12 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
   const partners = useDraftSabangnetPartners(draft.brandId, specialRelease)
   const partnerName = release.partnerId ? partners.names.get(release.partnerId) : undefined
   const releasePartners = withSavedDraftPartner(partners.options, release.partnerId, release.partner, partnerName)
-  const quantity = useDraftTeamSection(teamWork, 'md-quantity', { quantities: {}, arrival: '' }, readOnly)
+  function quantityPayload(value: DraftTeamValues['md-quantity']) {
+    return { ...value, quantities: Object.fromEntries(draft.colors.map(color => [
+      color.id, value.quantities[color.id] ?? color.orderQty?.toString() ?? '',
+    ])) }
+  }
+  const quantity = useDraftTeamSection(teamWork, 'md-quantity', { quantities: {}, arrival: '' }, readOnly, quantityPayload)
   const price = useDraftTeamSection(teamWork, 'md-price', {
     retail: draft.retailPrice?.toString() ?? '', discount: draft.discountPrice?.toString() ?? '', extraDiscount: '', auto: false,
   }, readOnly)
@@ -166,7 +172,7 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
   const listingConfirmed = listing.confirmed
   const listingLocked = listing.locked || listingConfirmed || listing.conflict
   const quantityConfirmed = quantity.confirmed && matchesTeamColors(quantity.value.quantities, draft.colors)
-  const quantityLocked = quantity.locked || quantityConfirmed || quantity.conflict
+  const quantityLocked = quantity.inputLocked || quantityConfirmed || quantity.conflict
   const priceLocked = price.locked || price.confirmed || price.conflict
   const optionsLocked = options.locked || options.confirmed || options.conflict
   const registerOptions = withSavedDraftPartner(catalog.lists.register, registerType || null, release.registerLabel)
@@ -190,9 +196,7 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
       expectedArrival = expectedDay.toISOString().slice(0, 10)
     }
     setEditingArrival(false)
-    void quantity.save(confirmed, { arrival: expectedArrival, quantities: Object.fromEntries(draft.colors.map(color => [
-      color.id, quantity.value.quantities[color.id] ?? color.orderQty?.toString() ?? '',
-    ])) })
+    void quantity.save(confirmed, quantityPayload({ ...quantity.value, arrival: expectedArrival }))
   }
 
   function setPrice(field: keyof Omit<DraftTeamValues['md-price'], 'auto'>, value: string) {
@@ -232,21 +236,24 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
       <div className="draft-md-layout">
         <div className="draft-md-order">
           <div className="draft-color-pad justify-center">
-            <DraftTeamActions label="MD 수량" confirmText="수량 확정" className="draft-md-quantity-actions"
+            <DraftTeamActions label="MD 수량" confirmText="수량 확정" showSave={false} className="draft-md-quantity-actions"
               locked={quantity.locked} confirmed={quantityConfirmed} busy={quantity.busy} editing={quantity.editing}
-              conflict={quantity.conflict} onEdit={() => quantity.change(value => value)} onSave={saveQuantities} onReset={quantity.reset} />
+              conflict={quantity.conflict} onEdit={quantity.startEdit} onSave={saveQuantities} onReset={quantity.reset} />
           </div>
           <div className="draft-color-lines">
             {draft.colors.map((color, index) => {
               const name = color.name.trim() || `컬러 ${index + 1}`
-              const amount = quantity.value.quantities[color.id] ?? color.orderQty?.toString() ?? ''
+              const entered = quantity.value.quantities[color.id]
+              const amount = entered ?? color.orderQty?.toString() ?? ''
+              const state = quantityConfirmed && amount ? 'is-confirmed' : entered ? 'is-temporary' : ''
               return (
                 <div key={color.id} className={`draft-color-line${index % 2 === 1 ? ' is-alt' : ''}`}>
-                  <label className="draft-md-order-quantity">
+                  <label className={cn('draft-md-order-quantity', state)}>
                     <Input inputMode="numeric" aria-label={`${name} 발주 수량`} disabled={quantityLocked}
+                      aria-description={state === 'is-confirmed' ? '확정됨' : state === 'is-temporary' ? '임시 입력' : undefined}
                       value={amount.replace(/\B(?=(\d{3})+(?!\d))/g, ',')} onChange={event => {
                         const next = event.currentTarget.value.replaceAll(',', '')
-                        if (/^\d{0,15}$/.test(next)) quantity.change(current => ({ ...current, quantities: { ...current.quantities, [color.id]: next } }))
+                        if (next !== amount && /^\d{0,15}$/.test(next)) quantity.change(current => ({ ...current, quantities: { ...current.quantities, [color.id]: next } }))
                       }} />
                   </label>
                 </div>
@@ -254,6 +261,8 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
             })}
           </div>
           <DraftTeamNotice error={quantity.error} conflict={quantity.conflict} />
+          {quantity.error && quantity.dirty && !quantity.conflict && !readOnly && <Button type="button" variant="outline" size="sm"
+            className="draft-team-control" disabled={quantity.locked} onClick={quantity.saveTemporary}>임시 저장 다시 시도</Button>}
         </div>
 
         <div className="draft-md-main">
