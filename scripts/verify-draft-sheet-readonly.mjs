@@ -642,6 +642,7 @@ try{
  await page.getByRole('dialog').getByRole('button',{name:'닫기',exact:true}).click()
  await mdCountry.filter({hasText:'CHINA (김웅사장님)'}).waitFor()
  const pricePending=priceCell.getByRole('button',{name:'단가 계산중',exact:true})
+ assert.equal(await priceCell.locator('.draft-color-line').count(),0,'The first request has no price bands before the reply')
  const sent=priceCell.locator('time')
  const elapsed=priceCell.getByText('+ 5days',{exact:true})
  assert.match(await sent.innerText(),/^10\. 29\.\n오후 04:46 발송$/)
@@ -680,19 +681,16 @@ try{
  assert.deepEqual(await priceRows.allTextContents(),['15','0'],'회신 단가는 현재 컬러 ID에 맞춰 표시한다')
  assert.deepEqual(await coordinates(priceRows),await coordinates(colorRows),'회신 단가와 컬러 행을 같은 높이에 배치한다')
  await assertOrderAlignment()
- const colorBands=await row.locator(':scope > td:is(.draft-sheet-color-cell,.draft-sheet-information-cell,.draft-sheet-visual-cell,.draft-sheet-amd-cell)').evaluateAll(cells=>
+ const colorBands=await row.locator(':scope > td:is(.draft-sheet-price-cell,.draft-sheet-color-cell,.draft-sheet-information-cell,.draft-sheet-visual-cell,.draft-sheet-amd-cell,.draft-sheet-md-cell)').evaluateAll(cells=>
    cells.map(cell=>Array.from(cell.querySelectorAll('.draft-color-line'),line=>{
      const {left,right}=line.getBoundingClientRect()
      return {left,right,background:getComputedStyle(line).backgroundColor,cellBackground:getComputedStyle(cell).backgroundColor}
    })))
- assert.equal(colorBands.length,4)
- assert.notEqual(colorBands[0][0].background,colorBands[0][1].background)
+ assert.equal(colorBands.length,6)
  for(const [first,second] of colorBands) {
    assert.notEqual(first.background,first.cellBackground,'A single color line has visible shading')
-   assert.notEqual(second.background,second.cellBackground)
+   assert.equal(second.background,'rgb(255, 255, 255)','The second color line is white')
  }
- assert.deepEqual(await orderRows.evaluateAll(lines=>lines.map(line=>getComputedStyle(line).backgroundColor)),
-   colorBands[0].map(line=>line.background),'MD order quantities use the same color bands')
  for(let column=1;column<colorBands.length;column++) {
    assert.equal(colorBands[column].length,colorBands[column-1].length)
    colorBands[column].forEach((line,index)=>{
