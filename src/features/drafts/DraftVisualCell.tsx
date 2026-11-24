@@ -38,8 +38,6 @@ export function DraftVisualCell({ colors, colorPhotos, readOnly, hidden, panelId
                 {label}
               </Button>
             })}
-            {index === 0 && <Button type="button" variant="outline" size="sm" className="draft-team-control draft-team-confirm"
-              aria-label="비주얼 팀 확정" disabled>확정</Button>}
           </div>
         })}
       </div>
