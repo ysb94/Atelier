@@ -28,6 +28,7 @@ export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, 
   const [drop, setDrop] = useState<DropTarget | null>(null)
   const columns = layout.filter(column => column.visible)
   const canMove = Boolean(onMoveColumn && columns.length > 1)
+  const hasSample = columns.some(column => column.id === 'sample')
   const width = columns.reduce((total, { id }) => total + DRAFT_SHEET_COLUMNS[id].width, 0)
 
   useEffect(() => () => {
@@ -159,7 +160,7 @@ export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, 
     if (target) onMoveColumn?.(current.id, target.id, target.after)
   }
 
-  return <table className="draft-board-table" style={{ width, '--draft-sheet-width': `${width}px` } as CSSProperties}>
+  return <table className="draft-board-table" style={{ width: hasSample ? 'max-content' : width, minWidth: width, '--draft-sheet-width': `${width}px` } as CSSProperties}>
     {caption && <caption className="sr-only">{caption}</caption>}
     <colgroup>{columns.map(({ id }) => <col key={id} className={`draft-column-${id}`}
       style={{ width: DRAFT_SHEET_COLUMNS[id].width }} />)}</colgroup>

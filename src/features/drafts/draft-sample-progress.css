@@ -19,6 +19,12 @@
 .draft-sample-passed{color:var(--color-primary);font-size:12px}
 .draft-sheet-row .draft-sheet-sample-cell p.draft-sheet-registered{margin-bottom:8px;color:var(--color-primary);font-weight:400}
 .draft-sheet-sample-cell :is(.draft-sample-heading,.draft-sample-dispatch,.draft-sample-received-elapsed){font-size:inherit}
+.draft-board-table:has(col.draft-column-sample){table-layout:auto}
+/* Only SAMPLE can increase the nominal column widths. */
+.draft-board-table:has(col.draft-column-sample) .draft-sheet-row>td:not(.draft-sheet-sample-cell){max-width:0}
+.draft-sheet-sample-cell .draft-sample-route{grid-template-columns:minmax(min-content,1fr) auto}
+.draft-sheet-sample-cell .draft-sample-heading{flex-wrap:nowrap;white-space:nowrap}
+.draft-sheet-sample-cell .draft-sample-heading>*{flex:none}
 .draft-sheet-sample-cell .draft-sample-dispatch.is-china-waiting{align-self:start;padding-inline-start:1rem;text-align:left;color:var(--color-blue-700);font-size:.5em}
 .draft-sheet-sample-cell .draft-sample-revision-preview{display:inline-flex}
 .draft-sheet-sample-cell .has-revision-preview>.draft-sample-heading{grid-column:1}

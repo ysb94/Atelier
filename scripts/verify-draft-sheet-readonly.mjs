@@ -510,6 +510,27 @@ try{
    return canvas.measureText(input.value).width<=input.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight)
  }),'A 13-digit barcode remains visible in the compact AMD column')
  await board.screenshot({path:'.tmp/draft-sheet-team-columns.png'})
+ const sampleColumnSizing=await row.locator('.draft-sheet-sample-cell .draft-sample-heading').first().evaluate(heading=>{
+   const table=heading.closest('table')
+   const widths=()=>Object.fromEntries(Array.from(table.querySelectorAll('th[data-column]'),header=>[
+     header.dataset.column,header.getBoundingClientRect().width,
+   ]))
+   const country=heading.querySelector('.draft-sample-country')
+   const label=country.firstChild
+   const original=label.textContent
+   const before=widths()
+   try {
+     label.textContent='아주 긴 샘플 진행처 이름 '.repeat(8)
+     const expanded=widths()
+     const fits=heading.lastElementChild.getBoundingClientRect().right<=heading.getBoundingClientRect().right+1
+       && country.scrollWidth<=country.clientWidth+1
+     return {before,expanded,fits}
+   } finally { label.textContent=original }
+ })
+ const {sample: sampleBefore,...otherWidths}=sampleColumnSizing.before
+ const {sample: sampleExpanded,...otherExpanded}=sampleColumnSizing.expanded
+ assert.ok(sampleExpanded>sampleBefore&&sampleColumnSizing.fits,'SAMPLE grows to show the whole supplier, date, and elapsed days')
+ assert.deepEqual(otherExpanded,otherWidths,'Long SAMPLE text leaves the other columns at their configured widths')
  await page.setViewportSize({width:1800,height:950})
  assert.equal(Math.round((await mdCell.boundingBox()).width),490,'MD TEAM uses the compact column width')
  const mdSections=await mdCell.getByRole('region').evaluateAll(nodes=>nodes.map(node=>Math.round(node.getBoundingClientRect().height)))
