@@ -6,28 +6,41 @@ import {createServer} from 'node:http'
 import {chromium} from 'playwright-core'
 const root=process.cwd(),dir=path.join(root,'.tmp','my-home-notifications-browser')
 await mkdir(dir,{recursive:true})
-await writeFile(path.join(dir,'auth.ts'),`export const useAuth=()=>({profile:{id:'staff',companyId:sessionStorage.getItem('operations-case')?'e0000000-0000-4000-8000-000000000001':'company',departmentId:sessionStorage.getItem('operations-case')?'2e49ef43-75b9-4c89-b42d-9fd50ad9087b':null,status:'active'},session:{user:{id:'staff'}}});`)
+await writeFile(path.join(dir,'auth.ts'),`export const useAuth=()=>({profile:{id:'staff',companyId:sessionStorage.getItem('operations-case')||sessionStorage.getItem('visual-case')?'e0000000-0000-4000-8000-000000000001':'company',departmentId:sessionStorage.getItem('operations-case')?'2e49ef43-75b9-4c89-b42d-9fd50ad9087b':sessionStorage.getItem('visual-case')?'7ac8b7a8-7f12-4f3e-a371-d2dac7e492f1':null,status:'active'},session:{user:{id:'staff'}}});`)
 await writeFile(path.join(dir,'client.ts'),`
 let read=false,done=false,fail=false;
 let meeting=sessionStorage.getItem('meeting-case')||'',meetingRead=sessionStorage.getItem('meeting-read')==='true';export const audit=[];
 const meetingRows=()=>[{id:'series',status:'in_progress',host:{id:meeting==='member'?'other':'staff',name:'호스트'},members:[{id:'staff',name:'직원'}],rounds:[{id:'round',startsAt:'2030-01-07T10:00',scheduleVersion:1,responses:[]}]}];
 const meetingNotice=()=>({id:'notice',kind:'meeting_invitation',title:meeting==='member'?'회의 참석 요청':meeting==='host-all'?'전원 참석 가능':'참석 불가 발생',body:'멤버 응답 현황',href:'/settings/profile?part=meetings&meeting=series&round=round',createdAt:'2026-11-02T00:00:00Z',readAt:meetingRead?'2026-11-02T00:01:00Z':null,meeting:{role:meeting==='member'?'member':'host',roundId:'round',scheduleVersion:1,status:meeting==='member'?'pending':meeting==='host-all'?'available':'unavailable'}});
 const operations = sessionStorage.getItem('operations-case')==='true';
+const visual = sessionStorage.getItem('visual-case')==='true';
+const draftNotices = [
+  {id:'10000000-0000-4000-8000-000000000001',field:'size',changes:[{color:'검정',status:'confirmed',fields:['weight']}],saved_values:[{size:'W=300;D=120;H=210;STRAP=;UNIT=mm',weight:'250g'}]},
+  {id:'10000000-0000-4000-8000-000000000002',field:'fabric',changes:[{color:'아이보리',status:'reopened',fields:[]}],saved_values:[{fabric:'면'}]},
+].map(row=>({...row,draft_id:'draft',draft_no:'PL-TEST',draft_name:'알림 기획안',created_at:'2026-11-24T00:00:00Z',read_at:null}));
+function draftNoticeQuery() {
+  let id, single=false;
+  const query={select:()=>query,eq:(_field,value)=>{id=value;return query},order:()=>query,limit:()=>query,abortSignal:()=>query,
+    maybeSingle:()=>{single=true;return query},then:resolve=>Promise.resolve({
+      data:single?draftNotices.find(row=>row.id===id)??null:draftNotices.map(row=>({...row})),error:null,
+    }).then(resolve)};
+  return query;
+}
 const advance = {id:'advance-one',employee_id:'requester',employee_name:'선사용 직원',department_id:'planning',department_name:'기획',kind:'annual',from_date:'2026-11-02',to_date:'2026-11-04',start_time:'09:00',end_time:'18:00',note:'가족 일정으로 3일 사용 요청',place:'',advance_requested:true,created_at:'2026-11-02T00:00:00Z',status:'pending',decision_note:null};
 const row=()=>operations?({...advance,event_key:'request-approval:'+advance.id,entity_id:advance.id,event_type:'approval',tab:'operations-leave',title:'선사용 직원 · 연차 선사용 승인 요청',note:'',action_needed:!done,current:!done,read_at:read?'2026-11-02T00:01:00Z':null}):({event_key:done?'request-result:one':'request-approval:one',entity_id:'one',created_at:'2026-11-02T00:00:00Z',event_type:done?'result':'approval',tab:done?'overtime':'approvals',kind:'overtime',employee_name:'검증 직원',from_date:'2026-11-02',to_date:'2026-11-02',start_time:'18:00',end_time:'19:00',note:'검증용 야근 신청',decision_note:done?'확인했습니다':null,action_needed:!done,status:done?'approved':'pending',read_at:read?'2026-11-02T00:01:00Z':null});
 export function fixture(action){if(action.startsWith('host')||action==='member'){meeting=action;meetingRead=false;fail=false;sessionStorage.setItem('meeting-case',meeting);sessionStorage.removeItem('meeting-read')}else if(action==='reset'){read=false;done=false;meeting='';sessionStorage.removeItem('meeting-case')}else if(action==='complete'){done=true;read=false}else if(action==='fail'){fail=!fail}}
-export function getSupabase(){return {rpc:async(name,args)=>{audit.push(name);if(name==='employee_leave_advances')return {data:{ready:true,approvalMode:'operations',employees:[],events:[]},error:null};if(name==='list_my_meeting_invitations')return {data:meeting?[meetingNotice()]:[],error:null};if(name==='list_company_meetings')return {data:meeting?meetingRows():[],error:null};if(name==='read_meeting_notice_version'){if(fail)return {data:null,error:{message:'의도한 읽음 실패'}};meetingRead=true;sessionStorage.setItem('meeting-read','true');return {data:null,error:null}}if(name==='list_my_home_work_notifications'||name==='list_my_managed_work_notifications')return {data:meeting?[]:[row()],error:null};if(name==='read_my_home_work_notification'){if(fail)return {data:null,error:{message:'의도한 읽음 실패'}};read=true;return {data:null,error:null}}return {data:[],error:null}},from:table=>{if(operations&&table==='company_leave_requests'){
+export function getSupabase(){return {rpc:async(name,args)=>{audit.push(name);if(name==='read_draft_information_notice'){ const item=draftNotices.find(row=>row.id===args.p_id);if(fail)return {data:null,error:{message:'의도한 읽음 실패'}}; if(item)item.read_at='2026-11-24T00:01:00Z';return {data:item?.read_at??null,error:null} }if(name==='employee_leave_advances')return {data:{ready:true,approvalMode:'operations',employees:[],events:[]},error:null};if(name==='list_my_meeting_invitations')return {data:meeting?[meetingNotice()]:[],error:null};if(name==='list_company_meetings')return {data:meeting?meetingRows():[],error:null};if(name==='read_meeting_notice_version'){if(fail)return {data:null,error:{message:'의도한 읽음 실패'}};meetingRead=true;sessionStorage.setItem('meeting-read','true');return {data:null,error:null}}if(name==='list_my_home_work_notifications'||name==='list_my_managed_work_notifications')return {data:meeting||visual?[]:[row()],error:null};if(name==='read_my_home_work_notification'){if(fail)return {data:null,error:{message:'의도한 읽음 실패'}};read=true;return {data:null,error:null}}return {data:[],error:null}},from:table=>{if(visual&&table==='draft_information_notices')return draftNoticeQuery();if(operations&&table==='company_leave_requests'){
 const q={select:()=>q,eq:()=>q,order:()=>q,range:()=>q,update:change=>{audit.push('advance-decision');done=true;Object.assign(advance,change,{decided_by_name:'운영지원 담당자'});return q},maybeSingle:async()=>({data:advance,error:null}),then:ok=>Promise.resolve({data:[{...advance}],error:null}).then(ok)};return q;
 }const q={select:()=>q,eq:()=>q,order:()=>q,like:()=>q,then:(ok)=>Promise.resolve({data:[],error:null}).then(ok)};return q}}}
 export const isSupabaseConfigured=()=>true;
 `)
 await writeFile(path.join(dir,'entry.tsx'),`
 import React,{useState} from 'react';import{createRoot}from'react-dom/client';import{QueryClient,QueryClientProvider}from'@tanstack/react-query';import{BrowserRouter,useNavigate}from'react-router-dom';
-import{MyHomeNotificationList,MyHomeWorkNoticeDetail}from'@/features/settings/MyHomeNotificationList';import{useMyHomeNotifications,useReadMyHomeNotification}from'@/features/settings/use-my-home-notifications';import{useSearchParams}from'react-router-dom';import{NotificationPanel}from'@/components/layout/NotificationPanel';import{fixture,audit}from'./client';
+import{MyHomeNotificationList,MyHomeWorkNoticeDetail,VisualWorkflowNotificationList}from'@/features/settings/MyHomeNotificationList';import{useMyHomeNotifications,useReadMyHomeNotification}from'@/features/settings/use-my-home-notifications';import{useSearchParams}from'react-router-dom';import{NotificationPanel}from'@/components/layout/NotificationPanel';import{fixture,audit}from'./client';
 import{LeavePanel}from'@/features/operations-support/LeavePanel';import{useLocation}from'react-router-dom';
 const cache=new QueryClient({defaultOptions:{queries:{retry:false,staleTime:Infinity}}});
 function MeetingDetail(){const read=useReadMyHomeNotification('meeting','round','1',true);return <section aria-label="회의 내용"><h2>멤버 응답 현황</h2>{read.error&&<button onClick={read.retry}>회의 읽음 재시도</button>}</section>}
-function Screen(){const notices=useMyHomeNotifications();const go=useNavigate();const location=useLocation();const[params]=useSearchParams();const[tab,setTab]=useState('approvals');window.__noticeCalls=()=>audit;window.__meetingCase=async mode=>{go('/settings/profile?part=meetings');setTab('meetings');fixture(mode);await cache.invalidateQueries()};return <main><h1>My home 알림 통합 검증</h1><output aria-label="상태">안 읽음 {notices.items.filter(x=>!x.readAt).length} / 처리 {new Set(notices.items.flatMap(x=>x.action?[x.action.key]:[])).size}</output><button onClick={()=>setTab('approvals')}>승인 탭</button><button onClick={()=>setTab('overtime')}>야근 탭</button><button onClick={async()=>{fixture('complete');await cache.invalidateQueries({queryKey:['my-home-work-notices']})}}>서버 승인</button><button onClick={async()=>{fixture('reset');await cache.invalidateQueries({queryKey:['my-home-work-notices']})}}>초기화</button><button onClick={()=>fixture('fail')}>실패 전환</button><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:24,padding:24}}><section>{location.pathname==='/operations-support/leave'?<LeavePanel/>:<><MyHomeNotificationList key={tab} tab={tab}/><MyHomeWorkNoticeDetail/>{params.has('meeting')&&<MeetingDetail/>}</>}</section><NotificationPanel titleId="bell-title" items={notices.items} onOpen={item=>go(item.href)} onClose={()=>{}}/></div></main>}
+function Screen(){const notices=useMyHomeNotifications();const go=useNavigate();const location=useLocation();const[params]=useSearchParams();const[tab,setTab]=useState('approvals');window.__noticeCalls=()=>audit;window.__meetingCase=async mode=>{go('/settings/profile?part=meetings');setTab('meetings');fixture(mode);await cache.invalidateQueries()};return <main><h1>My home 알림 통합 검증</h1><output aria-label="상태">안 읽음 {notices.items.filter(x=>!x.readAt).length} / 처리 {new Set(notices.items.flatMap(x=>x.action?[x.action.key]:[])).size}</output><button onClick={()=>setTab('approvals')}>승인 탭</button><button onClick={()=>setTab('overtime')}>야근 탭</button><button onClick={async()=>{fixture('complete');await cache.invalidateQueries({queryKey:['my-home-work-notices']})}}>서버 승인</button><button onClick={async()=>{fixture('reset');await cache.invalidateQueries({queryKey:['my-home-work-notices']})}}>초기화</button><button onClick={()=>fixture('fail')}>실패 전환</button><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:24,padding:24}}><section>{location.pathname==='/operations-support/leave'?<LeavePanel/>:sessionStorage.getItem('visual-case') ? <VisualWorkflowNotificationList/> : <><MyHomeNotificationList key={tab} tab={tab}/><MyHomeWorkNoticeDetail/>{params.has('meeting')&&<MeetingDetail/>}</>}</section><NotificationPanel titleId="bell-title" items={notices.items} onOpen={item=>go(item.href)} onClose={()=>{}}/></div></main>}
 createRoot(document.getElementById('root')).render(<QueryClientProvider client={cache}><BrowserRouter><Screen/></BrowserRouter></QueryClientProvider>);
 `)
 await build({entryPoints:[path.join(dir,'entry.tsx')],outfile:path.join(dir,'app.js'),bundle:true,format:'esm',plugins:[{name:'mock-relative-client',setup(b){b.onResolve({filter:/^\./},args=>{const target=path.resolve(path.dirname(args.importer),args.path).replace(/\.tsx?$/,'');if(target===path.join(root,'src/lib/supabase/client'))return {path:path.join(dir,'client.ts')};if(target===path.join(root,'src/lib/supabase/auth'))return {path:path.join(dir,'auth.ts')}})}}],define:{'import.meta.env':'{}'},jsx:'automatic',alias:{'@/lib/supabase/auth':path.join(dir,'auth.ts'),'@/lib/supabase/client':path.join(dir,'client.ts'),'@':path.join(root,'src')},logLevel:'silent'})
@@ -101,6 +114,26 @@ await status.filter({hasText:'안 읽음 0 / 처리 0'}).waitFor()
 await review.getByText('승인되어 직원의 달력에 휴가가 등록됐습니다.',{exact:true}).waitFor()
 assert.equal(await page.evaluate(()=>window.__noticeCalls().filter(name=>name==='advance-decision').length),1)
 await page.screenshot({path:path.join(dir,'verified.png'),fullPage:true})
+await page.evaluate(()=>{
+ sessionStorage.removeItem('operations-case')
+ sessionStorage.setItem('visual-case','true')
+})
+await page.goto(origin)
+await status.filter({hasText:'안 읽음 2 / 처리 0'}).waitFor()
+await page.getByRole('button',{name:'실패 전환',exact:true}).click()
+await bell.getByRole('button').filter({hasText:'사이즈 확정'}).click()
+const information=page.getByRole('dialog',{name:'기획안 정보 변경 알림'})
+await information.getByText('250g',{exact:true}).waitFor()
+await information.getByText('읽음 기록을 저장하지 못했습니다.').waitFor()
+assert.match(await status.textContent(),/안 읽음 2 \/ 처리 0/)
+await page.getByRole('button',{name:'실패 전환',exact:true}).click()
+await information.getByRole('button',{name:'다시 시도',exact:true}).click()
+await status.filter({hasText:'안 읽음 1 / 처리 0'}).waitFor()
+assert.equal(await tab.getByText('사이즈 확정 · 검정',{exact:true}).count(),0)
+await tab.getByRole('button').filter({hasText:'패브릭 확정 해제'}).click()
+await information.getByText('면',{exact:true}).waitFor()
+await status.filter({hasText:'안 읽음 0 / 처리 0'}).waitFor()
+assert.equal(await bell.getByText('패브릭 확정 해제 · 아이보리',{exact:true}).count(),0)
 assert.deepEqual(errors,[])
-console.info('My home browser: shared reads and pending counts, meeting and approval results, Operations Support leave request detail and approval passed')
+console.info('My home browser: shared reads, pending counts, meeting and approval results, Operations Support leave and Visual INFORMATION notice details passed')
 }finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve))}

@@ -10,7 +10,7 @@ import { draftVisualBoardKey, useDraftVisualBoard } from '@/features/drafts/use-
 import { useDraftSpecDocumentTemporary } from '@/features/drafts/use-draft-spec-document-temporary'
 import { useDraftPriceDestinations } from '@/features/drafts/use-draft-price-destinations'
 import { emptyDraftInput, newColorRow } from '@/lib/drafts/empty-draft'
-import { normalizeColorSpecs, writeColorSpec, type SaveColorSpec } from '@/lib/drafts/color-spec'
+import { normalizeColorSpecs, reopenDraftInformation, writeColorSpec, type ReopenDraftInformation, type SaveColorSpec } from '@/lib/drafts/color-spec'
 import { normalizeDraftManualPrice } from '@/lib/drafts/manual-price'
 import { newSampleWorkOrder } from '@/lib/drafts/sample-work-order'
 import type { Brand, ProductDraft } from '@/lib/types'
@@ -103,6 +103,10 @@ function Fixture() {
     clearTemporary(revision)
     await write()
   }
+  const reopenInformation: ReopenDraftInformation = async (field, colorId) => {
+    setDraft(current => ({ ...current, specs: reopenDraftInformation(current.specs, field, colorId) }))
+    await write()
+  }
   const saveSpec: SaveColorSpec = async (colorId, changes, applyAll, field, revision) => {
     setSavedSpec(JSON.stringify([colorId, changes, applyAll]))
     setDraft(current => {
@@ -169,7 +173,7 @@ function Fixture() {
           setDraft(current => ({ ...current, specs: { ...current.specs, manualPrice } }))
         },
       }}
-      onOpen={()=>setOpened(n=>n+1)} onSaveColors={saveColors} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={saveSpec} onSaveSpecDocument={saveDocument} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/>} />
+      onOpen={()=>setOpened(n=>n+1)} onSaveColors={saveColors} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={saveSpec} onSaveSpecDocument={saveDocument} onReopenInformation={reopenInformation} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/>} />
     {stickyHeader && <div aria-hidden="true" className="h-[550px]" />}
   </main>
 }

@@ -11,7 +11,7 @@ import { MAX_DRAFT_COLORS } from '@/lib/drafts/empty-draft'
 import {
   DRAFT_INFORMATION_LABELS, colorInformationEditKey, documentEditKey, hasInformationEdits, informationEditText,
   isColorInformationConfirmed, isSpecDocumentConfirmed, resolveColorSpec, type ColorInformationField,
-  type InformationDrafts, type SaveColorSpec, type UpdateInformationEdits,
+  type InformationDrafts, type ReopenDraftInformation, type SaveColorSpec, type UpdateInformationEdits,
 } from '@/lib/drafts/color-spec'
 import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
 import { colorSampleLineStatus, resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
@@ -786,7 +786,7 @@ function DraftReleaseFolderSelect({ draft, folders, readOnly, onChange }: {
   </>
 }
 
-export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout = DEFAULT_DRAFT_SHEET_LAYOUT, brand, releaseFolders, onChangeReleaseFolder, price, teamWork, visualBoard, informationEditorId, informationTemporaryStore, specDocumentTemporarySource, onOpen, onNextSample, onSaveColors, onSharedPhotoChange, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout = DEFAULT_DRAFT_SHEET_LAYOUT, brand, releaseFolders, onChangeReleaseFolder, price, teamWork, visualBoard, informationEditorId, informationTemporaryStore, specDocumentTemporarySource, onOpen, onNextSample, onSaveColors, onSharedPhotoChange, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onReopenInformation, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
   readOnly?: boolean
   mode?: DraftBoardMode
   layout?: DraftSheetLayout
@@ -804,6 +804,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   onRenameColor: (colorId: string, name: string) => Promise<void>
   onSaveSheetValue: SaveColorSpec
   onSaveSpecDocument: (value: string, temporaryRevision?: string) => Promise<void>
+  onReopenInformation?: ReopenDraftInformation
   informationEditorId?: string
   informationTemporaryStore?: DraftInformationTemporaryStore
   specDocumentTemporarySource?: string
@@ -1123,6 +1124,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
         onSave={onSaveSheetValue}
         onSharedPhotoChange={onSharedPhotoChange}
         onSaveSpecDocument={onSaveSpecDocument}
+        onReopenInformation={onReopenInformation}
         onFieldChange={field => setInformation(current => current && { ...current, field })}
         onClose={closeInformation} />
     )}

@@ -3,6 +3,7 @@ import { parseSizeSpecInput } from './spec-format'
 
 export type ColorSpecField = Exclude<keyof DraftColorSpec, 'sizeConfirmed' | 'fabricConfirmed'>
 export type DraftInformationField = 'size' | 'fabric' | 'specDoc'
+export type ReopenDraftInformation = (field: DraftInformationField, colorId?: string) => Promise<void>
 export type ColorInformationField = Exclude<DraftInformationField, 'specDoc'>
 export type ResolvedDraftColorSpec = DraftColorSpec & { coating: string }
 export type ColorSpecValues = Partial<Pick<DraftColorSpec, ColorSpecField>>
@@ -61,6 +62,14 @@ export function isColorInformationConfirmed(specs: DraftSpecs, spec: ResolvedDra
 
 export function isSpecDocumentConfirmed(specs: DraftSpecs) {
   return specs.specDocumentConfirmed ?? (specs.size.confirmed && specs.fabric.confirmed && specs.weight.confirmed)
+}
+
+export function reopenDraftInformation(specs: DraftSpecs, field: DraftInformationField, colorId?: string): DraftSpecs {
+  if (field === 'specDoc') return { ...specs, specDocumentConfirmed: false }
+  if (!colorId) throw new Error('컬러를 찾지 못했습니다.')
+  const current = specs.colorSpecs[colorId] ?? colorSpecFromProduct(specs)
+  const confirmation = field === 'size' ? 'sizeConfirmed' : 'fabricConfirmed'
+  return { ...specs, colorSpecs: { ...specs.colorSpecs, [colorId]: { ...current, [confirmation]: false } } }
 }
 
 export function writeColorSpec(

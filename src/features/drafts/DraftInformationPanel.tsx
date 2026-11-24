@@ -11,7 +11,7 @@ import { resolveDraftVisualPhoto } from '@/lib/drafts/color-photo'
 import {
   DRAFT_INFORMATION_LABELS, colorInformationEditKey, documentEditKey, informationEditText, isColorInformationConfirmed,
   isSpecDocumentConfirmed, resolveColorSpec, type ColorInformationField, type ColorSpecField, type ColorSpecValues,
-  type InformationDrafts, type InformationEdits, type ResolvedDraftColorSpec, type SaveColorSpec, type UpdateInformationEdits,
+  type InformationDrafts, type InformationEdits, type ReopenDraftInformation, type ResolvedDraftColorSpec, type SaveColorSpec, type UpdateInformationEdits,
 } from '@/lib/drafts/color-spec'
 import { formatSizeSpec, parseSizeSpec, type SizeParts } from '@/lib/drafts/spec-format'
 import type { DraftColorRow, ProductDraft } from '@/lib/types'
@@ -180,11 +180,12 @@ function SizeFields({ text, weight, note, locked, onChange }: {
   )
 }
 
-function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, showWriteActions, highlighted, canApplyBelow, edits, saved, onEditsChange, onSave, onSaveTemporary }: {
+function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, showWriteActions, highlighted, canApplyBelow, edits, saved, onEditsChange, onSave, onSaveTemporary, onReopen }: {
   color: DraftColorRow; photo?: string | null; field: ColorInformationField; spec: ResolvedDraftColorSpec; confirmed: boolean
   readOnly: boolean; showWriteActions: boolean; highlighted: boolean; canApplyBelow: boolean; onSave: SaveColorSpec
   edits?: InformationEdits; onEditsChange: (update: UpdateInformationEdits) => void
   saved?: DraftInformationTemporary; onSaveTemporary?: SaveTemporaryInformation
+  onReopen?: () => Promise<void>
 }) {
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -255,6 +256,15 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
     }
   }
 
+  async function reopen() {
+    if (locked || !onReopen) return
+    setBusy(true)
+    setError('')
+    try { await onReopen() }
+    catch (err) { setError(err instanceof Error ? err.message : '확정을 해제하지 못했습니다.') }
+    finally { setBusy(false) }
+  }
+
   return (
     <form aria-label={`${colorName} ${fieldLabel}`} onSubmit={event => {
       event.preventDefault()
@@ -310,7 +320,13 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
           <span aria-hidden="true" className={cn('size-3 rounded-sm border border-border', isConfirmed && 'border-primary bg-primary')} />
         </span>
         {showWriteActions && (showModify
-          ? <Button size="sm" type="button" variant="outline" disabled={locked} onClick={() => setEditing(true)}>수정</Button>
+          ? <div className="flex flex-wrap justify-end gap-2">
+            <Button size="sm" type="button" variant="outline" disabled={locked} onClick={() => setEditing(true)}>수정</Button>
+            {onReopen && <Button size="sm" type="button" variant="outline" disabled={locked} onClick={event => {
+              event.preventDefault()
+              void reopen()
+            }}>확정 해제</Button>}
+          </div>
           : <div className="flex flex-wrap justify-end gap-2">
             <Button size="sm" type="button" variant="outline" disabled={locked || !onSaveTemporary || !temporaryChanged} onClick={() => void saveTemporary()}>임시 저장</Button>
             <Button size="sm" type="submit" disabled={locked || !canConfirm}>{busy ? '저장 중…' : '확정'}</Button>
@@ -321,10 +337,11 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
   )
 }
 
-function SpecDocumentForm({ draft, readOnly, showWriteActions, edits, saved, onEditChange, onSave, onSaveTemporary }: {
+function SpecDocumentForm({ draft, readOnly, showWriteActions, edits, saved, onEditChange, onSave, onSaveTemporary, onReopen }: {
   draft: ProductDraft; readOnly: boolean; showWriteActions: boolean; edits: InformationEdits | undefined
   onEditChange: (update: UpdateInformationEdits) => void; onSave: (value: string, temporaryRevision?: string) => Promise<void>
   saved?: DraftInformationTemporary; onSaveTemporary?: SaveTemporaryInformation
+  onReopen?: () => Promise<void>
 }) {
   const value = draft.specs.coating.note
   const [busy, setBusy] = useState(false)
@@ -354,6 +371,15 @@ function SpecDocumentForm({ draft, readOnly, showWriteActions, edits, saved, onE
     } finally {
       setBusy(false)
     }
+  }
+
+  async function reopen() {
+    if (locked || !onReopen) return
+    setBusy(true)
+    setError('')
+    try { await onReopen() }
+    catch (err) { setError(err instanceof Error ? err.message : '확정을 해제하지 못했습니다.') }
+    finally { setBusy(false) }
   }
 
   return (
@@ -399,7 +425,13 @@ function SpecDocumentForm({ draft, readOnly, showWriteActions, edits, saved, onE
           {hasChanges && !temporaryChanged ? '임시 저장됨' : canConfirm ? '기입 중' : text.trim() ? '확정 완료' : '미입력'}
         </span>
         {showWriteActions && (showModify
-          ? <Button size="sm" type="button" variant="outline" disabled={locked} onClick={() => setEditing(true)}>수정</Button>
+          ? <>
+            <Button size="sm" type="button" variant="outline" disabled={locked} onClick={() => setEditing(true)}>수정</Button>
+            {onReopen && <Button size="sm" type="button" variant="outline" disabled={locked} onClick={event => {
+              event.preventDefault()
+              void reopen()
+            }}>확정 해제</Button>}
+          </>
           : <>
             <Button size="sm" type="button" variant="outline" disabled={locked || !onSaveTemporary || !temporaryChanged} onClick={() => void saveTemporary()}>임시 저장</Button>
             <Button size="sm" type="submit" disabled={locked || !canConfirm}>{busy ? '저장 중…' : '확정'}</Button>
@@ -672,13 +704,14 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
 }
 
 export function DraftInformationPanel({
-  id, anchor, draft, field, colorId, readOnly, fromVisual, edits, onEditsChange, onFieldChange, onClose, onSave, onSaveSpecDocument,
+  id, anchor, draft, field, colorId, readOnly, fromVisual, edits, onEditsChange, onFieldChange, onClose, onSave, onSaveSpecDocument, onReopenInformation,
   onSharedPhotoChange, teamWork, editorId, temporaryStore = draftInformationTemporaryStore,
 }: {
   id: string; anchor: HTMLButtonElement; draft: ProductDraft; field: DraftInformationPanelField; colorId: string | null
   readOnly: boolean; fromVisual: boolean
   onFieldChange: (field: DraftInformationPanelField) => void; onClose: () => void; onSave: SaveColorSpec
   onSaveSpecDocument: (value: string, temporaryRevision?: string) => Promise<void>
+  onReopenInformation?: ReopenDraftInformation
   onSharedPhotoChange: (saved?: { colorId: string; photo: string }) => Promise<void>
   teamWork: Pick<DraftTeamWork, 'ready' | 'records'>
   edits: InformationDrafts; onEditsChange: (key: string, update: UpdateInformationEdits) => void
@@ -922,6 +955,7 @@ export function DraftInformationPanel({
           </div>
         ) : field === 'specDoc' ? (
           <SpecDocumentForm key={String(locked)} draft={draft} readOnly={locked || loadingTemporary} showWriteActions={!fromVisual} saved={savedDocument}
+            onReopen={onReopenInformation ? () => onReopenInformation('specDoc') : undefined}
             onSave={async (value, revision) => {
               await onSaveSpecDocument(value, revision)
               removeConfirmedTemporary(revision)
@@ -940,6 +974,7 @@ export function DraftInformationPanel({
             edits={edits[editKey] ?? saved?.edits} saved={saved}
             onEditsChange={next => onEditsChange(editKey, current => next(current ?? saved?.edits))}
             onSaveTemporary={canSaveTemporary ? next => saveTemporary(field, color.id, next) : undefined}
+            onReopen={onReopenInformation ? () => onReopenInformation(field, color.id) : undefined}
             highlighted={color.id === colorId} readOnly={locked || loadingTemporary} showWriteActions={!fromVisual}
             canApplyBelow={index === 0 && colors.length > 1} onSave={saveColor} />
         }) : <p className="border-t border-border px-4 py-3 text-sm text-muted-foreground">등록된 컬러가 없습니다.</p>}

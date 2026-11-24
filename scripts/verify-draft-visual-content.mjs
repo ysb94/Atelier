@@ -174,6 +174,64 @@ try {
   await role(outsider)
   assert.equal(await status(), undefined)
   console.log('Draft Visual DB: access, private drafts, shared COLOR images, saved status, team assignments and conflicts passed')
+
+  await db.exec('reset role')
+  await db.exec(await readFile('supabase/migrations/20261124131129_draft_visual_information_notices.sql', 'utf8'))
+  const notices = async () => (await db.query('select * from public.draft_information_notices order by created_at,id')).rows
+  const readNotice = async id => (await db.query('select public.read_draft_information_notice($1)::text read_at', [id])).rows[0].read_at
+  const saveSpecs = specs => db.query('update public.product_drafts set specs=$2 where id=$1', [draft, specs])
+  await role(author)
+  const [emptyGroup] = await save([change('assignees', 'team', [], group.revision)])
+  const originalSpecs = { ...((await readShared()).specs), colorSpecs: { [black]: {
+    size: 'W=300;D=120;H=210;STRAP=;UNIT=mm', weight: '250g', fabric: '면', sizeConfirmed: false, fabricConfirmed: false,
+  } } }
+  await saveSpecs(originalSpecs)
+  const [activeGroup] = await save([change('assignees', 'team', [visualOne, visualTwo], emptyGroup.revision)])
+  await role(visualOne)
+  assert.deepEqual(await notices(), [], 'Assignment does not send earlier changes')
+  await role(author)
+  const confirmed = { ...originalSpecs, colorSpecs: { [black]: {
+    ...originalSpecs.colorSpecs[black], sizeConfirmed: true, fabricConfirmed: true,
+  } }, specDocumentConfirmed: true }
+  await saveSpecs(confirmed)
+  await saveSpecs({ ...confirmed, colorNames: { [black]: { nameEn: 'Black' } } })
+  await saveSpecs(confirmed)
+  await role(visualOne)
+  const first = await notices()
+  assert.equal(first.length, 3)
+  assert.deepEqual(first.map(row => row.field).sort(), ['fabric', 'size', 'specDoc'])
+  assert.ok(first.every(row => row.recipient_id === visualOne && row.changes[0].status === 'confirmed'))
+  assert.equal(first.find(row => row.field === 'size').saved_values[0].weight, '250g')
+  await assert.rejects(db.query('update public.draft_information_notices set read_at=now()'), { code: '42501' })
+  await role(visualTwo)
+  assert.equal(await readNotice(first[0].id), null, 'A different recipient cannot mark a notice read')
+  assert.equal((await notices()).length, 3)
+  await role(outsider)
+  assert.deepEqual(await notices(), [])
+  assert.equal(await readNotice(first[0].id), null)
+  await role('', 'anon')
+  await assert.rejects(notices(), { code: '42501' })
+  await assert.rejects(readNotice(first[0].id), { code: '42501' })
+  await role(author)
+  assert.deepEqual(await notices(), [])
+  await save([change('assignees', 'team', [visualOne], activeGroup.revision)])
+  const updated = { ...confirmed, specDocumentConfirmed: false, colorSpecs: { [black]: {
+    ...confirmed.colorSpecs[black], weight: '280g', fabricConfirmed: false,
+  } } }
+  await saveSpecs(updated)
+  await role(visualTwo)
+  assert.equal((await notices()).length, 3, 'Former assignees receive only changes made while assigned')
+  await role(visualOne)
+  const last = (await notices()).filter(row => !first.some(old => old.id === row.id))
+  assert.equal(last.length, 3)
+  assert.deepEqual(last.find(row => row.field === 'size').changes, [{ color: '블랙', fields: ['weight'], status: 'changed' }])
+  assert.equal(last.find(row => row.field === 'fabric').changes[0].status, 'reopened')
+  assert.equal(last.find(row => row.field === 'specDoc').changes[0].status, 'reopened')
+  const firstRead = await readNotice(first[0].id)
+  assert.ok(firstRead)
+  assert.equal(await readNotice(first[0].id), firstRead)
+  assert.equal((await notices()).filter(row => row.read_at !== null).length, 1, 'Reading one event leaves newer versions unread')
+  console.log('Draft INFORMATION notices: assignment timing, confirmed/changed/reopened, duplicate saves, recipient access and exact read passed')
 } finally {
   await db.close()
 }

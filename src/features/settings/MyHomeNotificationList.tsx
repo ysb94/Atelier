@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CheckoutNoticeForm } from './CheckoutNoticeForm'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useMyHomeNotifications, useReadMyHomeNotification } from './use-my-home-notifications'
@@ -8,6 +9,13 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { useVisualWorkflowNotices, visualWorkflowNoticeItem } from '@/features/work-requests/use-visual-workflow-notices'
 import type { InboxNotification } from '@/lib/inbox/types'
+import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
+import { useNotificationDetailVisibility } from '@/lib/inbox/use-notification-visibility'
+import {
+  DRAFT_INFORMATION_NOTICE_FIELDS, DRAFT_INFORMATION_NOTICE_PARAM, DRAFT_INFORMATION_NOTICE_STATUS,
+  draftInformationNoticeItem, readDraftInformationNotice, updateDraftInformationNoticeRead,
+  useDraftInformationNoticeDetail, useDraftInformationNotices,
+} from '@/features/drafts/use-draft-information-notices'
 
 export function MyHomeNotificationBadge({ tab }: { tab: string }) {
   const notices=useMyHomeNotifications()
@@ -23,8 +31,74 @@ export function MyHomeNotificationList({ tab }: { tab: MyHomeNotificationTab }) 
 
 export function VisualWorkflowNotificationList() {
   const notices = useVisualWorkflowNotices()
-  if (!notices.available && !notices.error) return null
-  return <NotificationRows items={notices.rows?.map(visualWorkflowNoticeItem) ?? []} error={notices.error} />
+  const information = useDraftInformationNotices()
+  const items = [...(notices.rows?.map(visualWorkflowNoticeItem) ?? []), ...(information.rows?.map(draftInformationNoticeItem) ?? [])]
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  return <>
+    {information.active && <DraftInformationNoticeDetail actor={information.actor} />}
+    {Boolean(notices.available || information.available || notices.error || information.error) &&
+      <NotificationRows items={items} error={notices.error ?? information.error} />}
+  </>
+}
+
+function DraftInformationNoticeDetail({ actor }: { actor?: string }) {
+  const [params, setParams] = useSearchParams()
+  const rawId = params.get(DRAFT_INFORMATION_NOTICE_PARAM)
+  const id = rawId && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(rawId) ? rawId : undefined
+  const visible = useNotificationDetailVisibility()
+  const cache = useQueryClient()
+  const detail = useDraftInformationNoticeDetail(actor, id, Boolean(actor) && visible)
+  const notice = detail.isSuccess && detail.isFetchedAfterMount ? detail.data : undefined
+  const attempted = useRef('')
+  const read = useMutation({
+    mutationFn: (input: { actor: string; id: string }) => readDraftInformationNotice(input.id),
+    onSuccess: (readAt, input) => updateDraftInformationNoticeRead(cache, input.actor, input.id, readAt),
+  })
+  const { mutate } = read
+  useEffect(() => {
+    if (!visible || !actor || !notice || notice.read_at) return
+    const key = `${actor}:${notice.id}`
+    if (attempted.current === key) return
+    attempted.current = key
+    mutate({ actor, id: notice.id })
+  }, [actor, mutate, notice, visible])
+
+  if (!rawId || !visible) return null
+  const item = notice ? draftInformationNoticeItem(notice) : undefined
+  return <section role="dialog" aria-modal="false" aria-label="기획안 정보 변경 알림" className="mb-4 rounded-xl border border-border bg-card p-4 shadow-sm">
+    <header className="flex items-start justify-between gap-3">
+      <div>
+        <h2 className="font-semibold">{item?.title ?? '기획안 정보 변경'}</h2>
+        {item && <p className="mt-1 text-sm text-muted-foreground">{item.body}</p>}
+      </div>
+      <Button type="button" size="sm" variant="ghost" onClick={() => setParams(previous => {
+        const next = new URLSearchParams(previous)
+        next.delete(DRAFT_INFORMATION_NOTICE_PARAM)
+        return next
+      }, { replace: true })}>닫기</Button>
+    </header>
+    {notice ? <ul className="mt-3 divide-y divide-border">
+      {notice.changes.map((change, index) => {
+        const values = notice.saved_values[index] ?? {}
+        return <li key={index} className="py-2 text-sm">
+          <p className="font-medium">{[change.color, DRAFT_INFORMATION_NOTICE_STATUS[change.status]].filter(Boolean).join(' · ')}</p>
+          <dl className="mt-1 space-y-1">
+            {Object.entries(values).map(([field, value]) => <div key={field} className="text-muted-foreground">
+              <dt className="font-medium">
+                {DRAFT_INFORMATION_NOTICE_FIELDS[field as keyof typeof DRAFT_INFORMATION_NOTICE_FIELDS]}
+                {change.fields.some(changed => changed === field) && <span className="ml-2 text-xs text-primary">변경</span>}
+              </dt>
+              <dd className="whitespace-pre-wrap break-words">{(field === 'size' ? formatSizeSpecLabel(value) : value) || '미입력'}</dd>
+            </div>)}
+          </dl>
+        </li>
+      })}
+    </ul> : <p role="status" className="mt-2 text-sm text-muted-foreground">{id && detail.isPending ? '알림을 불러오는 중입니다.' : '이 알림을 열 수 없습니다.'}</p>}
+    {notice && actor && read.isError && read.variables?.id === notice.id && <p role="alert" className="mt-2 text-sm text-danger">
+      읽음 기록을 저장하지 못했습니다.
+      <Button type="button" size="sm" variant="outline" onClick={() => mutate({ actor, id: notice.id })}>다시 시도</Button>
+    </p>}
+  </section>
 }
 
 function NotificationRows({ items, error }: { items: readonly InboxNotification[]; error: unknown }) {

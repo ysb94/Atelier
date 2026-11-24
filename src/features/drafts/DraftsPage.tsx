@@ -26,7 +26,7 @@ import { registerDraftSampleStage } from '@/lib/drafts/sample-registration'
 import { draftToInput, attachSampleWorkOrderFile, latestFilledSampleWorkOrder, legacyWorkOrderFields } from '@/lib/drafts/sample-work-order'
 import { normalizeDraftManualPrice } from '@/lib/drafts/manual-price'
 import { receiveSample, registerNextReceivedSample } from '@/lib/drafts/sample-receipt'
-import { writeColorSpec } from '@/lib/drafts/color-spec'
+import { reopenDraftInformation, writeColorSpec } from '@/lib/drafts/color-spec'
 import { useAuth } from '@/lib/supabase/auth'
 import { useBasicWorkAccess, canWriteDraft } from '@/lib/supabase/basic-work-access'
 import { draftPriceError, type DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
@@ -687,6 +687,15 @@ export function CompanyDraftsPage() {
                         const input = draftToInput(current)
                         return { ...input, specs: { ...input.specs, specDocumentConfirmed: true, coating: { ...input.specs.coating, note: value } } }
                       }, 'draft_information_save', temporaryRevision)
+                    }}
+                    onReopenInformation={async (field, colorId) => {
+                      await saveDraftChange(draft.id, current => {
+                        if (field !== 'specDoc' && !current.colors.some(color => color.id === colorId)) {
+                          throw new Error('컬러를 찾지 못했습니다.')
+                        }
+                        const input = draftToInput(current)
+                        return { ...input, specs: reopenDraftInformation(input.specs, field, colorId) }
+                      }, 'draft_information_save')
                     }}
                     onUploadSampleWorkOrder={async (file) => {
                       await saveDraftChange(draft.id, (current) => {
