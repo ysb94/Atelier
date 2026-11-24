@@ -6,8 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { elapsedMaterialRequestDays } from '@/features/planning/material-request-days'
 import {
-  DRAFT_PRICE_DESTINATIONS, isDraftManualPriceDestination, isSharedDraftPriceDestination, parseDraftManualAmount,
-  type DraftPriceDestinationOption,
+  currentDraftManualPrice, draftPriceDestinationLabel, isDraftManualPriceDestination, isSharedDraftPriceDestination, parseDraftManualAmount,
+  type DraftPriceDestinationChoice, type DraftPriceDestinationOption,
 } from '@/lib/drafts/manual-price'
 import { CHINA_TEAM_DESTINATION } from '@/lib/drafts/sample-receipt'
 import { draftPriceError, type DraftPriceRequest, type SharedDraftPriceDestination } from '@/lib/supabase/draft-price-requests'
@@ -44,7 +44,7 @@ const requestClock = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: true,
 })
 
-export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, controls, confirmedRequestId, colors = [], manualPrice }: {
+export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, controls, confirmedRequestId, colors = [], manualPrice, selectedDestination, onSelectDestination }: {
   readOnly: boolean
   hasColors: boolean
   missingColors: string[]
@@ -52,11 +52,12 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   confirmedRequestId?: string
   colors?: readonly Pick<DraftColorRow, 'id' | 'name'>[]
   manualPrice?: DraftManualPrice
+  selectedDestination?: DraftPriceDestinationChoice
+  onSelectDestination: (choice?: DraftPriceDestinationChoice) => void
 }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [selectedDestination, setSelectedDestination] = useState<{ value: string; label?: string }>()
   const [pendingDestination, setPendingDestination] = useState<{ value: string; label: string }>()
   const [vendor, setVendor] = useState('')
   const [currency, setCurrency] = useState<CostCurrency>('CNY')
@@ -71,9 +72,10 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   const destinations = controls?.destinations
   const reply = controls?.reply
   const amounts = reply?.amounts
-  const showingManual = Boolean(manualPrice && (!latest || Date.parse(manualPrice.savedAt) >= Date.parse(latest.requestedAt)))
-  const displayedAmounts = showingManual ? manualPrice?.amounts : amounts
-  const manualCurrency = showingManual && manualPrice ? COST_CURRENCY_LABEL[manualPrice.currency] : undefined
+  const currentManualPrice = currentDraftManualPrice(manualPrice, latest?.requestedAt)
+  const showingManual = Boolean(currentManualPrice)
+  const displayedAmounts = currentManualPrice?.amounts ?? amounts
+  const manualCurrency = currentManualPrice && COST_CURRENCY_LABEL[currentManualPrice.currency]
   const hasReply = Boolean(reply?.answeredAt && reply.id === latest?.id)
   const confirmed = !showingManual && hasReply && reply?.id === confirmedRequestId
   const confirm = controls?.confirm
@@ -87,9 +89,7 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   const destination = selectedDestination?.value ?? ''
   const editingManual = isDraftManualPriceDestination(destination) && !readOnly && !waiting && Boolean(controls?.saveManual)
   const sharedDestination = isSharedDraftPriceDestination(destination)
-  const destinationLabel = destinations?.rows?.find(row => (row.preset_key ?? row.id) === destination)?.name ??
-    selectedDestination?.label ?? (manualPrice?.destination === destination ? manualPrice.destinationLabel : undefined)
-  const displayedDestinationLabel = destinationLabel ?? DRAFT_PRICE_DESTINATIONS.find(option => option.value === destination)?.label
+  const destinationLabel = selectedDestination && draftPriceDestinationLabel(selectedDestination, destinations?.rows)
   const canSend = Boolean(confirmingChina && controls && ready && !readOnly && !waiting && !controls.loading && !controls.error)
   const canSaveManual = Boolean(editingManual &&
     (!sharedDestination || destinationLabel) && colors.length &&
@@ -144,10 +144,10 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
     }
   }
 
-  function selectDestination(option?: { value: string; label?: string }) {
+  function selectDestination(option?: DraftPriceDestinationChoice) {
     const value = option?.value ?? ''
     const saved = manualPrice?.destination === value ? manualPrice : undefined
-    setSelectedDestination(option)
+    onSelectDestination(option)
     setVendor(saved?.vendor ?? '')
     setCurrency(saved?.currency ?? (value === '한국' ? 'KRW' : value === 'other' || isSharedDraftPriceDestination(value) ? 'USD' : 'CNY'))
     setManualAmounts(saved ? Object.fromEntries(Object.entries(saved.amounts).map(([id, amount]) => [id, String(amount)])) : {})
@@ -206,7 +206,7 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
         </div>)}
       </div>
       <div className="mx-auto grid w-full max-w-28 gap-1.5">
-        <p className="break-words text-xs font-medium" title={displayedDestinationLabel}>{displayedDestinationLabel}</p>
+        <p className="break-words text-xs font-medium" title={destinationLabel}>{destinationLabel}</p>
         <Input aria-label="업체명 (선택)" placeholder="업체명 (선택)" value={vendor} maxLength={120} disabled={busy}
           className="h-7 min-w-0 px-1 text-xs" onChange={event => setVendor(event.currentTarget.value)} />
         {!colors.length && <p className="text-xs text-muted-foreground">컬러를 먼저 추가해 주세요.</p>}
@@ -313,7 +313,7 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
           </dl>
         </div>}
         {manualPrice && (readOnly || destination !== manualPrice.destination) && <div className="mt-3 rounded-lg border border-border px-3 py-2 text-sm">
-          <p className="font-medium">{manualPrice.destinationLabel ?? DRAFT_PRICE_DESTINATIONS.find(option => option.value === manualPrice.destination)?.label} 단가 기록</p>
+          <p className="font-medium">{draftPriceDestinationLabel({ value: manualPrice.destination, label: manualPrice.destinationLabel })} 단가 기록</p>
           {manualPrice.vendor && <p className="text-xs text-muted-foreground">{manualPrice.vendor}</p>}
           <dl className="mt-1 divide-y divide-border">
             {colors.map(color => {

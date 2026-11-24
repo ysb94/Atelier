@@ -14,7 +14,8 @@ import {
 } from '@/lib/drafts/color-spec'
 import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
 import { colorSampleLineStatus, resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
-import { sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
+import { CHINA_TEAM_DESTINATION, sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
+import { currentDraftManualPrice, draftPriceDestinationLabel, type DraftPriceDestinationChoice } from '@/lib/drafts/manual-price'
 import { sheetRegisteredDay } from '@/lib/drafts/sample-work-order'
 import { readFileAsDataUrl } from '@/lib/images'
 import type { DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
@@ -820,12 +821,14 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   } | null>(null)
   const fromVisual = Boolean(information?.visualTrigger)
   const [informationEdits, setInformationEdits] = useState<InformationDrafts>({})
+  const [priceEdit, setPriceEdit] = useState<{ editorKey: string; destination: DraftPriceDestinationChoice }>()
   const editorKey = `${informationEditorId ?? ''}:${readOnly}`
   const previousEditorKey = useRef(editorKey)
   useEffect(() => {
     if (previousEditorKey.current === editorKey) return
     previousEditorKey.current = editorKey
     setInformationEdits({})
+    setPriceEdit(undefined)
   }, [editorKey])
   function updateInformationEdits(key: string, update: UpdateInformationEdits) {
     if (!readOnly && !fromVisual) setInformationEdits(current => ({ ...current, [key]: update(current[key]) }))
@@ -852,6 +855,16 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   const documentOpen = !fromVisual && information?.field === 'specDoc'
   const colorRows: Array<DraftColorRow | null> = draft.colors.length ? draft.colors : [null]
   const priceAmounts = price?.reply?.amounts ?? draft.specs.manualPrice?.amounts
+  const latestPriceRequest = price?.latest
+  const manualPrice = draft.specs.manualPrice
+  const savedManualPrice = currentDraftManualPrice(manualPrice, latestPriceRequest?.requestedAt)
+  const editingPriceDestination = priceEdit?.editorKey === editorKey && !readOnly && price?.saveManual &&
+    (!latestPriceRequest || latestPriceRequest.answeredAt) ? priceEdit.destination : undefined
+  const savedPriceDestination = savedManualPrice
+    ? { value: savedManualPrice.destination, label: savedManualPrice.destinationLabel }
+    : latestPriceRequest ? CHINA_TEAM_DESTINATION : undefined
+  const priceDestination = editingPriceDestination ?? savedPriceDestination
+  const priceDestinationName = priceDestination && draftPriceDestinationLabel(priceDestination, price?.destinations?.rows)
   function colorSampleDone(colorId: string) {
     return colorId in pendingDone ? pendingDone[colorId] : doneColorIds.has(colorId)
   }
@@ -950,8 +963,9 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
     brand: <td className="draft-sheet-brand-cell" hidden={hidden.has('brand')}>{brandContent}</td>,
     sample: <td className="draft-sheet-sample-cell" hidden={hidden.has('sample')}>{sampleContent}</td>,
     price: <td className={`draft-sheet-price-cell${priceAmounts && hasColor ? ' has-reply' : ''}`} hidden={hidden.has('price')}>
-      <DraftPriceRequestButton readOnly={readOnly} hasColors={hasColor} colors={draft.colors} missingColors={missingPriceColors} controls={price}
-        confirmedRequestId={draft.specs.confirmedPriceRequestId} manualPrice={draft.specs.manualPrice} />
+      <DraftPriceRequestButton key={editorKey} readOnly={readOnly} hasColors={hasColor} colors={draft.colors} missingColors={missingPriceColors} controls={price}
+        confirmedRequestId={draft.specs.confirmedPriceRequestId} manualPrice={manualPrice} selectedDestination={editingPriceDestination}
+        onSelectDestination={destination => setPriceEdit(destination ? { editorKey, destination } : undefined)} />
     </td>,
     color: <td className="draft-sheet-color-cell" hidden={hidden.has('color')}>
       <div className="draft-color-pad draft-sheet-color-tools">
@@ -1053,7 +1067,8 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
       onOpenVisualTab={(anchor, colorId, field) => setInformation(current =>
         current?.anchor === anchor && current.field === field ? null : { anchor, colorId, field, visualTrigger: field })} />,
     amd: <DraftAmdCell key={editorKey} colors={draft.colors} hidden={hidden.has('amd')} readOnly={readOnly} teamWork={teamWork} />,
-    md: <DraftMdTeamCell key={editorKey} draft={draft} hidden={hidden.has('md')} readOnly={readOnly} actorId={informationEditorId} teamWork={teamWork} />,
+    md: <DraftMdTeamCell key={editorKey} draft={draft} hidden={hidden.has('md')} readOnly={readOnly} actorId={informationEditorId}
+      teamWork={teamWork} priceDestinationName={priceDestinationName} />,
     ect: <td hidden={hidden.has('ect')} />,
   }
 

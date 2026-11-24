@@ -67,6 +67,7 @@ function Fixture() {
     const base=emptyDraftInput()
     return {...base,id:'fixture',createdBy:'owner',companyId:'fixture',brandId:brand.id,draftNo:'PL-TEST',createdAt:'2026-10-01',updatedAt:'2026-10-01',promotedStyleId:null,nameKo:'회의용 기획안',nameEn:'Meeting sample',owner:'작성자',releaseIssue:'생산 일정 협의',seasonId:savedRelease?'group':null,
       imageUrl:'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="gray"/></svg>'),
+      originCountry:'PROMOTION [중국]',
       colors:[{...newColorRow(),id:'black',name:'블랙',orderQty:12},{...newColorRow(),id:'ivory',name:'아이보리',orderQty:8}],
       sampleWorkOrders:[{...newSampleWorkOrder(),id:'sample',url:'sample.pdf',shippedAt:'2026-10-01T00:00:00Z',receivedAt:'2026-10-02T00:00:00Z',passed:false}],
       specs:{...base.specs,manualPrice:normalizeDraftManualPrice(JSON.parse(sessionStorage.getItem(manualPriceKey) ?? 'null')),
