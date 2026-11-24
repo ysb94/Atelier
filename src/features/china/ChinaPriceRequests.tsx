@@ -1,7 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
-import { X } from 'lucide-react'
+import { ImageIcon, X } from 'lucide-react'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -22,7 +21,7 @@ const requestDate = new Intl.DateTimeFormat('ko-KR', {
 const quoteAmount = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 })
 
 type RequestFilter = 'all' | 'first' | 'repeat' | 'confirmed'
-type SelectedPhoto = { requestId: string; color: DraftPriceColor }
+type SelectedPhoto = { requestId: string; colorId: string }
 export type DraftPriceInputs = Record<string, Record<string, string>>
 
 function linkedColorPhoto(draft: ProductDraft | undefined, colorId: string): string | null | undefined {
@@ -48,35 +47,73 @@ function groupPriceRequests(requests: readonly DraftPriceRequest[]) {
     || Date.parse(a.requestedAt) - Date.parse(b.requestedAt))
 }
 
-function ChinaPricePhoto({ photo, linkedPhoto, onClose }: { photo: SelectedPhoto; linkedPhoto?: string | null; onClose: () => void }) {
+function useRequestColorPhoto(requestId: string, colorId: string, enabled: boolean) {
   const { session } = useAuth()
   const active = useWorkspaceTabActivity()
-  const dialog = useRef<HTMLDialogElement>(null)
-  const useRequestPhoto = linkedPhoto === undefined
-  const query = useQuery({
-    queryKey: ['draft-price-photo', session?.user.id, photo.requestId, photo.color.id],
-    queryFn: ({ signal }) => getDraftPricePhoto(photo.requestId, photo.color.id, signal),
-    enabled: active && Boolean(session) && useRequestPhoto, gcTime: 0, retry: false,
+  return useQuery({
+    queryKey: ['draft-price-photo', session?.user.id, requestId, colorId],
+    queryFn: ({ signal }) => getDraftPricePhoto(requestId, colorId, signal),
+    enabled: active && Boolean(session) && enabled, staleTime: Infinity, gcTime: 0, retry: false,
   })
-  const image = useRequestPhoto ? query.data : linkedPhoto
-  useEffect(() => {
-    if (!active) return
-    const current = dialog.current
-    current?.showModal()
-    return () => current?.close()
-  }, [active])
-  if (!active) return null
-  return createPortal(<dialog ref={dialog} className="draft-photo-dialog fixed inset-0 m-auto w-fit max-w-[calc(100%-2rem)] rounded-xl border border-border bg-card p-4 text-foreground shadow-xl"
-    aria-label={`${photo.color.name} 컬러 사진 크게 보기`} onCancel={event => { event.preventDefault(); onClose() }}
-    onClick={event => { if (event.target === event.currentTarget) onClose() }}>
-    <header><strong>{photo.color.name} 컬러</strong><button type="button" aria-label="사진 크게 보기 닫기" onClick={onClose}><X size={20} /></button></header>
-    {useRequestPhoto && query.isPending ? <p role="status">사진을 불러오는 중입니다.</p>
-      : useRequestPhoto && query.isError ? <p role="alert">{draftPriceError(query.error, '컬러 사진을 불러오지 못했습니다.')}</p>
-      : image ? <img src={image} alt={`${photo.color.name} 컬러`} /> : <p>첨부 사진이 없습니다.</p>}
-  </dialog>, document.body)
 }
 
-function ChinaPriceRequestRow({ request, earlier, draft, confirmed, brandName, amounts, disabled, onEdit, onReply, onPhoto }: {
+function ChinaPriceThumbnail({ requestId, color, linkedPhoto, expanded, previewId, onClick }: {
+  requestId: string; color: DraftPriceColor; linkedPhoto?: string | null; expanded: boolean; previewId: string; onClick: () => void
+}) {
+  const thumbnail = useRef<HTMLSpanElement>(null)
+  const [visible, setVisible] = useState(false)
+  const useRequestPhoto = linkedPhoto === undefined
+  const query = useRequestColorPhoto(requestId, color.id, useRequestPhoto && (visible || expanded))
+  const image = useRequestPhoto ? query.data : linkedPhoto
+  useEffect(() => {
+    const element = thumbnail.current
+    if (!element || !useRequestPhoto || visible) return
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) setVisible(true)
+    }, { rootMargin: '96px' })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [useRequestPhoto, visible])
+
+  return <Button type="button" variant="outline" size="icon" className="shrink-0 overflow-hidden"
+    id={expanded ? `${previewId}-trigger` : undefined}
+    aria-label={`${color.name} 컬러 사진 크게 보기`} aria-expanded={expanded} aria-controls={expanded ? previewId : undefined} onClick={onClick}>
+    <span ref={thumbnail} className="grid size-full place-items-center bg-muted/30">
+      {image ? <img src={image} alt="" loading="lazy" decoding="async" className="size-full object-contain" />
+        : <ImageIcon className="size-4 text-muted-foreground" aria-hidden="true" />}
+    </span>
+  </Button>
+}
+
+function ChinaPricePhoto({ requestId, color, linkedPhoto, previewId, onClose }: {
+  requestId: string; color: DraftPriceColor; linkedPhoto?: string | null; previewId: string; onClose: () => void
+}) {
+  const preview = useRef<HTMLDialogElement>(null)
+  const useRequestPhoto = linkedPhoto === undefined && color.hasPhoto
+  const query = useRequestColorPhoto(requestId, color.id, useRequestPhoto)
+  const image = useRequestPhoto ? query.data : linkedPhoto
+  useEffect(() => {
+    preview.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [color.id])
+  function close() {
+    onClose()
+    document.getElementById(`${previewId}-trigger`)?.focus({ preventScroll: true })
+  }
+  return <dialog ref={preview} open id={previewId}
+    className="static m-0 w-full min-w-0 rounded-lg border border-border bg-card p-3 text-sm text-foreground shadow-sm"
+    aria-label={`${color.name} 컬러 사진 크게 보기`}
+    onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); close() } }}>
+    <header className="mb-2 flex items-center justify-between gap-2">
+      <strong className="min-w-0 break-words">{color.name} 컬러</strong>
+      <Button type="button" variant="ghost" size="icon" className="shrink-0" aria-label="사진 크게 보기 닫기" onClick={close}><X size={18} /></Button>
+    </header>
+    {useRequestPhoto && query.isPending ? <p role="status">사진을 불러오는 중입니다.</p>
+      : useRequestPhoto && query.isError ? <p role="alert">{draftPriceError(query.error, '컬러 사진을 불러오지 못했습니다.')}</p>
+      : image ? <img src={image} alt={`${color.name} 컬러`} className="mx-auto max-h-[min(36vh,18rem)] w-full rounded-md bg-muted/30 object-contain" /> : <p>첨부 사진이 없습니다.</p>}
+  </dialog>
+}
+
+function ChinaPriceRequestRow({ request, earlier, draft, confirmed, brandName, amounts, disabled, expandedColorId, onEdit, onReply, onPhoto }: {
   request: DraftPriceRequest
   earlier: readonly DraftPriceRequest[]
   draft: ProductDraft | undefined
@@ -84,15 +121,19 @@ function ChinaPriceRequestRow({ request, earlier, draft, confirmed, brandName, a
   brandName: string | undefined
   amounts: Record<string, string> | undefined
   disabled: boolean
+  expandedColorId?: string
   onEdit: (colorId: string, value: string) => void
   onReply: (amounts: Record<string, number>) => Promise<unknown>
-  onPhoto: (color: DraftPriceColor) => void
+  onPhoto: (colorId: string | null) => void
 }) {
   const formId = useId()
+  const previewId = `${formId}-preview`
+  const active = useWorkspaceTabActivity()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const { answeredAt, draftNo, colors } = request
   const sentEarlier = earlier.filter(round => round.answeredAt)
+  const expandedColor = active ? colors.find(color => color.id === expandedColorId) : undefined
 
   async function reply() {
     if (busy || disabled || answeredAt) return
@@ -112,7 +153,7 @@ function ChinaPriceRequestRow({ request, earlier, draft, confirmed, brandName, a
     }
   }
 
-  return <tr className="border-b border-primary/25 last:border-b-0">
+  return <><tr className="border-b border-primary/25 last:border-b-0">
     <td className="border-r border-border/60 px-4 py-4 align-top">
       <div className="mx-auto max-w-36 space-y-1.5">
         <p className="break-words text-center text-sm font-medium text-primary">{brandName ?? '브랜드 미정'}</p>
@@ -155,8 +196,9 @@ function ChinaPriceRequestRow({ request, earlier, draft, confirmed, brandName, a
           return <div key={color.id} className="flex h-9 items-center gap-2 pr-2">
             <span className="flex w-2 shrink-0 justify-center" aria-hidden="true">{hasPhoto && <span className="size-1 rounded-full bg-primary" />}</span>
             <span title={color.name} className="min-w-0 flex-1 truncate text-sm">{color.name}</span>
-            {hasPhoto && <Button type="button" variant="outline" size="sm" className="h-6 shrink-0 px-1.5 text-xs text-primary"
-              aria-label={`${color.name} 컬러 사진 크게 보기`} onClick={() => onPhoto(color)}>Image</Button>}
+            {hasPhoto && <ChinaPriceThumbnail requestId={request.id} color={color} linkedPhoto={linkedPhoto}
+              expanded={expandedColor?.id === color.id} previewId={previewId}
+              onClick={() => onPhoto(expandedColor?.id === color.id ? null : color.id)} />}
           </div>
         })}
       </div>
@@ -203,6 +245,15 @@ function ChinaPriceRequestRow({ request, earlier, draft, confirmed, brandName, a
       </div>
     </td>
   </tr>
+    {expandedColor && <tr className="border-b border-primary/25 bg-muted/20 last:border-b-0">
+      <td colSpan={5} className="p-0">
+        <div className="sticky left-0 w-[min(100cqw,20rem)] p-3 @min-[55rem]:ml-[37rem] @min-[55rem]:w-[min(calc(100cqw_-_37rem),20rem)]">
+          <ChinaPricePhoto requestId={request.id} color={expandedColor} linkedPhoto={linkedColorPhoto(draft, expandedColor.id)}
+            previewId={previewId} onClose={() => onPhoto(null)} />
+        </div>
+      </td>
+    </tr>}
+  </>
 }
 
 export function ChinaPriceRequests({ requests, drafts, brandById, inputs, loading, error, onRetry, onEdit, onReply }: {
@@ -229,12 +280,11 @@ export function ChinaPriceRequests({ requests, drafts, brandById, inputs, loadin
   }), [byDraft, requests])
   const pending = groups.filter(({ request }) => !request.answeredAt)
   const shown = groups.filter(({ status }) => filter === 'all' ? status !== 'confirmed' : status === filter)
-  const selectedRequest = photo ? requests.find(request => request.id === photo.requestId) : undefined
 
   return <section aria-labelledby="china-price-requests-title">
     <h2 id="china-price-requests-title" className="sr-only">단가요청</h2>
     <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4">
-      <FilterTabs<RequestFilter> value={filter} onChange={setFilter} ariaLabel="단가요청 구분" variant="underline" className="border-b-0"
+      <FilterTabs<RequestFilter> value={filter} onChange={value => { setFilter(value); setPhoto(null) }} ariaLabel="단가요청 구분" variant="underline" className="border-b-0"
         tabs={[
           { value: 'all', label: `ALL (${pending.length})` },
           { value: 'first', label: `1차 요청 (${pending.filter(({ status }) => status === 'first').length})` },
@@ -246,7 +296,7 @@ export function ChinaPriceRequests({ requests, drafts, brandById, inputs, loadin
     {error && <div className="mb-3 flex items-center gap-2 text-sm text-danger">
       <p role="alert">{error}</p><Button type="button" variant="outline" size="sm" onClick={onRetry}>다시 조회</Button>
     </div>}
-    <Card className="overflow-x-auto">
+    <Card className="@container overflow-x-auto">
       <table aria-label="단가요청 목록" className="w-full min-w-[880px] table-fixed text-left">
         <colgroup><col className="w-40" /><col className="w-36" /><col className="w-36" /><col className="w-36" /><col /></colgroup>
         <thead className="bg-primary text-primary-foreground">
@@ -263,14 +313,13 @@ export function ChinaPriceRequests({ requests, drafts, brandById, inputs, loadin
             <ChinaPriceRequestRow key={request.id} request={request} earlier={earlier} draft={draft} confirmed={status === 'confirmed'}
               brandName={draft?.brandId ? brandById?.get(draft.brandId)?.name : undefined} amounts={inputs[request.id]} disabled={Boolean(error)}
               onEdit={(id, value) => onEdit(request.id, id, value)} onReply={values => onReply(request.id, values)}
-              onPhoto={color => setPhoto({ requestId: request.id, color })} />)}
+              expandedColorId={photo?.requestId === request.id ? photo.colorId : undefined}
+              onPhoto={colorId => setPhoto(colorId === null ? null : { requestId: request.id, colorId })} />)}
           {shown.length === 0 && <tr><td colSpan={5} className="px-4 py-12 text-center text-sm text-muted-foreground">
             {loading ? '단가요청을 불러오는 중입니다.' : error ? '단가요청 목록을 다시 조회해 주세요.' : '해당 단가요청이 없습니다.'}
           </td></tr>}
         </tbody>
       </table>
     </Card>
-    {photo && selectedRequest && <ChinaPricePhoto photo={photo}
-      linkedPhoto={linkedColorPhoto(byDraft.get(selectedRequest.draftId), photo.color.id)} onClose={() => setPhoto(null)} />}
   </section>
 }
