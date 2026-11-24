@@ -288,6 +288,9 @@ try{
  assert.deepEqual(await page.getByRole('columnheader').allTextContents(),
    ['BRAND','SAMPLE','PRICE','COLOR','INFORMATION','VISUAL TEAM','AMD','MD TEAM','e.c.t'])
  assert.equal(await row.locator(':scope > td').count(),9)
+ const cellHeights=await row.getByRole('cell').evaluateAll(cells=>cells.map(cell=>Math.round(cell.getBoundingClientRect().height)))
+ assert.equal(new Set(cellHeights).size,1,'Every column ends at the same planning row boundary')
+ assert.ok(cellHeights[0]<=240,`A two-color draft fits within a compact row, got ${cellHeights[0]}px`)
  assert.equal(await row.locator('.draft-sheet-brand-cell .draft-sheet-edit:visible').count(),0,'BRAND shows no standalone edit button')
  const editAnchor=row.locator('.draft-sheet-edit-anchor')
  const editIcon=editAnchor.getByRole('button',{name:'PL-TEST 기획안 편집',exact:true})
@@ -334,9 +337,9 @@ try{
      assert.ok(Math.abs(header.x-body.x)<1 && Math.abs(header.width-body.width)<1)
      const fits=await cell.locator('.draft-color-pad button, .draft-color-line :is(button,input)').evaluateAll(controls=>
        controls.every(control=>{
-         const {left,right}=control.getBoundingClientRect()
+         const {left,right,top,bottom}=control.getBoundingClientRect()
          const slot=control.closest('.draft-color-pad, .draft-color-line').getBoundingClientRect()
-         return left>=slot.left && right<=slot.right
+         return left>=slot.left && right<=slot.right && top>=slot.top-1 && bottom<=slot.bottom+1
        }))
      assert.ok(fits,`${id} controls fit on their color row`)
    }
@@ -604,6 +607,7 @@ try{
  const orderRows=mdCell.locator('.draft-md-order .draft-color-line')
  async function assertOrderAlignment() {
    const expected=await coordinates(colorRows)
+   assert.ok(expected.every(([,height])=>height<=34),'Color rows use compact height')
    assert.deepEqual(await coordinates(informationColorRows),expected,'COLOR and INFORMATION use the same color rows')
    assert.deepEqual(await coordinates(visualCell.locator('.draft-color-line')),expected,'Visual controls align with their color rows')
    assert.deepEqual(await coordinates(amdCell.locator('.draft-color-line')),expected,'AMD inputs align with their color rows')

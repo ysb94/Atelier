@@ -35,9 +35,9 @@
 .draft-board-table th[data-drop=before]::after{left:1px}
 .draft-board-table th[data-drop=after]::after{right:1px}
 .draft-sheet-row{--draft-sheet-cell-block-padding:24px;border-bottom:1px solid #d88489}
-.draft-sheet-row>td{position:relative;padding:var(--draft-sheet-cell-block-padding) 18px;vertical-align:top;background:#fff;overflow-wrap:anywhere}
+.draft-sheet-row>td{position:relative;padding:var(--draft-sheet-cell-block-padding) 18px 8px;vertical-align:top;background:#fff;overflow-wrap:anywhere}
 .draft-sheet-row>td[hidden]{display:none}
-.draft-sheet-row>td.draft-sheet-brand-cell{padding:6px 16px 12px}
+.draft-sheet-row>td.draft-sheet-brand-cell{padding:6px 16px 8px}
 .draft-sheet-row>td.draft-sheet-brand-cell:has(>.draft-sheet-edit-anchor){padding-top:28px}
 .draft-board-table th+th::before,.draft-sheet-row>td:not([hidden])~td:not([hidden])::after{position:absolute;z-index:1;inset-block:0;inset-inline-start:0;width:1px;border-inline-start:1px solid var(--draft-sheet-divider-color);content:'';pointer-events:none}
 .draft-board-table th+th:is(.draft-column-visual,.draft-column-amd,.draft-column-md)::before,
@@ -55,6 +55,8 @@
 .draft-sheet-progress i{display:block;height:100%;background:#c60920}
 .draft-sheet-status{font-size:11px;color:#995b18}
 .draft-sheet-samples{margin:14px 0 10px}
+.draft-sheet-row .draft-sheet-samples{margin:8px 0 0}
+.draft-sheet-row .draft-sheet-sample-launch{margin-top:8px}
 .draft-cards-region{container-type:inline-size}
 .draft-cards-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
 @container (min-width:860px){.draft-cards-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -189,17 +191,17 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-field-error{display:block;max-width:100%;font-size:10px;line-height:1.3;color:#c60920;text-align:center}
 .draft-sheet-row>td.draft-sheet-price-cell{padding-inline:7px;vertical-align:middle;text-align:center}
 .draft-sheet-row>td.draft-sheet-price-cell.has-reply,.draft-sheet-row>td.draft-sheet-price-cell:has(.draft-price-manual){vertical-align:top}
-.draft-price-amounts{margin-bottom:16px}
+.draft-price-amounts{margin-bottom:8px}
 .draft-price-amounts .draft-color-line{justify-content:center;padding-inline:0}
-.draft-color-pad{display:flex;align-items:center;height:36px}
+.draft-color-pad{display:flex;align-items:center;height:34px}
 .draft-color-lines{display:flex;flex-direction:column}
-.draft-color-line{display:flex;flex:none;align-items:center;justify-content:space-between;gap:8px;box-sizing:border-box;height:40px;padding:6px 8px;border-bottom:1px solid #f0d0d0;background:var(--draft-color-line-background,var(--color-card))}
+.draft-color-line{display:flex;flex:none;align-items:center;justify-content:space-between;gap:8px;box-sizing:border-box;height:34px;padding:2px 8px;border-bottom:1px solid #f0d0d0;background:var(--draft-color-line-background,var(--color-card))}
 .draft-color-line.is-alt{background:#faf6f4}
 .draft-color-line:last-child{border-bottom:0}
 .draft-color-line small{color:#8a8e94}
 .draft-sheet-visual-cell .draft-color-line{justify-content:flex-start;gap:5px}
 .draft-sheet-visual-cell .draft-team-control[aria-expanded=true]:not(.is-done){border-color:var(--color-primary);color:var(--color-primary)}
-.draft-visual-assignee{gap:5px;align-items:flex-end;padding:0 8px 7px}
+.draft-visual-assignee{gap:5px;align-items:flex-end;padding:0 8px}
 .draft-visual-assignee .draft-visual-assignee-add{width:20px;flex:none;padding:0}
 .draft-board-table .draft-team-control{height:22px;min-width:0;padding-inline:7px;border-radius:4px;box-shadow:none;font-size:11px;font-weight:400;line-height:1}
 .draft-board-table .draft-team-control:disabled{cursor:default;opacity:.65}
