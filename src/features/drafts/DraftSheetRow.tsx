@@ -843,6 +843,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   const nameConfirmed = Boolean(draft.specs.nameConfirmed)
   const colorsConfirmed = Boolean(draft.specs.colorsConfirmed)
   const registeredDay = sheetRegisteredDay(draft.createdAt)
+  const sampleAssignee = draft.specs.chinaWorkAssignment?.assigneeName.trim()
   const documentConfirmed = isSpecDocumentConfirmed(draft.specs)
   const specDocument = draft.specs.coating.note
   const documentEditing = !readOnly &&
@@ -918,7 +919,10 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
       )}
     </div>
   const sampleContent = <>
-      {registeredDay ? <p className="draft-sheet-registered">등록일 : {registeredDay}</p> : null}
+      {(registeredDay || sampleAssignee) && <p className="draft-sheet-registered flex flex-wrap items-baseline gap-x-3">
+        {registeredDay && <span>등록일 : {registeredDay}</span>}
+        {sampleAssignee && <span className="ms-auto min-w-0 text-right text-xs font-medium text-foreground">담당자 : {sampleAssignee}</span>}
+      </p>}
       {(draft.status !== 'open' || draft.held) && <div className="draft-sheet-status">{draft.status !== 'open' ? DRAFT_STATUS_LABEL[draft.status] : ''}{draft.held ? ' · 보류' : ''}</div>}
       {orders.length > 0 ? (
         <div className={`draft-sheet-samples${colorRounds.length ? ' has-color-sample' : ''}`} aria-label="샘플 진행 이력">

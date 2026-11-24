@@ -1513,6 +1513,16 @@ try{
  const viewPicker=page.getByRole('group',{name:'기획안 보기 방식'})
  const cardsButton=viewPicker.getByRole('button',{name:'카드 보기',exact:true})
  const tableButton=viewPicker.getByRole('button',{name:'표 보기',exact:true})
+ const sampleRegistration=row.locator('.draft-sheet-sample-cell .draft-sheet-registered')
+ const sampleAssignee=sampleRegistration.getByText('담당자 : 중국 샘플 담당자',{exact:true})
+ assert.equal(await sampleAssignee.count(),0,'담당자만 지정한 상태에서는 배정된 직원으로 표시하지 않는다')
+ await page.getByRole('button',{name:'업무 배정 반영',exact:true}).click()
+ await sampleAssignee.waitFor()
+ const [registrationBox, dateBox, assigneeBox]=await Promise.all([
+   sampleRegistration.boundingBox(),sampleRegistration.getByText('등록일 : 26.10.01',{exact:true}).boundingBox(),sampleAssignee.boundingBox(),
+ ])
+ assert.ok(assigneeBox.x>dateBox.x+dateBox.width&&Math.abs(assigneeBox.x+assigneeBox.width-registrationBox.x-registrationBox.width)<1,
+   '업무 배정 담당자는 SAMPLE 등록일 줄의 오른쪽 끝에 표시한다')
  await cardsButton.click()
  const draftCard=page.getByRole('article',{name:'PL-TEST Meeting sample'})
  await draftCard.waitFor()
@@ -1520,6 +1530,7 @@ try{
  assert.equal(await draftCard.getByText('MAS',{exact:true}).isVisible(),true)
  assert.equal(await draftCard.getByText('No. PL-TEST',{exact:true}).isVisible(),true)
  assert.match(await draftCard.locator('.draft-sheet-registered').textContent(),/26\.10\.01/)
+ await draftCard.locator('.draft-sheet-registered').getByText('담당자 : 중국 샘플 담당자',{exact:true}).waitFor()
  assert.equal(await draftCard.getByRole('link',{name:/1차 샘플/}).getAttribute('href'),'sample.pdf')
  assert.equal(await columnHeaders.count(),0)
  assert.equal(await layoutButton.count(),0)

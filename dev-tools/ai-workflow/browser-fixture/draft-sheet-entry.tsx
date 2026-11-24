@@ -68,7 +68,7 @@ function Fixture() {
     return {...base,id:'fixture',createdBy:'owner',companyId:'fixture',brandId:brand.id,draftNo:'PL-TEST',createdAt:'2026-10-01',updatedAt:'2026-10-01',promotedStyleId:null,nameKo:'회의용 기획안',nameEn:'Meeting sample',owner:'작성자',releaseIssue:'생산 일정 협의',seasonId:savedRelease?'group':null,
       imageUrl:'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="gray"/></svg>'),
       colors:[{...newColorRow(),id:'black',name:'블랙',orderQty:12},{...newColorRow(),id:'ivory',name:'아이보리',orderQty:8}],
-      sampleWorkOrders:[{...newSampleWorkOrder(),id:'sample',url:'sample.pdf',shippedAt:'2026-10-01T00:00:00Z',receivedAt:'2026-10-02T00:00:00Z',passed:false}],
+      sampleWorkOrders:[{...newSampleWorkOrder(),id:'sample',url:'sample.pdf',shippedAt:'2026-10-01T00:00:00Z',receivedAt:'2026-10-02T00:00:00Z',passed:false,assigneeId:'assigned-worker',assigneeName:'중국 샘플 담당자'}],
       specs:{...base.specs,manualPrice:normalizeDraftManualPrice(JSON.parse(sessionStorage.getItem(manualPriceKey) ?? 'null')),
         nameConfirmed:true,colorsConfirmed:true,colorNamesConfirmed:true,proposer:withoutProposer?undefined:{id:'proposer',name:'제안 직원'},
         releaseSchedule:savedRelease?{seasonId:'group',targetDate:'2026-11-27',certainty:'confirmed'}:undefined,
@@ -111,6 +111,9 @@ function Fixture() {
     {stickyHeader && <style>{'.draft-sheet-row { height: 1100px; }'}</style>}
     <button onClick={()=>setReadOnly(v=>!v)}>{readOnly?'작성자로 전환':'다른 직원으로 전환'}</button><select aria-label="검증 단계" value={phase} onChange={event=>setPhase(event.target.value)}><option value="review">샘플 검토</option><option value="new">최초 지시서</option><option value="color-upload">컬러 지시서</option></select><output data-testid="writes">{writes}</output><output data-testid="opened">{opened}</output>
     <output data-testid="saved-spec">{savedSpec}</output>
+    <button type="button" onClick={() => setDraft(current => ({ ...current, specs: { ...current.specs,
+      chinaWorkAssignment: { assigneeId: 'assigned-worker', assigneeName: '중국 샘플 담당자', assignedAt: '2026-10-03T00:00:00Z' },
+    } }))}>업무 배정 반영</button>
     <button type="button" onClick={() => setPriceRequest(current => current && {
       ...current, answeredAt: current.round === 1 ? '2026-11-02T10:00:00Z' : '2026-11-02T15:00:30Z',
       amounts: { ivory: 0, black: 14 + current.round },
