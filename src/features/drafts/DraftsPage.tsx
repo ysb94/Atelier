@@ -691,7 +691,11 @@ export function CompanyDraftsPage() {
                     price={{
                       ...price, loading: prices.query.isPending, error: priceListError,
                       retry: () => { void prices.query.refetch() },
-                      destinations: { ...priceDestinations, add: name => priceDestinations.add(draft.id, name) },
+                      destinations: {
+                        ...priceDestinations,
+                        add: name => priceDestinations.add(draft.id, name),
+                        change: (option, name) => priceDestinations.change(draft.id, option, name),
+                      },
                       request: () => prices.change({
                         action: 'request', draftId: draft.id, revision: currentDraft(draft.id)?.updatedAt ?? draft.updatedAt, previousId: price?.latest.id ?? null,
                       }),

@@ -5,7 +5,10 @@ import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activ
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { elapsedMaterialRequestDays } from '@/features/planning/material-request-days'
-import { DRAFT_PRICE_DESTINATIONS, isDraftManualPriceDestination, isSharedDraftPriceDestination, parseDraftManualAmount } from '@/lib/drafts/manual-price'
+import {
+  DRAFT_PRICE_DESTINATIONS, isDraftManualPriceDestination, isSharedDraftPriceDestination, parseDraftManualAmount,
+  type DraftPriceDestinationOption,
+} from '@/lib/drafts/manual-price'
 import { CHINA_TEAM_DESTINATION } from '@/lib/drafts/sample-receipt'
 import { draftPriceError, type DraftPriceRequest, type SharedDraftPriceDestination } from '@/lib/supabase/draft-price-requests'
 import { COST_CURRENCY_LABEL, type CostCurrency, type DraftColorRow, type DraftManualPrice } from '@/lib/types'
@@ -27,6 +30,7 @@ export type DraftPriceControls = {
     error: string
     retry: () => void
     add: (name: string) => Promise<SharedDraftPriceDestination>
+    change: (option: DraftPriceDestinationOption, name: string | null) => Promise<SharedDraftPriceDestination>
   }
 }
 
@@ -81,11 +85,11 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   const confirmingChina = pendingDestination?.value === CHINA_TEAM_DESTINATION.value
   const manualSelected = isDraftManualPriceDestination(destination)
   const sharedDestination = isSharedDraftPriceDestination(destination)
-  const sharedLabel = destinations?.rows?.find(row => row.id === destination)?.name ??
+  const destinationLabel = destinations?.rows?.find(row => (row.preset_key ?? row.id) === destination)?.name ??
     (manualPrice?.destination === destination ? manualPrice.destinationLabel : undefined)
   const canSend = Boolean(confirmingChina && controls && ready && !readOnly && !waiting && !controls.loading && !controls.error)
   const canSaveManual = Boolean(manualSelected && controls?.saveManual && !readOnly && !waiting &&
-    (!sharedDestination || sharedLabel) && colors.length &&
+    (!sharedDestination || destinationLabel) && colors.length &&
     colors.every(color => parseDraftManualAmount(manualAmounts[color.id] ?? '') !== null))
   const visible = open && active && (!readOnly || Boolean(latest || manualPrice))
   const showingConfirmation = visible && !readOnly && Boolean(pendingDestination)
@@ -163,7 +167,7 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
     setBusy(true)
     setError('')
     try {
-      await controls.saveManual({ destination, destinationLabel: sharedDestination ? sharedLabel : undefined, vendor: vendor.trim(), currency, amounts })
+      await controls.saveManual({ destination, destinationLabel, vendor: vendor.trim(), currency, amounts })
       setOpen(false)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '단가를 저장하지 못했습니다.')
@@ -227,7 +231,7 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
     </div>}
     {visible && createPortal(
       <dialog ref={dialog} aria-labelledby={titleId} onCancel={event => { event.preventDefault(); if (!busy) setOpen(false) }}
-        className="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm overflow-y-auto rounded-xl border border-border bg-card p-5 text-left text-card-foreground shadow-xl backdrop:bg-black/40">
+        className="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-max min-w-[min(24rem,calc(100%-2rem))] max-w-[calc(100%-2rem)] overflow-y-auto rounded-xl border border-border bg-card p-5 text-left text-card-foreground shadow-xl backdrop:bg-black/40">
         <h2 id={titleId} className="font-semibold">{latest ? `${latest.draftNo} 단가요청` : '단가 요청'}</h2>
         {waiting && <p role="status" className="mt-2 text-sm text-muted-foreground">{latest?.round}차 요청이 접수되어 중국팀 회신을 기다리고 있습니다.</p>}
         {!waiting && !readOnly && <DraftPriceDestinationPicker value={destination} onChange={askDestination}
@@ -237,7 +241,16 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
             setBusy(true)
             try {
               const row = await destinations.add(name)
-              askDestination({ value: row.id, label: row.name })
+              askDestination({ value: row.preset_key ?? row.id, label: row.name })
+            } finally {
+              setBusy(false)
+            }
+          } : undefined}
+          onEdit={destinations ? async (option, name) => {
+            setBusy(true)
+            try {
+              await destinations.change(option, name)
+              if (name === null && option.value === destination) selectDestination('')
             } finally {
               setBusy(false)
             }

@@ -95,12 +95,26 @@ try{
  await page.route('**/rpc/list_company_attendance_exempt', route => route.fulfill({json:{data:['fixture-md'],error:null}}))
  const teamRows=new Map()
  const priceDestinations=[]
+ await page.route('**/rpc/list_draft_price_destinations',route=>route.fulfill({
+   json:{data:priceDestinations.filter(row=>!row.removed||row.preset_key),error:null},
+ }))
+ await page.route('**/rpc/change_draft_price_destination',route=>{
+   const {p_draft,p_option,p_revision,p_name}=route.request().postDataJSON()
+   assert.equal(p_draft,'fixture')
+   const index=priceDestinations.findIndex(row=>(row.preset_key??row.id)===p_option)
+   const previous=priceDestinations[index]
+   assert.equal(p_revision,previous?.revision??null)
+   const row={...(previous??{id:crypto.randomUUID(),preset_key:p_option}),
+     name:p_name??previous?.name,removed:p_name===null,revision:crypto.randomUUID()}
+   if(index<0) priceDestinations.push(row)
+   else priceDestinations[index]=row
+   return route.fulfill({json:{data:row,error:null}})
+ })
  await page.route('**/rest/v1/draft_price_destinations?*',route=>{
-   if(route.request().method()==='GET') return route.fulfill({json:priceDestinations})
    assert.equal(route.request().method(),'POST')
    const {source_draft_id,name}=route.request().postDataJSON()
    assert.equal(source_draft_id,'fixture')
-   const row={id:crypto.randomUUID(),name}
+   const row={id:crypto.randomUUID(),name,revision:crypto.randomUUID()}
    priceDestinations.push(row)
    return route.fulfill({status:201,json:row})
  })
@@ -1548,7 +1562,7 @@ try{
  await page.getByRole('button',{name:'작성자로 전환'}).click()
  await manualPriceButton.click()
  assert.equal(await destinationButton('CHINA (외부 업체)').getAttribute('aria-pressed'),'true')
- assert.equal(await destinationButton('KOREA').evaluate(button=>getComputedStyle(button.parentElement).borderTopWidth),'1px')
+ assert.equal(await destinationButton('KOREA').evaluate(button=>getComputedStyle(button.parentElement.parentElement.parentElement).borderTopWidth),'1px')
  await destinationButton('제조국 추가').click()
  await priceDialog.getByRole('textbox',{name:'제조국 이름'}).fill('베트남')
  await priceDialog.getByRole('button',{name:'공용 제조국 추가',exact:true}).click()
@@ -1566,6 +1580,45 @@ try{
  await manualPriceButton.click()
  assert.equal(await destinationButton('베트남').getAttribute('aria-pressed'),'true')
  assert.equal(await priceDialog.getByRole('textbox',{name:'블랙 단가'}).inputValue(),'44.25')
+ const longCountry='베트남 하노이 의류 생산 협력 공장 단가 기록용 제조처 이름'
+ await destinationButton('베트남 수정').click()
+ await priceDialog.getByRole('textbox',{name:'제조국 이름'}).fill(longCountry)
+ await priceDialog.getByRole('button',{name:'이름 저장',exact:true}).click()
+ await destinationButton(longCountry).waitFor()
+ assert.equal(await destinationButton(longCountry).evaluate(button=>getComputedStyle(button).whiteSpace),'nowrap')
+ assert.ok(await destinationButton(longCountry).evaluate(button=>button.scrollWidth<=button.clientWidth+1),'The desktop popup fits the full country name')
+ const chinaIcons=await Promise.all(['수정','삭제'].map(action=>destinationButton(`CHINA (김웅사장님) ${action}`).boundingBox()))
+ const longIcons=await Promise.all(['수정','삭제'].map(action=>destinationButton(`${longCountry} ${action}`).boundingBox()))
+ assert.deepEqual(longIcons.map(box=>box.x),chinaIcons.map(box=>box.x),'Edit and delete icons share aligned columns')
+ assert.ok((await destinationButton(longCountry).boundingBox()).y>(await destinationButton('KOREA').boundingBox()).y)
+ await page.setViewportSize({width:390,height:850})
+ await destinationButton(longCountry).scrollIntoViewIfNeeded()
+ const mobileDelete=await destinationButton(`${longCountry} 삭제`).boundingBox()
+ assert.ok(mobileDelete.x>=0&&mobileDelete.x+mobileDelete.width<=390)
+ await destinationButton(`${longCountry} 삭제`).click()
+ await priceDialog.getByText(/회사 공용 선택 목록에서/).waitFor()
+ await priceDialog.getByRole('button',{name:'제조처 삭제',exact:true}).click()
+ await destinationButton(longCountry).waitFor({state:'detached'})
+ assert.deepEqual(await priceRows.allTextContents(),['44.25','53'])
+ await page.setViewportSize({width:1000,height:760})
+ await destinationButton('CHINA (김웅사장님) 수정').click()
+ await priceDialog.getByRole('textbox',{name:'제조국 이름'}).fill('CHINA 주 공장')
+ await priceDialog.getByRole('button',{name:'이름 저장',exact:true}).click()
+ await destinationButton('CHINA 주 공장').click()
+ await chinaConfirmation.getByText('CHINA 주 공장',{exact:true}).waitFor()
+ await chinaConfirmation.getByRole('button',{name:'취소',exact:true}).click()
+ await destinationButton('CHINA 주 공장 삭제').click()
+ await priceDialog.getByRole('button',{name:'제조처 삭제',exact:true}).click()
+ await destinationButton('CHINA 주 공장').waitFor({state:'detached'})
+ await destinationButton('제조국 추가').click()
+ await priceDialog.getByRole('textbox',{name:'제조국 이름'}).fill('CHINA (김웅사장님)')
+ await priceDialog.getByRole('button',{name:'공용 제조국 추가',exact:true}).click()
+ await chinaConfirmation.getByText('CHINA (김웅사장님)',{exact:true}).waitFor()
+ await chinaConfirmation.getByRole('button',{name:'취소',exact:true}).click()
+ await page.reload()
+ await manualPriceButton.click()
+ assert.equal(await destinationButton(longCountry).count(),0)
+ await destinationButton('CHINA (김웅사장님)').waitFor()
  assert.deepEqual(errors,[])
  console.log('draft-sheet-readonly: saved content, permissions, column dragging and visibility, sticky header, and responsive card view passed')
 }finally{await browser?.close();await server?.close()}

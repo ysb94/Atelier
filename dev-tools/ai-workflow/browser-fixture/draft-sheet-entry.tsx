@@ -129,7 +129,11 @@ function Fixture() {
       price={{
         latest: priceRequest, reply: priceRequest?.answeredAt ? priceRequest : previousPriceReply,
         loading: false, error: '', retry: () => {},
-        destinations: { ...priceDestinations, add: name => priceDestinations.add(draft.id, name) },
+        destinations: {
+          ...priceDestinations,
+          add: name => priceDestinations.add(draft.id, name),
+          change: (option, name) => priceDestinations.change(draft.id, option, name),
+        },
         request: async () => {
           if (priceRequest?.answeredAt) setPreviousPriceReply(priceRequest)
           const round = (priceRequest?.round ?? 0) + 1
