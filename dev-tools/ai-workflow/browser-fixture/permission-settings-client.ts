@@ -3,16 +3,47 @@ const original = [{ id:'self-manage',profileId:'fixture-user',permission:'permis
 let grants = structuredClone(original), revision = 1
 const audit: Record<string,unknown>[] = []
 const calls: string[] = []
-Object.assign(window,{ __permissionsFixture: { audit, calls, original, grants: () => structuredClone(grants), conflict: () => { revision++ } } })
+const matrixCalls: string[] = []
+const settingsRoute = () => location.pathname === '/settings/permissions'
+const matrixMode = () => new URLSearchParams(location.search).get('matrix')
+const reply = (data: unknown) => Promise.resolve({ data, error: null })
+const failure = (message: string) => Promise.resolve({data:null,error:{message}})
+
+Object.assign(window,{ __permissionsFixture: { audit, calls, matrixCalls, original, grants: () => structuredClone(grants), conflict: () => { revision++ } } })
+
+export function permissionFixtureTable(name: string) {
+  if (!settingsRoute() || !['material_nudge_recipients', 'china_work_assignees', 'department_request_approvers'].includes(name)) return undefined
+  matrixCalls.push(name)
+  if (name === 'department_request_approvers') return {
+    select: () => ({ order: () => ({ order: () => ({ range: () => reply([
+      { department_id:'dept-design', request_type:'overtime', approver_id:'other-user', substitute_id:'fixture-user', updated_at:'2026-10-20T00:00:00Z' },
+    ]) }) }) }),
+  }
+  const rows = name === 'material_nudge_recipients' ? [{ profile_id: 'other-user' }] : [{ profile_id: 'fixture-user', sort_order: 1 }]
+  const result = name === 'material_nudge_recipients' && matrixMode() === 'loading'
+    ? new Promise(() => {})
+    : name === 'material_nudge_recipients' && matrixMode() === 'error' ? failure('검증용 조르기 조회 실패') : reply(rows)
+  const chain = { select: () => chain, eq: () => chain, order: () => chain, then: result.then.bind(result) }
+  return chain
+}
+
 export function permissionFixtureRpc(name: string,args?: Record<string,unknown>) {
+  if (settingsRoute()) {
+    if (name === 'get_my_basic_work_access') {
+      matrixCalls.push(name)
+      return reply({ profileId: 'fixture-user', operator: false, legacyEdit: false,
+        domains: matrixMode() === 'unavailable' ? ['china'] : ['planning', 'china'], manageOwners: [] })
+    }
+    if (name === 'get_work_request_settings') return reply({ revision: 1, categories: [], supervisorIds: [], activeSupervisorIds: [] })
+    if (name === 'list_department_workforce_management') return reply([])
+  }
   if (!['permission_directory','set_permission_grant'].includes(name)) return undefined
   calls.push(name)
-  const failure = (message: string) => Promise.resolve({data:null,error:{message}})
   if (location.search.includes('identity=employee')) return failure('권한 지정 관리 권한이 필요합니다.')
   if (name === 'permission_directory') {
     if (location.search.includes('permissions-error')) return failure('권한 지정 내역 조회 실패')
-    if (location.search.includes('identity=partner')) return Promise.resolve({error:null,data:{revision:String(revision),profiles:[{id:'fixture-user',name:'업체 담당',department:'디자인팀',status:'active'},{id:'other-user',name:'검증 직원',department:'물류팀',status:'active'}],scopes:[{kind:'partner',id:'partner-a',name:'검증 업체'}],grants:structuredClone(grants.filter(grant=>grant.permission==='partner.edit'))}})
-    return Promise.resolve({error:null,data:{activation:location.search.includes('permissions-legacy')?'pending':undefined,revision:String(revision),profiles:[{id:'fixture-user',name:'화면 검수',department:'디자인팀',position:'사원',status:'active'},{id:'other-user',name:'검증 직원',department:'물류팀',position:'사원',status:'active'}],scopes:[{kind:'company',id:company,name:'회사 전체'},{kind:'department',id:'dept-design',name:'디자인팀'},{kind:'department',id:'dept-logistics',name:'물류팀'}],grants:structuredClone(grants)}})
+    if (location.search.includes('identity=partner')) return reply({canManageAll:false,revision:String(revision),profiles:[{id:'fixture-user',name:'업체 담당',department:'디자인팀',status:'active'},{id:'other-user',name:'검증 직원',department:'물류팀',status:'active'}],scopes:[{kind:'partner',id:'partner-a',name:'검증 업체'}],grants:structuredClone(grants.filter(grant=>grant.permission==='partner.edit'))})
+    return reply({canManageAll:matrixMode() !== 'denied',activation:location.search.includes('permissions-legacy')?'pending':'active',revision:String(revision),profiles:[{id:'fixture-user',name:'화면 검수',department:'디자인팀',position:'사원',status:'active'},{id:'other-user',name:'검증 직원',department:'물류팀',position:'사원',status:'active'},{id:'disabled-user',name:'비활성 검증 직원',department:'물류팀',position:'사원',status:'disabled'}],scopes:[{kind:'company',id:company,name:'회사 전체'},{kind:'department',id:'dept-design',name:'디자인팀'},{kind:'department',id:'dept-logistics',name:'물류팀'}],grants:structuredClone(grants)})
   }
   if (name === 'set_permission_grant' && args) {
     if (args.p_profile === 'fixture-user') return failure('본인 권한 변경 불가')
