@@ -947,7 +947,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
       <DraftPriceRequestButton readOnly={readOnly} hasColors={hasColor} colors={draft.colors} missingColors={missingPriceColors} controls={price}
         confirmedRequestId={draft.specs.confirmedPriceRequestId} />
     </td>,
-    color: <td hidden={hidden.has('color')}>
+    color: <td className="draft-sheet-color-cell" hidden={hidden.has('color')}>
       <div className="draft-color-pad draft-sheet-color-tools">
         <ColorDocumentButton
           readOnly={readOnly}
@@ -989,9 +989,14 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
         }) : <ColorLine index={0}><span className="draft-sheet-muted">컬러 미정</span></ColorLine>}
       </div>
     </td>,
-    information: <td hidden={hidden.has('information')}>
-      <div className="draft-color-pad" />
-      <div className="draft-sheet-information grid w-fit grid-cols-[max-content_auto]">
+    information: <td className="draft-sheet-information-cell" hidden={hidden.has('information')}>
+      <div className="draft-sheet-information">
+        <div className="draft-color-pad px-2">
+          <InformationButton label={documentConfirmed && specDocument.trim() && !documentEditing ? '스펙 확정' : '스펙 문서'}
+            value={specDocument} tone={specTone(specDocument, documentConfirmed, documentEditing)} panelId={informationId}
+            expanded={documentOpen} disabled={false} icon={<FileText size={16} aria-hidden="true" />}
+            onClick={event => setInformation(documentOpen ? null : { anchor: event.currentTarget, colorId: null, field: 'specDoc' })} />
+        </div>
         <div className="draft-color-lines">
           {colorRows.map((color, index) => {
             const spec = color ? resolveColorSpec(draft.specs, color.id) : null
@@ -1031,12 +1036,6 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
               </ColorLine>
             )
           })}
-        </div>
-        <div className="flex items-center justify-center bg-card pl-2">
-          <InformationButton label={documentConfirmed && specDocument.trim() && !documentEditing ? '스펙 확정' : '스펙 문서'}
-            value={specDocument} tone={specTone(specDocument, documentConfirmed, documentEditing)} panelId={informationId}
-            expanded={documentOpen} disabled={false} icon={<FileText size={16} aria-hidden="true" />}
-            onClick={event => setInformation(documentOpen ? null : { anchor: event.currentTarget, colorId: null, field: 'specDoc' })} />
         </div>
       </div>
     </td>,

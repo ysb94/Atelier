@@ -393,6 +393,21 @@ try{
  assert.deepEqual(await priceRows.allTextContents(),['15','0'],'회신 단가는 현재 컬러 ID에 맞춰 표시한다')
  assert.deepEqual(await coordinates(priceRows),await coordinates(colorRows),'회신 단가와 컬러 행을 같은 높이에 배치한다')
  await assertOrderAlignment()
+ const colorBands=await row.locator(':scope > td:is(.draft-sheet-color-cell,.draft-sheet-information-cell,.draft-sheet-visual-cell,.draft-sheet-amd-cell)').evaluateAll(cells=>
+   cells.map(cell=>Array.from(cell.querySelectorAll('.draft-color-line'),line=>{
+     const {left,right}=line.getBoundingClientRect()
+     return {left,right,background:getComputedStyle(line).backgroundColor}
+   })))
+ assert.equal(colorBands.length,4)
+ assert.notEqual(colorBands[0][0].background,colorBands[0][1].background)
+ for(let column=1;column<colorBands.length;column++) {
+   assert.equal(colorBands[column].length,colorBands[column-1].length)
+   colorBands[column].forEach((line,index)=>{
+     const previous=colorBands[column-1][index]
+     assert.ok(Math.abs(previous.right-line.left)<1,'같은 컬러 행의 배경은 열 사이 빈틈 없이 이어진다')
+     assert.equal(line.background,previous.background)
+   })
+ }
  assert.ok((await reRequest.boundingBox()).y>(await priceRows.last().boundingBox()).y)
  await confirmPrice.click()
  const priceHeart=priceCell.getByRole('img',{name:'단가 확정',exact:true})
@@ -481,16 +496,8 @@ try{
  assert.equal(await documentButton.count(),1)
  const informationRows=row.locator('.draft-sheet-information .draft-color-lines')
  const [rowsBox,documentBox]=await Promise.all([informationRows.boundingBox(),documentButton.boundingBox()])
- assert.ok(Math.abs(rowsBox.y+rowsBox.height/2-documentBox.y-documentBox.height/2)<1,'스펙 문서 버튼을 컬러 행 전체 높이의 가운데에 둔다')
- const informationCellBox=await row.locator(':scope > td').nth(4).boundingBox()
- const fabricBox=await fabricTrigger.boundingBox()
- const buttonGap=documentBox.x-fabricBox.x-fabricBox.width
- assert.ok(buttonGap>=0&&buttonGap<=16,'스펙 문서 버튼을 Fabric 버튼 바로 옆에 둔다')
- assert.ok(informationCellBox.x+informationCellBox.width-documentBox.x-documentBox.width<=48,'INFORMATION 열 오른쪽 여백을 줄인다')
- const colorBackgrounds=await informationRows.locator('.draft-color-line').evaluateAll(lines=>lines.map(line=>getComputedStyle(line).backgroundColor))
- const documentBackground=await documentButton.evaluate(button=>getComputedStyle(button.parentElement).backgroundColor)
- assert.notEqual(colorBackgrounds[0],colorBackgrounds[1])
- assert.equal(documentBackground,colorBackgrounds[0],'버튼 영역에는 컬러 행의 교차색을 적용하지 않는다')
+ assert.ok(documentBox.y+documentBox.height<=rowsBox.y,'공통 스펙 문서 버튼은 색상별 size·Fabric 행 위에 있다')
+ assert.equal(await documentButton.evaluate(button=>Boolean(button.closest('.draft-color-pad'))),true)
  await documentButton.click()
  const specDocument=panel.getByRole('form',{name:'공통 스펙 문서'})
  const documentInput=specDocument.getByLabel('스펙 문서 값')
