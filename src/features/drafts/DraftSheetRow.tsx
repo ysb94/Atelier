@@ -889,6 +889,9 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
     })
   }
 
+  const editButton = <button type="button" className="draft-sheet-edit" aria-label={`${draft.draftNo} 기획안 ${readOnly ? '조회' : '편집'}`} onClick={onOpen}>
+    <Pencil size={12} aria-hidden="true" />기획안 {readOnly ? '조회' : '편집'}
+  </button>
   const brandContent = <div className="draft-sheet-image-cell">
       {mode === 'card'
         ? <p className="draft-card-brand-name">{brand?.name || '브랜드 미정'}</p>
@@ -918,15 +921,15 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
       >
         {named ? '네임확정' : '네임 미정'}
       </SheetConfirmButton>
-      <div className="draft-sheet-brand-actions">
-        <button type="button" className="draft-sheet-edit" aria-label={`${draft.draftNo} 기획안 ${readOnly ? '조회' : '편집'}`} onClick={onOpen}><Pencil size={12} />기획안 {readOnly ? '조회' : '편집'}</button>
-        {mode === 'table' && <button type="button" className="draft-sheet-schedule-button" disabled={readOnly} onClick={onSchedule}>{schedule?.group ? '일정 수정' : '일정 정하기'}</button>}
-      </div>
+      {mode === 'card' && <div className="draft-sheet-brand-actions">{editButton}</div>}
       {mode === 'table' && (draft.releaseIssue.trim() || schedule?.group) && (
         <details className="draft-sheet-release">
           <summary>발매 이슈</summary>
           <p>{draft.releaseIssue.trim() || '등록된 이슈 없음'}</p>
-          {schedule?.group && <div className="draft-sheet-schedule">{formatReleaseGroupLabel(schedule.group)}{schedule.certainty ? ` · ${RELEASE_CERTAINTY_LABEL[schedule.certainty]}` : ''}{schedule.targetDate ? ` · ${formatTargetDate(schedule.targetDate)}` : ''}{schedule.isPreview ? ' · 미리보기' : ''}</div>}
+          {schedule?.group && <>
+            <div className="draft-sheet-schedule">{formatReleaseGroupLabel(schedule.group)}{schedule.certainty ? ` · ${RELEASE_CERTAINTY_LABEL[schedule.certainty]}` : ''}{schedule.targetDate ? ` · ${formatTargetDate(schedule.targetDate)}` : ''}{schedule.isPreview ? ' · 미리보기' : ''}</div>
+            <button type="button" className="draft-sheet-schedule-button" disabled={readOnly} onClick={onSchedule}>일정 수정</button>
+          </>}
         </details>
       )}
     </div>
@@ -1074,6 +1077,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
 
   return <><tr className="draft-sheet-row">
       {layout.map(({ id }) => <Fragment key={id}>{cells[id]}</Fragment>)}
+      <td className="draft-sheet-action-column">{editButton}</td>
     </tr>
     {information && !hidden.has(fromVisual ? 'visual' : 'information') && (
       <DraftInformationPanel key={informationEditorId} id={informationId} anchor={information.anchor}

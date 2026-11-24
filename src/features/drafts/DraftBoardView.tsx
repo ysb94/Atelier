@@ -43,7 +43,7 @@ export function DraftBoardView({ layout, accountId, label, emptyMessage, tableNo
           caption="기획안별 샘플, 상품 정보 및 팀별 진행 현황">
           <DraftMdOptionsProvider><tbody>
             {emptyMessage ? <tr>
-              <td colSpan={visibleColumns} className="bg-card px-4 py-10 text-center text-sm text-muted-foreground">
+              <td colSpan={visibleColumns + 1} className="bg-card px-4 py-10 text-center text-sm text-muted-foreground">
                 {emptyMessage}
               </td>
             </tr> : renderRows('table')}

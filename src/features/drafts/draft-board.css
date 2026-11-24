@@ -39,6 +39,8 @@
 .draft-sheet-row>td{position:relative;padding:var(--draft-sheet-cell-block-padding) 18px;vertical-align:top;background:#fff;overflow-wrap:anywhere}
 .draft-sheet-row>td[hidden]{display:none}
 .draft-sheet-row>td.draft-sheet-brand-cell{padding:6px 16px 12px}
+.draft-board-table th.draft-sheet-action-column,.draft-sheet-row>td.draft-sheet-action-column{position:sticky;right:0;text-align:center}
+.draft-sheet-row>td.draft-sheet-action-column{z-index:2;padding:6px 8px}
 .draft-board-table th+th::before,.draft-sheet-row>td:not([hidden])~td:not([hidden])::after{position:absolute;z-index:1;inset-block:0;inset-inline-start:0;width:1px;background:var(--draft-sheet-divider-color);content:'';pointer-events:none}
 .draft-sheet-row>td:is(.draft-sheet-color-cell,.draft-sheet-information-cell,.draft-sheet-visual-cell,.draft-sheet-amd-cell){--draft-color-line-background:var(--color-muted);padding-inline:0}
 .draft-sheet-row p,.draft-sheet-row dl,.draft-sheet-row dd{margin:0}

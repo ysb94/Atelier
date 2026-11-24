@@ -14,6 +14,7 @@ type HeaderDrag = {
 
 const DRAG_DISTANCE = 5
 const SCROLL_EDGE = 42
+const ACTION_COLUMN_WIDTH = 100
 
 export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, onMoveColumn, children }: {
   layout?: DraftSheetLayout
@@ -28,7 +29,7 @@ export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, 
   const [drop, setDrop] = useState<DropTarget | null>(null)
   const columns = layout.filter(column => column.visible)
   const canMove = Boolean(onMoveColumn && columns.length > 1)
-  const width = columns.reduce((total, { id }) => total + DRAFT_SHEET_COLUMNS[id].width, 0)
+  const width = columns.reduce((total, { id }) => total + DRAFT_SHEET_COLUMNS[id].width, ACTION_COLUMN_WIDTH)
 
   useEffect(() => () => {
     cancelAnimationFrame(scrollFrame.current)
@@ -100,10 +101,12 @@ export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, 
     const section = header.current
     const scroll = section?.closest<HTMLElement>('.draft-board-scroll')
     if (!current?.active || !section || !scroll) return
-    const { left, right } = scroll.getBoundingClientRect()
+    const bounds = scroll.getBoundingClientRect()
+    const { left } = bounds
+    const right = bounds.right - ACTION_COLUMN_WIDTH
     const { top, bottom } = section.getBoundingClientRect()
     const { x, y } = current
-    if (x < left || x > right || y < top || y > bottom) return
+    if (x < left || x > bounds.right || y < top || y > bottom) return
 
     const edge = Math.min(SCROLL_EDGE, (right - left) / 3)
     const distance = x < left + edge ? x - left - edge : Math.max(0, x - right + edge)
@@ -152,7 +155,7 @@ export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, 
   return <table className="draft-board-table" style={{ width }}>
     {caption && <caption className="sr-only">{caption}</caption>}
     <colgroup>{columns.map(({ id }) => <col key={id} className={`draft-column-${id}`}
-      style={{ width: DRAFT_SHEET_COLUMNS[id].width }} />)}</colgroup>
+      style={{ width: DRAFT_SHEET_COLUMNS[id].width }} />)}<col style={{ width: ACTION_COLUMN_WIDTH }} /></colgroup>
     <thead ref={header}>
       <tr>{columns.map(({ id }, index) => <th key={id} scope="col" className={`draft-column-${id}`}
         data-column={id} data-dragging={dragging === id || undefined}
@@ -172,7 +175,7 @@ export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, 
         }}>
         {DRAFT_SHEET_COLUMNS[id].label}
         {canMove && <GripVertical className="draft-header-grip" aria-hidden="true" />}
-      </th>)}</tr>
+      </th>)}<th scope="col" className="draft-sheet-action-column">기획안</th></tr>
     </thead>
     {children}
   </table>
