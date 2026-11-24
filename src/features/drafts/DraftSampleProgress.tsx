@@ -59,7 +59,7 @@ export function DraftSampleProgress({ orders, kind = 'sample', joined = false, o
             <a href={order.url!} download={order.name} title="작업지시서 내려받기">{label} {sampleHistoryDay(order.shippedAt).slice(2) || '등록일 기록 없음'}</a>
             {registered !== null && <span className={`draft-sample-registered-elapsed${order.receivedAt ? '' : ' is-pending'}`}
               title={order.receivedAt ? '작업지시서 등록부터 실물 수령까지 걸린 일수' : '작업지시서 등록 후 경과일'}>
-              {order.receivedAt ? `${registered}day` : `+${registered}day`}
+              {`${order.receivedAt ? '' : '+'}${registered} day`}
             </span>}
           </div>
           {!order.receivedAt && <p className={`draft-sample-dispatch${awaitingChinaDispatch ? ' is-china-waiting' : ''}`}>{country.code === 'CN'
