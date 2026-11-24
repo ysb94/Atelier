@@ -51,7 +51,7 @@ import {
 } from '@/lib/types'
 import { DEFAULT_COMPANY_ID } from '@/lib/company/capabilities'
 import {
-  requiresDraftBrand,
+  DRAFT_NAMES_REQUIRED, hasBothDraftNames, requiresDraftBrand,
 } from '@/lib/drafts/company-draft'
 import {
   colorWorkOrderFileName,
@@ -345,6 +345,7 @@ export function DraftEditPage() {
 
   const loaded = draftQuery.data
   const editable = canWriteDraft(workAccess.access, isNew ? null : loaded ?? { createdBy: null }, form.brandId)
+  const hasBothNames = hasBothDraftNames(form)
   useEffect(() => {
     if (!loaded) return
     const {
@@ -737,6 +738,7 @@ export function DraftEditPage() {
               <span />
               <Field label="영문명">
                 <Input
+                  aria-label="영문명"
                   className="h-9"
                   value={form.nameEn}
                   readOnly={Boolean(form.specs.nameConfirmed)}
@@ -763,12 +765,9 @@ export function DraftEditPage() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      disabled={!editable || saveMutation.isPending}
+                      disabled={!editable || saveMutation.isPending || !hasBothNames}
+                      title={hasBothNames ? undefined : DRAFT_NAMES_REQUIRED}
                       onClick={() => {
-                        if (!form.nameKo.trim() && !form.nameEn.trim()) {
-                          setError('한글명 또는 영문명을 먼저 입력해 주세요.')
-                          return
-                        }
                         const nextForm = { ...form, specs: { ...form.specs, nameConfirmed: true } }
                         patch({ specs: nextForm.specs })
                         if (!isNew) saveMutation.mutate(nextForm)

@@ -28,6 +28,12 @@ export function requiresDraftBrand(status: ProductDraftStatus) {
   return status === 'confirmed'
 }
 
+export const DRAFT_NAMES_REQUIRED = '한글명과 영문명을 모두 입력해 주세요.'
+
+export function hasBothDraftNames(draft: Pick<ProductDraft, 'nameKo' | 'nameEn'>) {
+  return Boolean(draft.nameKo.trim() && draft.nameEn.trim())
+}
+
 export function normalizeDraftBrandId(value: string | null | undefined) {
   const trimmed = value?.trim() ?? ''
   return trimmed ? trimmed : null

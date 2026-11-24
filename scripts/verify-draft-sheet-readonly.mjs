@@ -422,7 +422,15 @@ try{
  assert.equal(waitingAppearance.backgroundColor,'rgb(255, 255, 255)')
  assert.equal(waitingAppearance.content,'none')
  assert.deepEqual(await informationSlots(),samplingSlots,'Waiting colors reserve the same button widths')
+ const confirmName=row.getByRole('button',{name:'네임확정',exact:true})
+ for(const phase of ['name-ko-only','name-en-only']) {
+   await phaseSelect.selectOption(phase)
+   assert.equal(await confirmName.isDisabled(),true)
+   assert.equal(await confirmName.getAttribute('aria-pressed'),'false')
+   assert.equal(await confirmName.getAttribute('title'),'한글명과 영문명을 모두 입력해 주세요.')
+ }
  await phaseSelect.selectOption('review')
+ assert.equal(await confirmName.isEnabled(),true)
  const visualAssigneePicker=visualCell.getByRole('button',{name:'비주얼 팀 담당자',exact:true})
  await visualAssigneePicker.waitFor()
  assert.equal(await visualCell.getByRole('button',{name:'블랙 Image'}).isEnabled(),true)

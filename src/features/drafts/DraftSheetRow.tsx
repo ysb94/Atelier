@@ -7,6 +7,7 @@ import { Input, Select } from '@/components/ui/input'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { DRAFT_COLOR_PHOTO_ACCEPT, prepareDraftColorPhoto } from '@/lib/drafts/color-photo'
 import { draftColorNames, normalizeDraftColorNames } from '@/lib/drafts/color-names'
+import { DRAFT_NAMES_REQUIRED, hasBothDraftNames } from '@/lib/drafts/company-draft'
 import { MAX_DRAFT_COLORS } from '@/lib/drafts/empty-draft'
 import {
   DRAFT_INFORMATION_LABELS, colorInformationEditKey, documentEditKey, hasInformationEdits, informationEditText,
@@ -874,6 +875,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   const name = draft.nameEn.trim() || draft.nameKo.trim() || '이름 미정'
   const proposerName = draft.specs.proposer?.name?.trim()
   const named = Boolean(draft.nameEn.trim() || draft.nameKo.trim())
+  const hasBothNames = hasBothDraftNames(draft)
   const hasColor = draft.colors.length > 0
   const missingPriceColors = draft.colors.flatMap((color, index) =>
     colorImageConfigured(draft.specs.colorImageChoices?.[color.id], draft.specs.colorPhotoUrls?.[color.id])
@@ -909,7 +911,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
     : undefined
   const orderFolder = draft.brandId ? releaseFolders.find(folder => folder.id === draft.seasonId && folder.brandId === draft.brandId) : undefined
   const orderRequirements = [
-    nameConfirmed && named ? null : '네임 확정',
+    nameConfirmed && hasBothNames ? null : '네임 확정',
     hasColor && draft.colors.every(color => colorSetupComplete(draftColorNames(color.name, draft.specs.colorNames?.[color.id]),
       draft.specs.colorImageChoices?.[color.id], draft.specs.colorPhotoUrls?.[color.id])) ? null : '컬러 이름 왼쪽 빨간 표시',
     hasColor && confirmedOrderAmounts && Object.keys(confirmedOrderAmounts).length === draft.colors.length &&
@@ -973,8 +975,9 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
           className="draft-sheet-name-confirm"
           label="네임확정"
           confirmed={nameConfirmed}
-          canToggle={!readOnly && named}
-          blockedTitle="한글명 또는 영문명을 먼저 입력해 주세요"
+          canToggle={!readOnly && (nameConfirmed || hasBothNames)}
+          blockedTitle={readOnly ? '조회 전용 기획안입니다.' : DRAFT_NAMES_REQUIRED}
+          doneStyle={hasBothNames}
           onToggle={(next) => onToggleConfirm('nameConfirmed', next)}
         >
           {named ? '네임확정' : '네임 미정'}

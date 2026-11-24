@@ -13,9 +13,11 @@ import {
   canViewDraftsByOwner,
 } from '@/lib/company/capabilities'
 import {
+  DRAFT_NAMES_REQUIRED,
   UNASSIGNED_DRAFT_BRAND,
   UNASSIGNED_DRAFT_OWNER,
   countDesignerDevelopment,
+  hasBothDraftNames,
   matchesDraftBrandScope,
   matchesDraftOwnerScope,
   type DraftBrandScope,
@@ -791,6 +793,7 @@ export function CompanyDraftsPage() {
                     }}
                     onToggleConfirm={async (flag: DraftConfirmFlag, next) => {
                       await saveDraftChange(draft.id, (current) => {
+                        if (flag === 'nameConfirmed' && next && !hasBothDraftNames(current)) throw new Error(DRAFT_NAMES_REQUIRED)
                         const input = draftToInput(current)
                         return {
                           ...input,

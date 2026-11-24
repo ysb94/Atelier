@@ -86,11 +86,15 @@ function Fixture() {
   const colorSampleRounds = phase === 'color-done'
     ? draft.specs.colorSampleRounds?.map(round => ({ ...round, receivedAt: '2026-10-16T00:00:00Z' }))
     : phase === 'review' ? draft.specs.colorSampleRounds : []
+  const singleName = phase === 'name-ko-only' || phase === 'name-en-only'
   const shown = {
     ...draft,
+    nameKo: phase === 'name-en-only' ? ' ' : draft.nameKo,
+    nameEn: phase === 'name-ko-only' ? '' : draft.nameEn,
     seasonId: orderTest ? 'group' : draft.seasonId,
     sampleWorkOrders: phase === 'new' ? [] : draft.sampleWorkOrders,
-    specs: { ...draft.specs, colorSampleRounds, colorSampleDone: phase === 'color-done' ? { round: ['black'] } : draft.specs.colorSampleDone,
+    specs: { ...draft.specs, nameConfirmed: !singleName && draft.specs.nameConfirmed,
+      colorSampleRounds, colorSampleDone: phase === 'color-done' ? { round: ['black'] } : draft.specs.colorSampleDone,
       ...(orderTest && {
         colorNames: { ...draft.specs.colorNames, black: { nameEn: 'Black', nameKo: '블랙' }, ivory: { nameEn: 'Ivory', nameKo: '아이보리' } },
         manualPrice: priceRequest ? undefined : { destination: '한국', currency: 'KRW' as const, vendor: '', savedAt: '2026-10-20T00:00:00Z',
@@ -142,6 +146,8 @@ function Fixture() {
       <option value="new">최초 지시서</option>
       <option value="color-upload">컬러 지시서</option>
       <option value="color-done">첫 컬러 완료</option>
+      <option value="name-ko-only">한글명만 입력</option>
+      <option value="name-en-only">영문명만 입력</option>
     </select>
     <output data-testid="writes">{writes}</output><output data-testid="opened">{opened}</output>
     <output data-testid="saved-spec">{savedSpec}</output>
