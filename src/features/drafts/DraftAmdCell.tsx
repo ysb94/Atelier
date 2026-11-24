@@ -92,8 +92,8 @@ export function DraftAmdCell({ colors, readOnly, hidden, teamWork }: {
         const codes = saved.colors[color.id] ?? EMPTY_CODES
         return <div key={color.id} className={`draft-color-line${index % 2 ? ' is-alt' : ''}`}>
           <AmdNumbers name={`${name} AMD 번호`} fields={[
-            { label: `${name} 사방넷 번호`, placeholder: '사방넷 no.', value: codes.sabangnet },
-            { label: `${name} 바코드 번호`, placeholder: '바코드 no.', value: codes.barcode, numeric: true },
+            { label: `${name} 사방넷 번호`, placeholder: '사방넷', value: codes.sabangnet },
+            { label: `${name} 바코드 번호`, placeholder: '바코드', value: codes.barcode, numeric: true },
           ]} locked={locked} saving={saving === color.id} onReset={clearError}
             onSave={([sabangnet, barcode]) => save(color.id, payload => ({ ...payload, colors: {
               ...payload.colors, [color.id]: { sabangnet: sabangnet.trim(), barcode: barcode.trim() },

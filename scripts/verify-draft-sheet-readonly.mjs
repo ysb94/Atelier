@@ -180,6 +180,23 @@ try{
  const mdCell=row.locator('.draft-sheet-md-cell')
  const board=page.locator('.draft-board-scroll')
  assert.equal(await board.evaluate(node=>node.scrollWidth>node.clientWidth),true)
+ async function assertCompactColumns() {
+   for (const [id, width] of [['color',128],['information',174],['visual',154],['amd',232]]) {
+     const header=await page.locator(`th[data-column="${id}"]`).boundingBox()
+     const cell=row.locator(`.draft-sheet-${id}-cell`)
+     const body=await cell.boundingBox()
+     assert.equal(Math.round(header.width),width,`${id} has its compact width`)
+     assert.ok(Math.abs(header.x-body.x)<1 && Math.abs(header.width-body.width)<1)
+     const fits=await cell.locator('.draft-color-pad button, .draft-color-line :is(button,input)').evaluateAll(controls=>
+       controls.every(control=>{
+         const {left,right}=control.getBoundingClientRect()
+         const slot=control.closest('.draft-color-pad, .draft-color-line').getBoundingClientRect()
+         return left>=slot.left && right<=slot.right
+       }))
+     assert.ok(fits,`${id} controls fit on their color row`)
+   }
+ }
+ await assertCompactColumns()
  const visualAssigneePicker=visualCell.getByRole('button',{name:'비주얼 팀 담당자',exact:true})
  await visualAssigneePicker.waitFor()
  assert.equal(await visualCell.getByRole('button',{name:'블랙 Image'}).isEnabled(),true)
@@ -221,6 +238,14 @@ try{
  await reloadBlackAmd.click()
  assert.equal(await blackSabangnet.inputValue(),'00043')
  await page.setViewportSize({width:2600,height:950})
+ await assertCompactColumns()
+ assert.equal(Math.round((await page.locator('th[data-column="sample"]').boundingBox()).width),350,'The table does not transfer spare width to SAMPLE')
+ assert.ok(await amdBarcode.evaluate(input=>{
+   const style=getComputedStyle(input)
+   const canvas=document.createElement('canvas').getContext('2d')
+   canvas.font=style.font
+   return canvas.measureText(input.value).width<=input.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight)
+ }),'A 13-digit barcode remains visible in the compact AMD column')
  await board.screenshot({path:'.tmp/draft-sheet-team-columns.png'})
  await page.setViewportSize({width:1800,height:950})
  assert.equal(Math.round((await mdCell.boundingBox()).width),585,'MD TEAM keeps the reference column width')
@@ -462,7 +487,13 @@ try{
  await page.getByRole('button',{name:'단가 회신 반영',exact:true}).click()
  await confirmPrice.waitFor()
  assert.deepEqual(await priceRows.allTextContents(),['16','0'])
- const geometry=()=>row.locator(':scope > td').evaluateAll(cells=>cells.map(cell=>({x:Math.round(cell.getBoundingClientRect().x),width:Math.round(cell.getBoundingClientRect().width),height:Math.round(cell.getBoundingClientRect().height)})))
+ const geometry=()=>row.locator(':scope > td').evaluateAll(cells=>{
+   const rowLeft=cells[0].parentElement.getBoundingClientRect().left
+   return cells.map(cell=>{
+     const {left,width,height}=cell.getBoundingClientRect()
+     return {x:Math.round(left-rowLeft),width:Math.round(width),height:Math.round(height)}
+   })
+ })
  const ownerGeometry=await geometry()
  const names=await row.locator('input,textarea').evaluateAll(fields=>fields.map(field=>field.value))
  const colorColumn=row.locator(':scope > td').nth(3)
@@ -1294,6 +1325,18 @@ try{
  await applyLayout.click()
  await layoutDialog.waitFor({state:'hidden'})
  assert.deepEqual(await columnHeaders.allTextContents(),defaultHeaders)
+
+ await page.setViewportSize({width:2600,height:950})
+ await openLayout()
+ await showColumn('SAMPLE').uncheck()
+ await applyLayout.click()
+ await layoutDialog.waitFor({state:'hidden'})
+ await assertCompactColumns()
+ await openLayout()
+ await showColumn('SAMPLE').check()
+ await applyLayout.click()
+ await layoutDialog.waitFor({state:'hidden'})
+ await page.setViewportSize({width:1800,height:950})
 
  await headerFor('BRAND').press('Shift+ArrowRight')
  assert.deepEqual((await columnHeaders.allTextContents()).slice(0,2),['SAMPLE','BRAND'])

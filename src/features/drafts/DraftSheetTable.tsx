@@ -28,7 +28,7 @@ export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, 
   const [drop, setDrop] = useState<DropTarget | null>(null)
   const columns = layout.filter(column => column.visible)
   const canMove = Boolean(onMoveColumn && columns.length > 1)
-  const minWidth = columns.reduce((total, { id }) => total + DRAFT_SHEET_COLUMNS[id].width, 0)
+  const width = columns.reduce((total, { id }) => total + DRAFT_SHEET_COLUMNS[id].width, 0)
 
   useEffect(() => () => {
     cancelAnimationFrame(scrollFrame.current)
@@ -149,10 +149,10 @@ export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, 
     if (target) onMoveColumn?.(current.id, target.id, target.after)
   }
 
-  return <table className="draft-board-table" style={{ minWidth }}>
+  return <table className="draft-board-table" style={{ width }}>
     {caption && <caption className="sr-only">{caption}</caption>}
     <colgroup>{columns.map(({ id }) => <col key={id} className={`draft-column-${id}`}
-      style={id === 'sample' ? undefined : { width: DRAFT_SHEET_COLUMNS[id].width }} />)}</colgroup>
+      style={{ width: DRAFT_SHEET_COLUMNS[id].width }} />)}</colgroup>
     <thead ref={header}>
       <tr>{columns.map(({ id }, index) => <th key={id} scope="col" className={`draft-column-${id}`}
         data-column={id} data-dragging={dragging === id || undefined}

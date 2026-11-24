@@ -542,6 +542,7 @@ function SheetInlineField({
   value,
   className,
   showError = false,
+  title,
   multiline = false,
   onCommit,
 }: {
@@ -550,6 +551,7 @@ function SheetInlineField({
   value: string
   className: string
   showError?: boolean
+  title?: string
   multiline?: boolean
   onCommit: (next: string) => Promise<void>
 }) {
@@ -599,7 +601,7 @@ function SheetInlineField({
   const fieldProps = {
     'aria-label': label,
     'aria-invalid': error ? true as const : undefined,
-    title: error || undefined,
+    title: error || title,
     className,
     value: readOnly ? value : text,
     disabled: busy,
@@ -985,6 +987,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
                 label={`${draft.draftNo} 컬러 ${index + 1} 이름`}
                 className="draft-sheet-color-name"
                 value={color.name}
+                title={color.name}
                 onCommit={(next) => onRenameColor(color.id, next)}
               />
               {color.orderQty != null && color.orderQty > 0 ? <small>{formatNumber(color.orderQty)}</small> : null}
