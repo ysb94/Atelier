@@ -952,7 +952,7 @@ try{
  assert.equal(await ivoryHtml.getByRole('img').count(),0)
  assert.equal(await ivoryHtml.locator('.draft-visual-image-temporary, .draft-visual-image-pending').count(),0)
  const draftHtml='<p>아이보리 상세 HTML</p><script>document.body.dataset.previewScript = "ran"</script>'
- const context=page.context()
+ const openPages=page.context().pages().length
  const videoHost='https://cdn2.auchee.com'
  const embedUrl=videoHost+'/embed/atelier-preview-fixture.html'
  const videoPath='/video/atelier-preview-fixture.mp4'
@@ -964,13 +964,14 @@ try{
    <script src="${origin+previewScriptPath}"></script><iframe src="${origin+previewFramePath}"></iframe>
    <div><iframe src="${embedUrl}" title="검증 영상" width="320" height="180"></iframe></div>`)
  assert.equal(await blackInput.inputValue(),'')
- const [previewTab]=await Promise.all([context.waitForEvent('page'),
-   ivoryHtml.getByRole('button',{name:'미리보기',exact:true}).click()])
- const htmlFrame=previewTab.frameLocator('iframe[title="아이보리 HTML 미리보기"]')
+ const basicPreview=ivoryHtml.getByRole('button',{name:'미리보기',exact:true})
+ await basicPreview.click()
+ const previewDialog=page.getByRole('dialog',{name:'아이보리 HTML 미리보기',exact:true})
+ const htmlFrame=previewDialog.frameLocator('iframe[title="아이보리 HTML 미리보기"]')
  await htmlFrame.getByText('아이보리 상세 HTML').waitFor()
- assert.equal(await previewTab.title(),'아이보리 HTML 미리보기')
- assert.equal(await previewTab.evaluate(()=>window.opener===null),true)
- assert.equal(await previewTab.locator('iframe').getAttribute('sandbox'),'')
+ assert.equal(page.context().pages().length,openPages)
+ assert.equal(await previewDialog.locator('iframe').getAttribute('sandbox'),'')
+ assert.equal(await previewDialog.locator('iframe').getAttribute('referrerpolicy'),'no-referrer')
  for(const name of ['절대 주소 이미지','상대 주소 이미지','포함된 이미지']) {
    const width=await htmlFrame.getByRole('img',{name}).evaluate(image=>image.decode().then(()=>image.naturalWidth,()=>0))
    assert.equal(width,16,`${name} renders inside the preview`)
@@ -996,8 +997,12 @@ try{
  assert.equal(await htmlFrame.locator('body').getAttribute('data-preview-script'),null)
  assert.equal(await htmlFrame.locator('body').getAttribute('data-external-script'),null)
  assert.equal(await htmlFrame.locator('body').getAttribute('data-image-handler'),null)
- assert.equal(await ivoryHtml.locator('iframe').count(),0,'The editor has no inline preview')
- await previewTab.close()
+ await previewDialog.getByRole('button',{name:'HTML 미리보기 닫기'}).click()
+ await previewDialog.waitFor({state:'detached'})
+ assert.equal(await panel.isVisible(),true)
+ assert.equal(await basicPreview.evaluate(button=>document.activeElement===button),true)
+ assert.ok((await ivoryInput.inputValue()).includes(draftHtml))
+ assert.equal(await ivoryHtml.locator('iframe').count(),0,'Closing the dialog removes the preview frame')
  await ivoryInput.fill(draftHtml)
  await expectCopy(ivoryHtml,'아이보리 HTML',draftHtml)
  const temporaryHtmlMarker=ivoryHtml.locator('.draft-html-temporary-marker')
@@ -1055,12 +1060,16 @@ try{
  assert.ok(nameBox.x<copyBox.x&&copyBox.x<previewBox.x&&
    Math.abs(nameBox.y+nameBox.height/2-copyBox.y-copyBox.height/2)<=1&&copyBox.y===previewBox.y,
    'Vendor name, copy, and preview share a single row')
- const [vendorPreviewTab]=await Promise.all([context.waitForEvent('page'),musinsaPreview.click()])
- const vendorPreviewFrame=vendorPreviewTab.frameLocator('iframe[title="아이보리 무신사 HTML 미리보기"]')
+ await musinsaPreview.click()
+ const vendorPreviewDialog=page.getByRole('dialog',{name:'아이보리 무신사 HTML 미리보기',exact:true})
+ const vendorPreviewFrame=vendorPreviewDialog.frameLocator('iframe[title="아이보리 무신사 HTML 미리보기"]')
  await vendorPreviewFrame.getByText('무신사 하단',{exact:true}).waitFor()
+ assert.equal(page.context().pages().length,openPages)
  assert.deepEqual(await vendorPreviewFrame.locator('p').allTextContents(),['무신사 상단','아이보리 상세 HTML','무신사 하단'])
  assert.equal(await vendorPreviewFrame.locator('body').getAttribute('data-preview-script'),null)
- await vendorPreviewTab.close()
+ await vendorPreviewDialog.getByRole('button',{name:'HTML 미리보기 닫기'}).press('Escape')
+ await vendorPreviewDialog.waitFor({state:'detached'})
+ assert.equal(await panel.isVisible(),true)
  await musinsaName.click()
  assert.equal(await ivoryHtml.getByRole('textbox').count(),1,'A vendor name does not expand a code field')
  const [sourceHtmlBox,vendorListBox,generateButtonBox]=await Promise.all([
@@ -1080,6 +1089,13 @@ try{
  await page.setViewportSize({width:390,height:850})
  await visualHtml.click()
  assert.equal(await ivoryInput.inputValue(),draftHtml)
+ await basicPreview.click()
+ await previewDialog.waitFor()
+ const mobilePreview=await previewDialog.boundingBox()
+ assert.ok(mobilePreview.x>=0&&mobilePreview.x+mobilePreview.width<=390&&
+   mobilePreview.y>=0&&mobilePreview.y+mobilePreview.height<=850)
+ await previewDialog.getByRole('button',{name:'HTML 미리보기 닫기'}).click()
+ await previewDialog.waitFor({state:'detached'})
  await generateVendorCode(ivoryHtml).click()
  const [mobileSource,mobileOutput]=await Promise.all([ivoryInput.boundingBox(),ivoryVendors.boundingBox()])
  assert.ok(mobileOutput.y>=mobileSource.y+mobileSource.height,'On mobile, the vendor list is below the editor')

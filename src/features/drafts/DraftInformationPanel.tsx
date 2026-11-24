@@ -455,7 +455,7 @@ function VendorHtmlCode({ id, name, text, templates, partnerNames, amdReady, amd
         <span className="truncate px-1 text-xs" title={option.name}>{option.name}</span>
         <InformationCopyButton label={`${label} HTML`} text={option.code} buttonText="복사" className="h-6 px-1.5 text-xs" />
         <Button type="button" size="sm" variant="outline" className="h-6 px-1.5 text-xs"
-          aria-label={`${label} HTML 미리보기`} disabled={!option.code}
+          aria-label={`${label} HTML 미리보기`} aria-haspopup="dialog" disabled={!option.code}
           onClick={() => onPreview(label, option.code)}>미리보기</Button>
       </li>
     })}
@@ -474,7 +474,7 @@ function aucheePreviewUrl(source: string | null, directory: string, base: string
   }
 }
 
-async function prepareHtmlPreview(html: string) {
+async function prepareHtmlPreview(html: string, signal: AbortSignal) {
   if (!/<iframe\b/i.test(html)) return html
 
   // Templates let us inspect third-party markup without loading or running it.
@@ -487,7 +487,8 @@ async function prepareHtmlPreview(html: string) {
 
     try {
       const response = await fetch(embedUrl, {
-        credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error', signal: AbortSignal.timeout(8000),
+        credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error',
+        signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
       })
       if (!response.ok) throw new Error('Could not load video embed')
       const embed = document.createElement('template')
@@ -522,39 +523,53 @@ async function prepareHtmlPreview(html: string) {
   return preview.innerHTML
 }
 
-async function openHtmlPreview(title: string, html: string) {
-  const tab = window.open('', '_blank')
-  if (!tab) return false
-
-  tab.opener = null
-  const document = tab.document
-  document.documentElement.lang = 'ko'
-  document.title = title
-  const viewport = document.createElement('meta')
-  viewport.name = 'viewport'
-  viewport.content = 'width=device-width,initial-scale=1'
-  document.head.append(viewport)
-  document.body.textContent = '미리보기를 준비하는 중…'
-
-  const previewHtml = await prepareHtmlPreview(html)
-  if (tab.closed) return true
-
-  // Render editable HTML in an opaque sandbox, including when the preview fills a tab.
-  const frame = document.createElement('iframe')
-  frame.title = title
-  frame.setAttribute('sandbox', '')
-  frame.referrerPolicy = 'no-referrer'
-  frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0'
-  frame.srcdoc = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+function htmlPreviewDocument(html: string) {
+  return `<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="referrer" content="no-referrer">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; img-src data: https: http:; media-src ${AUCHEE_PREVIEW_ORIGIN}/video/; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
     <style>
       :where(html, body) { margin: 0; }
       :where(img) { display: block; max-width: 100%; height: auto; margin-inline: auto; }
       :where(video) { display: block; max-width: 100%; margin-inline: auto; }
-    </style>${previewHtml}`
-  document.body.replaceChildren(frame)
-  return true
+    </style>${html}`
+}
+
+function HtmlPreviewDialog({ title, html, onClose }: { title: string; html: string; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null)
+  const titleId = useId()
+  const [documentHtml, setDocumentHtml] = useState<string>()
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    dialog.current?.showModal()
+    const controller = new AbortController()
+    void prepareHtmlPreview(html, controller.signal).then(prepared => {
+      if (!controller.signal.aborted) setDocumentHtml(htmlPreviewDocument(prepared))
+    }).catch(() => {
+      if (!controller.signal.aborted) setFailed(true)
+    })
+    return () => controller.abort()
+  }, [html])
+
+  return <dialog ref={dialog} aria-labelledby={titleId} onClose={onClose}
+    onKeyDown={event => { if (event.key === 'Escape') event.stopPropagation() }}
+    className="m-auto h-[calc(100dvh-2rem)] max-h-[56rem] w-[calc(100%-2rem)] max-w-5xl overflow-hidden rounded-xl border border-border bg-card text-foreground shadow-xl backdrop:bg-black/35">
+    <div className="flex h-full flex-col">
+      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2">
+        <h2 id={titleId} className="break-words text-sm font-semibold sm:text-base">{title}</h2>
+        <Button type="button" variant="ghost" size="icon" className="shrink-0" aria-label="HTML 미리보기 닫기"
+          onClick={() => dialog.current?.close()}>
+          <X size={16} aria-hidden="true" />
+        </Button>
+      </header>
+      {documentHtml !== undefined
+        ? <iframe title={title} sandbox="" referrerPolicy="no-referrer" srcDoc={documentHtml}
+            className="min-h-0 w-full flex-1 border-0 bg-white" />
+        : failed
+          ? <p role="alert" className="p-4 text-sm text-danger">미리보기를 불러오지 못했습니다.</p>
+          : <p role="status" className="p-4 text-sm text-muted-foreground">미리보기를 준비하는 중…</p>}
+    </div>
+  </dialog>
 }
 
 function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSaveTemporary, entry, workingCopy, vendorHtml, partnerNames, amdReady, amdCodes, onSave }: {
@@ -571,6 +586,7 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
   const [codeOpen, setCodeOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [preview, setPreview] = useState<{ title: string; html: string }>()
   const codeId = useId()
   const stored = typeof entry?.payload === 'string' ? entry.payload : ''
   const working = readOnly ? undefined : workingCopy?.edits.html
@@ -595,9 +611,8 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
     }
   }
 
-  async function preview(label: string, html: string) {
-    const opened = await openHtmlPreview(`${label} HTML 미리보기`, html)
-    setError(opened ? '' : '미리보기를 열려면 브라우저의 팝업 차단을 해제해 주세요.')
+  function openPreview(label: string, html: string) {
+    setPreview({ title: `${label} HTML 미리보기`, html })
   }
 
   return <section aria-label={`${name} HTML`}
@@ -627,8 +642,8 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
         <span className="mr-auto text-[10px] text-muted-foreground" role="status">
           {saved ? '저장됨' : temporary ? '임시저장됨' : ''}
         </span>
-        <Button type="button" size="sm" variant="outline" className="h-6 px-2" title="새 탭에서 미리보기"
-          disabled={!hasContent} onClick={() => void preview(name, text)}>미리보기</Button>
+        <Button type="button" size="sm" variant="outline" className="h-6 px-2" aria-haspopup="dialog"
+          disabled={!hasContent} onClick={() => openPreview(name, text)}>미리보기</Button>
         {!readOnly && <>
           <Button type="button" size="sm" variant="secondary" className="h-6 px-2"
             disabled={!canSaveTemporary || !hasContent || saved || temporary || saving || versionChanged} onClick={() => void save(true)}>임시저장</Button>
@@ -643,7 +658,7 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
         aria-expanded={codeOpen} aria-controls={codeOpen ? codeId : undefined}
         onClick={() => setCodeOpen(open => !open)}>업체별 HTML 생성</Button>
       {codeOpen && <VendorHtmlCode id={codeId} name={name} text={text} templates={vendorHtml} partnerNames={partnerNames}
-        amdReady={amdReady} amdCodes={amdCodes} onPreview={preview} />}
+        amdReady={amdReady} amdCodes={amdCodes} onPreview={openPreview} />}
     </div>}
     {!readOnly && versionChanged ? <div className="col-span-full flex flex-wrap items-center gap-2">
       <p role="alert" className="text-xs text-danger">다른 화면에서 먼저 저장했습니다. 작성 중인 HTML은 복사할 수 있습니다.</p>
@@ -652,6 +667,7 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
         setError('')
       }}>최신 저장본 불러오기</Button>
     </div> : error && <p role="alert" className="col-span-full text-xs text-danger">{error}</p>}
+    {preview && <HtmlPreviewDialog {...preview} onClose={() => setPreview(undefined)} />}
   </section>
 }
 
