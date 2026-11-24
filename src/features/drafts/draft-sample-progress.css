@@ -8,7 +8,8 @@
 .draft-sample-country,.draft-sample-registered-elapsed{color:var(--color-primary)}
 .draft-sample-country>span{padding-left:4px}
 .draft-sample-progress .draft-sample-dispatch{grid-column:1;align-self:center;margin:0;text-align:center;color:var(--color-primary);font-size:13px;line-height:1.5}
-.draft-sample-receive{grid-column:2;grid-row:2;align-self:center}
+.draft-sample-receipt-actions{grid-column:2;grid-row:2;align-self:center;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.draft-sample-revision-preview{display:none}
 .draft-sample-progress button{height:auto;min-height:25px;padding:3px 8px;font-size:11px;font-weight:400;box-shadow:none}
 .draft-sample-interval{display:flex;min-height:88px;flex-direction:column;align-items:center;justify-content:flex-start;gap:12px;padding:12px 8px 16px;text-align:center}
 .draft-sheet-samples.has-color-sample>.draft-sample-progress+.draft-sample-progress>.draft-sample-round:first-child>.draft-sample-route{border-top:0}
@@ -18,5 +19,9 @@
 .draft-sample-passed{color:var(--color-primary);font-size:12px}
 .draft-sheet-row .draft-sheet-sample-cell p.draft-sheet-registered{margin-bottom:8px;color:var(--color-primary);font-weight:400}
 .draft-sheet-sample-cell :is(.draft-sample-heading,.draft-sample-dispatch,.draft-sample-received-elapsed){font-size:inherit}
+.draft-sheet-sample-cell .draft-sample-dispatch.is-china-waiting{align-self:start;padding-inline-start:1rem;text-align:left;color:var(--color-blue-700);font-size:.5em}
+.draft-sheet-sample-cell .draft-sample-revision-preview{display:inline-flex}
+.draft-sheet-sample-cell .has-revision-preview>.draft-sample-heading{grid-column:1}
+.draft-sheet-sample-cell .has-revision-preview>.draft-sample-receipt-actions{grid-row:1/span 2;align-self:start}
 .draft-sheet-row .draft-sample-route{padding-block:4px 6px}
 .draft-sheet-row .draft-sample-interval{min-height:0;gap:5px;padding-block:6px}

@@ -429,7 +429,30 @@ try{
    assert.equal(await confirmName.getAttribute('aria-pressed'),'false')
    assert.equal(await confirmName.getAttribute('title'),'한글명과 영문명을 모두 입력해 주세요.')
  }
+ await phaseSelect.selectOption('china-waiting')
+ const samplePreview=row.locator('.draft-sheet-sample-cell .draft-sample-round').last()
+ const dispatchPreview=samplePreview.getByText('중국팀 제작·발송 대기',{exact:true})
+ const revisionPreview=samplePreview.getByRole('button',{name:'수정 작업지시서',exact:true})
+ const receiptPreview=samplePreview.getByRole('button',{name:'수령 확인',exact:true})
+ assert.equal(await revisionPreview.isDisabled(),true)
+ assert.equal(await receiptPreview.isDisabled(),true)
+ assert.equal(await dispatchPreview.evaluate(element=>{
+   const heading=element.parentElement.querySelector('.draft-sample-heading')
+   return parseFloat(getComputedStyle(element).fontSize)/parseFloat(getComputedStyle(heading).fontSize)
+ }),0.5)
+ assert.equal(await dispatchPreview.evaluate(element=>{
+   const probe=document.createElement('span')
+   probe.style.color='var(--color-blue-700)'
+   element.append(probe)
+   const matches=getComputedStyle(element).color===getComputedStyle(probe).color
+   probe.remove()
+   return matches
+ }),true)
+ const [dispatchBox, revisionBox, receiptBox]=await Promise.all([dispatchPreview.boundingBox(),revisionPreview.boundingBox(),receiptPreview.boundingBox()])
+ assert.ok(revisionBox.y+revisionBox.height<=receiptBox.y&&revisionBox.x>=dispatchBox.x+dispatchBox.width)
+ assert.ok(Math.abs(revisionBox.x+revisionBox.width-receiptBox.x-receiptBox.width)<1,'SAMPLE actions share the right edge')
  await phaseSelect.selectOption('review')
+ assert.equal(await row.getByRole('button',{name:'수정 작업지시서',exact:true}).count(),0)
  assert.equal(await confirmName.isEnabled(),true)
  const visualAssigneePicker=visualCell.getByRole('button',{name:'비주얼 팀 담당자',exact:true})
  await visualAssigneePicker.waitFor()

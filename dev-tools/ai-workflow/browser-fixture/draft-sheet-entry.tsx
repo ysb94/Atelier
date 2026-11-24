@@ -87,12 +87,16 @@ function Fixture() {
     ? draft.specs.colorSampleRounds?.map(round => ({ ...round, receivedAt: '2026-10-16T00:00:00Z' }))
     : phase === 'review' ? draft.specs.colorSampleRounds : []
   const singleName = phase === 'name-ko-only' || phase === 'name-en-only'
+  const sampleOrders = draft.sampleWorkOrders ?? []
+  const sampleWorkOrders = phase === 'china-waiting'
+    ? [...sampleOrders, { ...newSampleWorkOrder(2), id: 'pending-china-sample', url: 'sample-2.pdf', originCountry: '중국', shippedAt: '2026-10-30T00:00:00Z' }]
+    : phase === 'new' ? [] : sampleOrders
   const shown = {
     ...draft,
     nameKo: phase === 'name-en-only' ? ' ' : draft.nameKo,
     nameEn: phase === 'name-ko-only' ? '' : draft.nameEn,
     seasonId: orderTest ? 'group' : draft.seasonId,
-    sampleWorkOrders: phase === 'new' ? [] : draft.sampleWorkOrders,
+    sampleWorkOrders,
     specs: { ...draft.specs, nameConfirmed: !singleName && draft.specs.nameConfirmed,
       colorSampleRounds, colorSampleDone: phase === 'color-done' ? { round: ['black'] } : draft.specs.colorSampleDone,
       ...(orderTest && {
@@ -146,6 +150,7 @@ function Fixture() {
       <option value="new">최초 지시서</option>
       <option value="color-upload">컬러 지시서</option>
       <option value="color-done">첫 컬러 완료</option>
+      <option value="china-waiting">중국팀 발송 대기</option>
       <option value="name-ko-only">한글명만 입력</option>
       <option value="name-en-only">영문명만 입력</option>
     </select>
