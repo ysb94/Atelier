@@ -23,15 +23,6 @@ export type BrandFileCapability = {
   reason: string | null
 }
 
-/**
- * R2 Worker 필요 계약:
- * - GET /list?type=&prefix=ROOT → ROOT/type/ 또는 기본 루트의 type/ 만
- * - PUT/DELETE/MOVE 키도 같은 prefix 안만 허용
- * 지금은 prefix를 무시하므로 비-ATELIER 브랜드 파일 작업을 열지 않는다.
- */
-export const R2_WORKER_PREFIX_CONTRACT =
-  'GET /list?type=&prefix=ROOT 가 ROOT 밖 키를 돌려주면 안 된다. 쓰기도 ROOT/ 또는 기본 type/ 만 허용해야 한다.'
-
 export function isAtelierBrandSlug(slug?: string | null) {
   return ATELIER_SLUGS.has((slug ?? '').trim().toLowerCase())
 }
