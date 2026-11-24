@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, RefreshCw, Upload } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, RefreshCw, Upload } from 'lucide-react'
 import { StylePicker } from '@/components/style-picker'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -45,6 +45,8 @@ import { cn, formatNumber, emptyList } from '@/lib/utils'
 import {
   FINAL_LOCATION_MARK,
   FORCED_PRIORITY_DATE,
+  SECOND_PRIORITY_DATE,
+  LAST_PRIORITY_DATE,
   WAREHOUSE_REVIEW_FLAG_LABEL,
   WAREHOUSE_STOCK_ACTION_LABEL,
   WAREHOUSE_USAGE_PRIORITY_LABEL,
@@ -84,6 +86,42 @@ type DialogState =
   | null
 
 const TABLE_PAGE_SIZE = 100
+const STOCK_COLUMNS = [
+  { key: 'usageRank', label: '순서' },
+  { key: 'styleNo', label: 'M번호' },
+  { key: 'styleName', label: '상품명' },
+  { key: 'location', label: '위치' },
+  { key: 'boxQr', label: '박스 QR' },
+  { key: 'receivedOn', label: '입고일' },
+  { key: 'unitsPerBox', label: '입수', numeric: true },
+  { key: 'remainingBoxes', label: '잔여박스', numeric: true },
+  { key: 'openedUnits', label: '개봉낱개', numeric: true },
+  { key: 'quantity', label: '총수량', numeric: true },
+  { key: 'review', label: '검수' },
+] as const
+type StockSortKey = typeof STOCK_COLUMNS[number]['key']
+type StockSorting = { key: StockSortKey; direction: 'asc' | 'desc' }
+const stockTextOrder = new Intl.Collator('ko-KR', { numeric: true })
+
+function stockSortValue(row: WarehouseStockPosition, key: StockSortKey, condition?: { referenceStyleNo: string }): string | number | null {
+  switch (key) {
+    case 'styleNo': return (condition?.referenceStyleNo || row.styleNo || row.sourceStyleNo).trim() || null
+    case 'location': return formatWarehouseLocation(row).trim() || null
+    case 'receivedOn': return row.receivedOn || (
+      [FORCED_PRIORITY_DATE, SECOND_PRIORITY_DATE, LAST_PRIORITY_DATE].includes(row.receivedOnRaw)
+        ? row.receivedOnRaw : null)
+    case 'quantity': return isWarehouseQuantityKnown(row) ? warehousePositionQty(row) : null
+    case 'review': {
+      const flags = condition ? row.reviewFlags.filter(flag => flag !== 'missing_style') : row.reviewFlags
+      return flags.length ? flags.map(flag => WAREHOUSE_REVIEW_FLAG_LABEL[flag]).join(' · ') : condition ? null : '정상'
+    }
+    default: {
+      const value = row[key]
+      return typeof value === 'string' ? value.trim() || null : value
+    }
+  }
+}
+
 const SHEET_CONFLICT_LABELS: Record<string, string> = {
   SHEET_STOCK_CHANGED: '시트 값이 저장 전 값과 다릅니다.',
   SHEET_REPAIR_HISTORY_UNAVAILABLE: '자동 정정 이력을 기록하지 못했습니다. 다음 동기화에서 다시 시도합니다.',
@@ -148,6 +186,7 @@ export function WarehouseInventoryPanel({
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<ReviewFilter>('all')
   const [tablePage, setTablePage] = useState(0)
+  const [sorting, setSorting] = useState<StockSorting>({ key: 'usageRank', direction: 'asc' })
   const [dialog, setDialog] = useState<DialogState>(null)
   const [error, setError] = useState<string | null>(null)
   const [downloadingTemplate, setDownloadingTemplate] = useState(false)
@@ -233,7 +272,13 @@ export function WarehouseInventoryPanel({
             .includes(q)
         )
       })
-      .sort((left, right) => {
+      .map(row => ({ row, value: stockSortValue(row, sorting.key, conditions.get(JSON.stringify([row.externalRowId, row.sourceProductName]))) }))
+      .sort(({ row: left, value: a }, { row: right, value: b }) => {
+        if (a == null && b != null) return 1
+        if (a != null && b == null) return -1
+        const compared = a == null || b == null ? 0 : typeof a === 'string' && typeof b === 'string'
+          ? stockTextOrder.compare(a, b) : Number(a) - Number(b)
+        if (compared) return compared * (sorting.direction === 'asc' ? 1 : -1)
         const leftRank = left.usageRank ?? 9999
         const rightRank = right.usageRank ?? 9999
         if (leftRank !== rightRank) return leftRank - rightRank
@@ -242,7 +287,12 @@ export function WarehouseInventoryPanel({
         }
         return left.sourceRowNumber - right.sourceRowNumber
       })
-  }, [conditions, filter, positionsQuery.data, search, zone])
+      .map(entry => entry.row)
+  }, [conditions, filter, positionsQuery.data, search, zone, sorting])
+
+  useEffect(() => {
+    setSorting({ key: 'usageRank', direction: 'asc' })
+  }, [brandId, zone])
 
   useEffect(() => {
     setTablePage(0)
@@ -456,20 +506,21 @@ export function WarehouseInventoryPanel({
         <table className="min-w-[1100px] w-full border-collapse text-xs">
           <thead className="sticky top-0 z-10 bg-primary text-primary-foreground">
             <tr className="text-left text-[10px] uppercase tracking-wide text-primary-foreground">
-              <th className="border-b border-border px-2 py-2">순서</th>
-              <th className="border-b border-border px-2 py-2">M번호</th>
-              <th className="border-b border-border px-2 py-2">상품명</th>
-              <th className="border-b border-border px-2 py-2">위치</th>
-              <th className="border-b border-border px-2 py-2">박스 QR</th>
-              <th className="border-b border-border px-2 py-2">입고일</th>
-              <th className="border-b border-border px-2 py-2 text-right">입수</th>
-              <th className="border-b border-border px-2 py-2 text-right">잔여박스</th>
-              {view === 'outbound' ? (
-                <th className="border-b border-border px-2 py-2 text-right">개봉낱개</th>
-              ) : null}
-              <th className="border-b border-border px-2 py-2 text-right">총수량</th>
-              <th className="border-b border-border px-2 py-2">검수</th>
-              <th className="border-b border-border px-2 py-2">관리</th>
+              {STOCK_COLUMNS.filter(column => view === 'outbound' || column.key !== 'openedUnits').map(column => {
+                const selected = sorting.key === column.key
+                const Icon = selected ? sorting.direction === 'asc' ? ArrowUp : ArrowDown : ArrowUpDown
+                const nextDirection = selected && sorting.direction === 'asc' ? 'desc' : 'asc'
+                return <th key={column.key} scope="col" className="border-b border-border p-0"
+                  aria-sort={selected ? sorting.direction === 'asc' ? 'ascending' : 'descending' : 'none'}>
+                  <button type="button" className={cn('flex w-full items-center gap-1 px-2 py-2 text-inherit hover:bg-primary-foreground/10 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2',
+                    'numeric' in column ? 'justify-end' : 'justify-start')}
+                    aria-label={`${column.label} ${nextDirection === 'asc' ? '오름차순' : '내림차순'} 정렬`}
+                    onClick={() => { setSorting({ key: column.key, direction: nextDirection }); setTablePage(0) }}>
+                    {column.label}<Icon className="size-3 shrink-0" aria-hidden="true" />
+                  </button>
+                </th>
+              })}
+              <th scope="col" className="border-b border-border px-2 py-2">관리</th>
             </tr>
           </thead>
           <tbody>

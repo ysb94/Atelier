@@ -8,6 +8,7 @@ import {
   groupOutboundPartnersInFolder,
   normalizeOutboundPartnerName,
   outboundPartnerUnitLabel,
+  outboundPartnerUnitDisplayName,
   type OutboundCompanyInFolder,
 } from '@/lib/codes/outbound-partner'
 import { buildFolderForest, folderPath } from '@/lib/codes/outbound-folder'
@@ -535,7 +536,7 @@ export function resolveBarcodeDataEntrySite(
     if (!singleUnit) return emptySiteFields()
     return {
       usageTargetId: singleUnit.id,
-      officialSiteName: outboundPartnerUnitLabel(singleUnit),
+      officialSiteName: outboundPartnerUnitDisplayName(singleUnit),
       siteStatus: singleUnit.active ? 'matched' : 'inactive',
     }
   }
@@ -549,7 +550,7 @@ export function resolveBarcodeDataEntrySite(
   }
   return {
     usageTargetId: hit.id,
-    officialSiteName: outboundPartnerUnitLabel(hit),
+    officialSiteName: outboundPartnerUnitDisplayName(hit),
     siteStatus: hit.active ? 'matched' : 'inactive',
   }
 }

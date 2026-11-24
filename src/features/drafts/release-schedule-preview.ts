@@ -1,4 +1,4 @@
-import { formatSeasonLabel, type Season } from '@/lib/types'
+import { formatSeasonLabel, type ProductDraft, type Season } from '@/lib/types'
 
 export type ReleaseCertainty = 'tentative' | 'confirmed'
 
@@ -57,7 +57,7 @@ export function newTempGroupId() {
 }
 
 export function resolveReleaseSchedule(
-  draft: { id: string; brandId: string | null; seasonId: string | null },
+  draft: Pick<ProductDraft, 'id' | 'brandId' | 'seasonId' | 'specs'>,
   seasonMap: Map<string, Season>,
   tempGroups: PreviewReleaseGroup[],
   assignments: Record<string, PreviewReleaseAssignment>,
@@ -87,10 +87,11 @@ export function resolveReleaseSchedule(
       isPreview: false,
     }
   }
+  const schedule = draft.specs.releaseSchedule?.seasonId === season.id ? draft.specs.releaseSchedule : undefined
   return {
     group: seasonToPreviewGroup(season),
-    targetDate: null,
-    certainty: 'tentative',
+    targetDate: schedule?.targetDate ?? null,
+    certainty: schedule?.certainty ?? 'tentative',
     brandId: draft.brandId,
     isPreview: false,
   }

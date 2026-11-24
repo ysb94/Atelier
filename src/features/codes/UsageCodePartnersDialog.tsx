@@ -7,6 +7,7 @@ import { folderPathLabel } from '@/lib/codes/outbound-folder'
 import {
   outboundPartnerDisplayName,
   outboundPartnerUnitLabel,
+  outboundPartnerUnitDisplayName,
 } from '@/lib/codes/outbound-partner'
 import { groupOutboundSearchSections } from '@/lib/codes/outbound-partner-browser'
 import type {
@@ -212,7 +213,7 @@ export function UsageCodePartnersDialog({
                                   />
                                   <span className="min-w-0 flex-1 break-words">
                                     {branched
-                                      ? outboundPartnerUnitLabel(unit)
+                                      ? outboundPartnerUnitDisplayName(unit)
                                       : outboundPartnerDisplayName(unit)}
                                   </span>
                                   {paused ? (

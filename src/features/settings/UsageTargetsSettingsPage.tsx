@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, CardContent } from '@/components/ui/card'
+import { OutboundPartnerRegistration } from '@/features/codes/OutboundPartnerRegistration'
 import { UsageTargetManagerPanel } from '@/features/codes/UsageTargetManager'
 import {
   getCodeUsageAssignments,
@@ -11,6 +12,9 @@ import {
   getCodeUsageTargets,
   getOutboundPartnerGroups,
 } from '@/lib/api'
+
+// The old W컨셉 row without a branch is still referenced by outbound shipments.
+const LEGACY_W_CONCEPT_TARGET_ID = '38ea0156-c5b3-4df7-843c-d71ec0e5540f'
 
 export function UsageTargetsSettingsPage() {
   const { brand } = useBrand()
@@ -77,17 +81,30 @@ export function UsageTargetsSettingsPage() {
     <div>
       <PageHeader
         title={`${brand.name} 출고업체`}
-        description="출고처를 폴더 아래 업체와 지점으로 두고, 지점이 없으면 업체를 실제 출고 단위로 관리합니다."
+        description="업체와 지점을 찾거나 등록합니다."
       />
 
       {loading && targets.length === 0 && folders.length === 0 ? (
         <div className="text-sm text-muted-foreground">불러오는 중...</div>
       ) : (
         <Card>
-          <CardContent className="p-5">
+          <CardContent className="space-y-4 p-5">
+            <OutboundPartnerRegistration
+              brandId={brand.id}
+              targets={targets}
+              folders={folders}
+              onSaved={async () => {
+                await Promise.all([
+                  invalidate(),
+                  queryClient.invalidateQueries({ queryKey: ['outboundShipments', brand.id] }),
+                  queryClient.invalidateQueries({ queryKey: ['barcodeDataEntryShipments', brand.id] }),
+                ])
+              }}
+            />
             <UsageTargetManagerPanel
               brandId={brand.id}
               targets={targets}
+              hiddenTargetId={LEGACY_W_CONCEPT_TARGET_ID}
               folders={folders}
               groups={groups}
               aliases={aliases}

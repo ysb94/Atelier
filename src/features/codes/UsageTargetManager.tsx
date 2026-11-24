@@ -19,6 +19,7 @@ import type { AliasOwner } from '@/features/codes/OutboundPartnerEditForm'
 type SharedProps = {
   brandId: string
   targets: CodeUsageTarget[]
+  hiddenTargetId?: string
   folders: CodeUsageTargetFolder[]
   groups: OutboundPartnerGroup[]
   aliases: CodeUsageTargetAlias[]
@@ -30,6 +31,7 @@ function UsageTargetManagerContent({
   layout,
   brandId,
   targets,
+  hiddenTargetId,
   folders,
   groups,
   aliases,
@@ -98,6 +100,7 @@ function UsageTargetManagerContent({
         layout={layout}
         brandId={brandId}
         targets={targets}
+        hiddenTargetId={hiddenTargetId}
         folders={folders}
         groups={groups}
         keyword={keyword}

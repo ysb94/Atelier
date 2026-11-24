@@ -24,11 +24,22 @@ export function verifyWarehouseSyncAppsScript() {
   }
   const get = (row, column) => cells.get(coordinate(row, column)) ?? ''
   let maxRows = 12
+  let lockHeld = false
+  let beforeLock
+  const lock = {
+    waitLock() {
+      beforeLock?.()
+      assert.equal(lockHeld, false, 'the writer must acquire the shared lock only once')
+      lockHeld = true
+    },
+    tryLock() { if (lockHeld) return false; this.waitLock(); return true },
+    releaseLock() { assert.equal(lockHeld, true); lockHeld = false },
+  }
   const sheet = {
     getSheetId: () => 1,
     getMaxRows: () => maxRows,
     getLastRow: () => maxRows,
-    getMaxColumns: () => 35,
+    getMaxColumns: () => 46,
     getRange(row, column, height = 1, width = 1) {
       const read = getter => Array.from({ length: height }, (_, y) =>
         Array.from({ length: width }, (_, x) => getter(row + y, column + x)))
@@ -79,6 +90,7 @@ export function verifyWarehouseSyncAppsScript() {
   }
   const ok = { getResponseCode: () => 200, getContentText: () => '{"ok":true}' }
   const ctx = createContext({
+    LockService: { getScriptLock: () => lock },
     SpreadsheetApp: {
       flush() {},
       Direction: { UP: 'up' },
@@ -153,6 +165,13 @@ export function verifyWarehouseSyncAppsScript() {
   assert.match(rows[2].externalRowId, /^inb_/)
   assert.equal(get(11, 27), 'finder-swatch')
   assert.equal(get(11, 19), '')
+  notes.set(coordinate(4, 27), 'Finder 입고 확인 대기')
+  put(4, 3, ['보호할 미확정 행'])
+  assert.throws(() => ctx.syncAtelierWarehouseSnapshot_({ validateOnly: false }), /AA를 확인/)
+  assert.equal(get(4, 27), '')
+  assert.equal(notes.get(coordinate(4, 27)), 'Finder 입고 확인 대기')
+  put(4, 3, [''])
+  notes.delete(coordinate(4, 27))
 
   ctx.upsertWPS_WhenRowDiff_resume()
   const searchByName = name => [...documents.values()].find(doc => doc.productName === name)?.libraryNumber
@@ -165,6 +184,12 @@ export function verifyWarehouseSyncAppsScript() {
   const beforeRetry = requests.length
   ctx.upsertWPS_WhenRowDiff_resume()
   assert.equal(requests.length, beforeRetry, 'unchanged rows do not rewrite search documents')
+
+  put(11, 3, ['before another job'])
+  beforeLock = () => { beforeLock = undefined; put(11, 3, ['newer name']) }
+  ctx.upsertWPS_WhenRowDiff_resume()
+  assert.equal(requests.length, beforeRetry, 'a WPS pass cannot export stale data after a competing write')
+  put(11, 3, ['스와치'])
 
   for (const row of [11, 12]) {
     const docId = get(row, 27)
@@ -222,8 +247,21 @@ export function verifyWarehouseSyncAppsScript() {
   assert.equal(ctx._writeAtelierStockCondition(sheet, restore).number, 'M0049')
   assert.equal(get(5609, 3), '뒤쪽 재고')
   put(8003, 3, [''])
-  notes.set(coordinate(5610, 27), '이전 행의 작업 메모')
-  formulas.set(coordinate(5611, 3), '=IF(TRUE,"","")')
+  // Physical row 5609 is occupied. New stock must reuse holes above it
+  // while older identities, WPS work, formulas and notes await their owners.
+  put(2, 2, ['헤더'])
+  notes.set(coordinate(4, 27), '이전 행의 작업 메모')
+  formulas.set(coordinate(5, 3), '=IF(TRUE,"","")')
+  put(6, 26, ['Z 보관값'])
+  formulas.set(coordinate(7, 24), '=IF(B7="","",B7)')
+  put(8, 27, ['다른 재고의 AA'])
+  put(10, 34, ['WPS 반영 대기'])
+  put(11, 19, ['QR 유지'])
+  notes.set(coordinate(12, 8), '보관할 메모')
+  put(13, 24, ['WPS 입력 대기'])
+  notes.set(coordinate(15, 35), '이전 WPS 메모')
+  formulas.set(coordinate(17, 26), '=IF(TRUE,"","")')
+  const manualRows = [7, 9]
   for (const [i, place] of ['2-1-1', 'P-7-1'].entries()) {
     const rowId = `at_manual_${String(i).padStart(32, '0')}`
     const entry = { requestId: `event-${i}`, rowId, before: null,
@@ -231,20 +269,22 @@ export function verifyWarehouseSyncAppsScript() {
         receivedOn: '261116', units: '20', boxes: '2', note: '' } }
     assert.equal(ctx._writeAtelierStockCondition(sheet, entry).row_id, rowId)
     assert.equal(ctx._writeAtelierStockCondition(sheet, entry).row_id, rowId)
-    assert.deepEqual([get(5612 + i, 2), get(5612 + i, 3), get(5612 + i, 4), get(5612 + i, 27)],
+    const row = manualRows[i]
+    assert.deepEqual([get(row, 2), get(row, 3), get(row, 4), get(row, 27)],
       ['', entry.values.productName, place, rowId])
   }
   const firstEvent = { requestId: 'event-0', rowId: `at_manual_${'0'.repeat(32)}`, before: null,
     values: { number: '', productName: '캐논 콜라보 토트백', place: '2-1-1',
       receivedOn: '261116', units: '20', boxes: '2', note: '' } }
-  put(5612, 4, [new Date('2002-01-01T00:00:00Z')])
+  put(manualRows[0], 4, [new Date('2002-01-01T00:00:00Z')])
   assert.equal(ctx._writeAtelierStockCondition(sheet, firstEvent).row_id, firstEvent.rowId)
-  assert.equal(get(5612, 4), '2-1-1')
+  assert.equal(get(manualRows[0], 4), '2-1-1')
   ctx.syncAtelierWarehouseSnapshot_({ validateOnly: false })
   const events = payloads.at(-1).rows.filter(row => row.externalRowId.startsWith('at_manual_'))
   assert.equal(events.length, 2)
-  assert.equal(notes.get(coordinate(5610, 27)), '이전 행의 작업 메모')
-  assert.equal(formulas.get(coordinate(5611, 3)), '=IF(TRUE,"","")')
+  assert.equal(notes.get(coordinate(4, 27)), '이전 행의 작업 메모')
+  assert.equal(formulas.get(coordinate(5, 3)), '=IF(TRUE,"","")')
+  assert.equal(formulas.get(coordinate(7, 24)), '=IF(B7="","",B7)')
   assert.ok(events.every(row => row.sourceStyleNo === '' && row.sourceProductName === '캐논 콜라보 토트백'))
   assert.equal(get(5609, 3), '뒤쪽 재고')
   const prior = { number: 'M0049', productName: '뒤쪽 재고', place: '3-4-4_B1',
@@ -268,7 +308,6 @@ export function verifyWarehouseSyncAppsScript() {
   let afterBatch
   ctx.PLACEMENT_REMOVED_NOTE = 'Finder 지운 행 ID: '
   ctx.warehousePlacementCell = (_id, row, column, fields, value) => ({ row, column, fields, value })
-  ctx.findWarehousePlacementEmptyRows = () => [5701]
   ctx.warehousePlacementSheetApi = (_sheet, path, method, { requests }) => {
     assert.equal(path, ':batchUpdate')
     assert.equal(method, 'post')
@@ -305,7 +344,8 @@ export function verifyWarehouseSyncAppsScript() {
   assert.equal(stockBatches.length, 2)
   assert.deepEqual(Array.from(ctx.writeAtelierQrAuditSheet(sheet, splitJob), row => row.id), [initial.id, split.id])
   assert.equal(stockBatches.length, 2)
-  assert.deepEqual([get(5700, 7), get(5701, 4), get(5701, 7), get(5701, 27)], [5, 'P-7-1', 2, split.id])
+  const splitRow = 14
+  assert.deepEqual([get(5700, 7), get(splitRow, 4), get(splitRow, 7), get(splitRow, 27)], [5, 'P-7-1', 2, split.id])
 
   const resized = { ...remaining, values: remaining.values.map((v, i) => i === 4 ? '40' : i === 5 ? '3' : v) }
   ctx.writeAtelierQrAuditSheet(sheet, stockWork([remaining], [resized]))
@@ -313,9 +353,8 @@ export function verifyWarehouseSyncAppsScript() {
   ctx.writeAtelierQrAuditSheet(sheet, stockWork([resized], []))
   for (const column of [2, 3, 4, 5, 6, 7, 8, 19, 27]) assert.equal(get(5700, column), '')
   assert.equal(get(5700, 9), '다른 열')
-  assert.equal(get(5701, 27), split.id)
+  assert.equal(get(splitRow, 27), split.id)
   assert.equal(notes.get(coordinate(5700, 27)), 'Finder 지운 행 ID: ' + initial.id)
-  ctx.findWarehousePlacementEmptyRows = () => [5702]
   const named = { id: 'at_manual_abc00000000040008000000000000001', qr: 'UNPLACED-REVIEW-QR',
     values: ['', '테이프', '2-1-1', '261113', '24', '1', ''] }
   const namedJob = stockWork([], [named])
@@ -324,7 +363,8 @@ export function verifyWarehouseSyncAppsScript() {
   const namedBatchCount = stockBatches.length
   assert.equal(ctx.writeAtelierQrAuditSheet(sheet, namedJob)[0].id, named.id)
   assert.equal(stockBatches.length, namedBatchCount)
-  assert.deepEqual([get(5702, 2), get(5702, 3), get(5702, 19), get(5702, 27)], ['', '테이프', named.qr, named.id])
+  const namedRow = 16
+  assert.deepEqual([get(namedRow, 2), get(namedRow, 3), get(namedRow, 19), get(namedRow, 27)], ['', '테이프', named.qr, named.id])
 
   const project = (row, changes) => ({ ...row, values: row.values.map((value, index) => changes[index] ?? value) })
   const toJob = (id, before, after, picking = []) => ({
@@ -359,7 +399,6 @@ export function verifyWarehouseSyncAppsScript() {
   assert.equal(removedProof.cleared.get(coalesced.id), 5704)
   assert.equal(get(5704, 20), '예약 열')
 
-  ctx.findWarehousePlacementEmptyRows = () => [5705]
   const versionedSplitFrom = { ...total, id: 'split-source' }
   const versionedSplitTo = { ...split, id: 'split-target' }
   put(5706, 2, versionedSplitFrom.values)
@@ -373,7 +412,8 @@ export function verifyWarehouseSyncAppsScript() {
   put(5708, 4, [''])
   assert.equal(ctx.writeAtelierQrAuditSheet(sheet, atomicSplit).rows.length, 2)
   assert.equal(stockBatches.length, initialBatchCount + 1)
-  assert.deepEqual([get(5705, 7), get(5706, 7), get(5705, 27)], [1, 1, versionedSplitTo.id])
+  const atomicTargetRow = 18
+  assert.deepEqual([get(atomicTargetRow, 7), get(5706, 7), get(atomicTargetRow, 27)], [1, 1, versionedSplitTo.id])
 
   const damaged = project(atomicSplit.after[0], { 5: '2' })
   afterBatch = () => put(5706, 7, ['9'])
@@ -396,11 +436,14 @@ export function verifyWarehouseSyncAppsScript() {
   ctx.enableAtelierStockSheetWritebackV2()
   assert.deepEqual(calls.splice(0), ['claim-stock-sheet-jobs'])
   assert.equal(properties.get('ATELIER_STOCK_SHEET_WRITEBACK_V2'), 'true')
-  ctx.LockService = { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) }
   ctx._atelierStockConditionCall = (action, body) => {
     calls.push({ action, body })
     if (action === 'list-qr-audit-exports') return { entries: [] }
-    if (action === 'claim-stock-sheet-jobs') return { jobs: [conflict, writeIndependent, consumed, adoptedManual] }
+    if (action === 'claim-stock-sheet-jobs') {
+      assert.deepEqual({ ...ctx.syncAtelierStockConditions() }, { confirmed: 0, pending: true },
+        'a concurrent inbound trigger must defer before reading or writing rows')
+      return { jobs: [conflict, writeIndependent, consumed, adoptedManual] }
+    }
     return { ok: true }
   }
   assert.deepEqual({ ...ctx.syncAtelierWarehouseQrAuditSheet() }, { synced: 3, pending: true })
@@ -411,7 +454,7 @@ export function verifyWarehouseSyncAppsScript() {
   ])
   assert.deepEqual({ ...calls[2].body.differences[0] },
     { id: versionedSplitFrom.id, field: '품명', expected: total.values[1], actual: '다른 상품', target: total.values[1] })
-  assert.equal(get(5702, 8), '다른 행 반영')
+  assert.equal(get(namedRow, 8), '다른 행 반영')
   assert.equal(get(5709, 3), reserved.values[1])
   assert.equal(notes.has(coordinate(5704, 27)), false, 'unreferenced row becomes reusable after acknowledgement')
 
@@ -558,6 +601,125 @@ export function verifyWarehouseSyncAppsScript() {
   assert.deepEqual(Array.from({ length: 35 }, (_, i) => get(1828, i + 1)), neighborBefore)
   assert.equal(formulas.get(coordinate(1828, 9)), '=KEEP()')
   assert.equal(notes.get(coordinate(1828, 27)), '정상 재고 메모')
+
+  // A batch with several new IDs must reserve distinct gaps above the tail.
+  // The second and fourth candidate rows carry independent WPS and Z data.
+  put(20, 28, ['WPS 스냅샷'])
+  put(22, 26, [0])
+  const batchRows = ['A', 'B', 'C'].map(suffix => ({
+    ...split, id: 'batch-' + suffix, qr: 'QR-BATCH-' + suffix,
+  }))
+  const gapJob = toJob('sparse-inserts', [], batchRows)
+  const countBeforeInserts = stockBatches.length
+  const verifiedBatch = ctx.writeAtelierQrAuditSheet(sheet, gapJob)
+  assert.deepEqual(Array.from(verifiedBatch.rows, row => row.id), batchRows.map(row => row.id))
+  for (const [index, row] of [19, 21, 23].entries()) {
+    assert.deepEqual([get(row, 3), get(row, 19), get(row, 27)],
+      [split.values[1], batchRows[index].qr, batchRows[index].id])
+  }
+  ctx.writeAtelierQrAuditSheet(sheet, gapJob)
+  assert.equal(stockBatches.length, countBeforeInserts + 1, 'all three writes commit once across a retry')
+  assert.deepEqual([get(2, 2), get(6, 26), get(8, 27), get(10, 34), get(11, 19), get(13, 24), get(20, 28), get(22, 26)],
+    ['헤더', 'Z 보관값', '다른 재고의 AA', 'WPS 반영 대기', 'QR 유지', 'WPS 입력 대기', 'WPS 스냅샷', 0])
+  assert.equal(notes.get(coordinate(12, 8)), '보관할 메모')
+  assert.equal(notes.get(coordinate(15, 35)), '이전 WPS 메모')
+  assert.equal(formulas.get(coordinate(17, 26)), '=IF(TRUE,"","")')
+  assert.equal(get(5709, 27), reserved.id, 'AA reserved for the same manual job was completed at its original row')
+
+  for (const col of [38, 45, 46]) {
+    put(31, col, [0])
+    formulas.set(coordinate(32, col), '=IF(TRUE,"","")')
+    notes.set(coordinate(33, col), '이동 기록')
+    assert.deepEqual(Array.from(ctx._atelierVacantStockRowsInRange(sheet, 31, 3)), [])
+    put(31, col, [''])
+    formulas.delete(coordinate(32, col))
+    notes.delete(coordinate(33, col))
+  }
+  const claim = 'Finder 입고 BOX\nrequest'
+  notes.set(coordinate(31, 27), claim)
+  assert.deepEqual(Array.from(ctx._atelierVacantStockRowsInRange(sheet, 31, 1)), [])
+  assert.deepEqual(Array.from(ctx._atelierVacantStockRowsInRange(sheet, 31, 1, '', claim)), [31])
+  assert.deepEqual(Array.from(ctx._atelierVacantStockRowsInRange(sheet, 31, 1, '', claim + '2')), [])
+  notes.delete(coordinate(31, 27))
+
+  // Simulate another writer leaving metadata after selection, before the actual write.
+  const allocate = ctx._atelierFindVacantStockRows
+  let changedRow
+  ctx._atelierFindVacantStockRows = (...args) => {
+    const targets = allocate(...args)
+    changedRow = targets[0]
+    put(changedRow, 26, ['동시 입력'])
+    return targets
+  }
+  const race = { ...split, id: 'changed-after-selection' }
+  const countBeforeRace = stockBatches.length
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, toJob('race', [], [race])), /ROW_OCCUPIED/)
+  ctx._atelierFindVacantStockRows = allocate
+  assert.deepEqual([get(changedRow, 26), get(changedRow, 27)], ['동시 입력', ''])
+  assert.equal(stockBatches.length, countBeforeRace)
+
+  const largeBatch = Array.from({ length: 100 }, (_, i) => ({
+    ...split, id: 'bulk-' + i, qr: 'INBOUND-QR-' + i,
+  }))
+  const bulkJob = toJob('bulk-response-lost', [], largeBatch)
+  lostReply = true
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, bulkJob), /LOST_BATCH_RESPONSE/)
+  const beforeReplay = stockBatches.length
+  assert.equal(ctx.writeAtelierQrAuditSheet(sheet, bulkJob).rows.length, 100)
+  assert.equal(stockBatches.length, beforeReplay)
+  for (const item of largeBatch) {
+    const rows = [...cells].filter(([key, value]) => key.endsWith(':27') && value === item.id)
+    assert.equal(rows.length, 1)
+    assert.equal(get(Number(rows[0][0].split(':')[0]), 19), item.qr)
+  }
+
+  runInContext(readFileSync('scripts/google-apps-script/warehouse-test-form.gs', 'utf8'), ctx)
+  ctx.SpreadsheetApp.openById = () => ctx.SpreadsheetApp.getActive()
+  ctx.Utilities.getUuid = () => '23456789-1234-4000-8000-000000000002'
+  const form = { styleNo: 'M0001', productName: '폼 입고', location: '4-1-4', receivedOn: '2026-11-20',
+    unitsPerBox: 30, boxes: 2, boxQr: 'DEV-FORM-QR' }
+  lostReply = true
+  assert.throws(() => ctx.saveAtelierWarehouseTestRow(form), /LOST_BATCH_RESPONSE/)
+  const formBatches = stockBatches.length
+  const formResult = ctx.saveAtelierWarehouseTestRow(form)
+  assert.equal(formResult.aaStatus, 'preserved')
+  assert.equal(get(formResult.row, 19), form.boxQr)
+  assert.throws(() => ctx.saveAtelierWarehouseTestRow({ ...form, boxes: 3 }), /박스 QR/)
+  assert.equal(stockBatches.length, formBatches)
+
+  // No partial commit when a batch exceeds the remaining warehouse range.
+  maxRows = 8003
+  for (let row = 3; row < 8002; row++) put(row, 27, ['occupied-' + row])
+  const oversized = [race, { ...race, id: 'requires-another-slot' }]
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, toJob('capacity', [], oversized)), /NO_EMPTY_ROW/)
+  assert.equal(stockBatches.length, formBatches)
+  assert.deepEqual([get(8002, 27), get(8003, 27)], ['', ''])
+  ctx.writeAtelierQrAuditSheet(sheet, toJob('last-slot', [], [race]))
+  assert.deepEqual([get(8002, 27), get(8003, 27)], [race.id, ''])
+
+  // Several claims can arrive during one run. Reuse the scan across claims,
+  // without repeatedly reading the whole sheet or returning the same gap twice.
+  const available = []
+  for (const [first, end] of [[3100, 5500], [6000, 7600]]) {
+    for (let row = first; row < end; row += 2) {
+      put(row, 27, [''])
+      available.push(row)
+    }
+  }
+  const cache = {}
+  let scans = 0
+  const measuredSheet = {
+    ...sheet,
+    getRange(...args) {
+      scans++
+      return sheet.getRange(...args)
+    },
+  }
+  const assigned = []
+  for (let i = 0; i < 100; i++) assigned.push(...allocate(measuredSheet, 20, cache))
+  assert.deepEqual(assigned, available)
+  assert.ok(scans < 100, `repeated claims must share scans (observed ${scans})`)
+  console.log('warehouse-sheet-sync Apps Script: earliest safe gaps, batch allocation, WPS reservations and existing-AA retries verified')
   console.log('warehouse-sheet-sync Apps Script: M0049 source-only deletion, cleared-AA recovery, M0954 preservation and destination guards verified')
   console.log('warehouse-sheet-sync Apps Script: verified inventory drift repair, pre-write audit, QR-only removal and unsafe matches blocked')
   console.log('warehouse-sheet-sync Apps Script: coalesced AA write, readback, independent conflict, split and depletion retry verified')

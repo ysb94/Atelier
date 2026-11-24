@@ -2,10 +2,13 @@ import type { DraftInformationField, InformationEdits } from '@/lib/drafts/color
 import { getSupabase } from './client'
 
 export type DraftInformationTemporary = {
-  field: DraftInformationField
+  field: DraftInformationField | 'html' | 'image'
   color_id: string | null
   revision: string
-  edits: InformationEdits
+  edits: InformationEdits & {
+    html?: { source: string; text: string }
+    image?: { source: string; text: string; draftRevision?: string }
+  }
 }
 
 export type DraftInformationTemporaryStore = {

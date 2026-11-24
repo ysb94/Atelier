@@ -1,6 +1,6 @@
 import {
   compactOutboundPartnerKey,
-  outboundPartnerDisplayName,
+  outboundPartnerRegisteredName,
 } from '@/lib/codes/outbound-partner'
 import type { CodeUsageTarget, CodeUsageTargetAlias } from '@/lib/types'
 
@@ -37,7 +37,7 @@ export function outboundPartnerSaveConflict(
       const alias = aliasesByKey.get(key)?.find((candidate) => candidate.targetId !== target.id)
       if (other || alias) {
         const owner = other ?? proposed.find((candidate) => candidate.id === alias?.targetId)
-        return `"${outboundPartnerDisplayName(target)}" 이름이 "${owner ? outboundPartnerDisplayName(owner) : alias?.alias}"의 이름 또는 별칭과 겹칩니다.`
+        return `"${outboundPartnerRegisteredName(target)}" 이름이 "${owner ? outboundPartnerRegisteredName(owner) : alias?.alias}"의 이름 또는 별칭과 겹칩니다.`
       }
     }
   }
@@ -53,7 +53,7 @@ export function outboundPartnerSaveConflict(
 /** 등록된 업체·지점 전체 이름과 기존 저장 이름을 함께 인식한다. 분류는 키가 아니다. */
 export function outboundPartnerNameKeys(target: NamedPartner): string[] {
   return [...new Set([
-    outboundPartnerDisplayName(target),
+    outboundPartnerRegisteredName(target),
     target.name,
     target.normalizedName,
   ].map(compactOutboundPartnerKey).filter(Boolean))]

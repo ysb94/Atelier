@@ -13,6 +13,8 @@ import {
 import { outboundPartnerSaveConflict } from '@/lib/codes/outbound-partner-matching'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
+import { readOutboundPartnerDisplayName } from '@/lib/supabase/outbound-partner-display-name'
+import { diagnosticQuery } from '@/lib/supabase/diagnostic-query'
 
 const COLUMNS =
   'id, brand_id, name, normalized_name, active, is_one_time, channel_type, shipping_method, folder_id, group_id, site_name, normalized_site_name, outbound_partner_groups(name), contact_name, contact_phone, contact_email, address, note, sort_order, created_at, updated_at'
@@ -26,6 +28,7 @@ type TargetRow = {
   id: string
   brand_id: string
   name: string
+  display_name?: string | null
   normalized_name: string
   active: boolean
   is_one_time: boolean
@@ -58,9 +61,9 @@ type AliasRow = {
 }
 
 export class CodeUsageTargetStoreError extends Error {
-  readonly code: 'duplicate' | 'not_found' | 'invalid'
+  readonly code: 'duplicate' | 'not_found' | 'invalid' | 'conflict'
 
-  constructor(message: string, code: 'duplicate' | 'not_found' | 'invalid') {
+  constructor(message: string, code: CodeUsageTargetStoreError['code']) {
     super(message)
     this.name = 'CodeUsageTargetStoreError'
     this.code = code
@@ -75,6 +78,7 @@ function toTarget(row: TargetRow): CodeUsageTarget {
     id: row.id,
     brandId: row.brand_id,
     name: row.name,
+    displayName: row.display_name,
     normalizedName: row.normalized_name,
     active: row.active,
     isOneTime: row.is_one_time,
@@ -114,11 +118,11 @@ export async function listCodeUsageTargets(
 ): Promise<CodeUsageTarget[]> {
   const rows: TargetRow[] = []
   for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await getSupabase()
+    const { data, error } = await readOutboundPartnerDisplayName((column) => getSupabase()
       .from('code_usage_targets')
-      .select(COLUMNS)
+      .select(COLUMNS + column)
       .eq('brand_id', brandId)
-      .range(from, from + PAGE_SIZE - 1)
+      .range(from, from + PAGE_SIZE - 1))
 
     if (error) {
       throw new CodeUsageTargetStoreError(
@@ -141,6 +145,25 @@ export async function listCodeUsageTargets(
         a.order - b.order ||
         a.name.localeCompare(b.name, 'ko'),
     )
+}
+
+export async function listCodeUsageTargetOptions(brandId: string, signal: AbortSignal) {
+  type TargetOptionRow = Pick<TargetRow, 'id' | 'name' | 'display_name' | 'active' | 'folder_id' | 'sort_order'>
+  const rows: TargetOptionRow[] = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await readOutboundPartnerDisplayName((column) => getSupabase()
+      .from('code_usage_targets')
+      .select('id,name,active,folder_id,sort_order' + column)
+      .eq('brand_id', brandId)
+      .order('sort_order')
+      .order('id')
+      .range(from, from + PAGE_SIZE - 1)
+      .abortSignal(signal))
+    if (error) throw error
+    rows.push(...((data as unknown as TargetOptionRow[] | null) ?? []))
+    if ((data?.length ?? 0) < PAGE_SIZE) break
+  }
+  return rows.sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'ko'))
 }
 
 export async function listCodeUsageTargetAliases(
@@ -216,10 +239,47 @@ function rpcError(error: PostgrestErrorLike, fallback: string) {
 
 export type SaveCodeUsageTargetInput = CodeUsageTargetInput & {
   id?: string | null
+  displayName?: string | null
   active?: boolean
   aliases?: readonly string[]
   folderId?: string | null
   groupName?: string
+}
+
+export type OutboundPartnerRegistrationInput =
+  | { action: 'new-company'; companyName: string; siteName: string; folderId: string | null; channelType: OutboundChannelType }
+  | { action: 'name-existing' | 'add-site'; existingId: string; expectedUpdatedAt: string; siteName: string }
+
+export async function registerOutboundPartner(brandId: string, input: OutboundPartnerRegistrationInput) {
+  const newCompany = input.action === 'new-company'
+  try {
+    const id = await diagnosticQuery<string | null>('app', 'outbound_partner_registration', getSupabase()
+      .rpc('register_outbound_partner', {
+        p_brand_id: brandId,
+        p_action: input.action,
+        p_company_name: newCompany ? input.companyName : null,
+        p_site_name: input.siteName,
+        p_folder_id: newCompany ? input.folderId : null,
+        p_channel_type: newCompany ? input.channelType : null,
+        p_existing_id: newCompany ? null : input.existingId,
+        p_expected_updated_at: newCompany ? null : input.expectedUpdatedAt,
+      }))
+    if (id) return id
+  } catch (error) {
+    const cause = error instanceof Error ? error.cause as PostgrestErrorLike | undefined : undefined
+    if (cause?.code === 'PGRST202' || cause?.code === '42883') {
+      throw new CodeUsageTargetStoreError('출고업체 등록 기능이 아직 서버에 적용되지 않았습니다.', 'invalid')
+    }
+    if (cause?.code === '23505') {
+      throw new CodeUsageTargetStoreError(newCompany ? '이미 등록된 이름입니다. 기존 업체를 검색해 주세요.' : '이미 등록된 지점 이름입니다.', 'duplicate')
+    }
+    if (cause?.code === '40001') {
+      throw new CodeUsageTargetStoreError('업체 정보가 바뀌었습니다. 업체를 다시 선택해 주세요.', 'conflict')
+    }
+    if (cause) throw rpcError(cause, '등록하지 못했습니다. 다시 시도해 주세요.')
+    throw error
+  }
+  throw new CodeUsageTargetStoreError('등록 결과를 확인하지 못했습니다. 업체를 검색해 확인해 주세요.', 'invalid')
 }
 
 /** 업체와 별칭을 한 트랜잭션으로 저장한다. 별칭 배열이 곧 최종 상태다. */
@@ -272,8 +332,10 @@ export async function saveCodeUsageTarget(
   const conflict = outboundPartnerSaveConflict(previous, proposed, proposedAliases, proposedId, savedAliases)
   if (conflict) throw new CodeUsageTargetStoreError(conflict, 'duplicate')
 
+  const displayName = normalizeOutboundPartnerName(input.displayName ?? '') || null
+  const setDisplayName = input.displayName !== undefined
   const { data, error } = await getSupabase().rpc(
-    'save_outbound_partner_unit_atomic',
+    setDisplayName ? 'save_outbound_partner_unit_with_display_name' : 'save_outbound_partner_unit_atomic',
     {
       p_brand_id: brandId,
       p_id: input.id ?? null,
@@ -294,6 +356,7 @@ export async function saveCodeUsageTarget(
       p_contact_email: (input.contactEmail ?? '').trim(),
       p_address: normalizeOutboundPartnerName(input.address ?? ''),
       p_aliases: aliasPayload(input.aliases ?? []),
+      ...(setDisplayName ? { p_display_name: displayName } : {}),
     },
   )
 
@@ -309,11 +372,11 @@ export async function saveCodeUsageTarget(
     )
   }
 
-  const { data: row, error: readError } = await getSupabase()
+  const { data: row, error: readError } = await readOutboundPartnerDisplayName((column) => getSupabase()
     .from('code_usage_targets')
-    .select(COLUMNS)
+    .select(COLUMNS + column)
     .eq('id', savedId)
-    .maybeSingle()
+    .maybeSingle())
 
   if (readError || !row) {
     throw new CodeUsageTargetStoreError(
@@ -384,6 +447,7 @@ export async function updateCodeUsageTarget(
     Pick<
       CodeUsageTarget,
       | 'name'
+      | 'displayName'
       | 'active'
       | 'isOneTime'
       | 'channelType'
@@ -399,11 +463,23 @@ export async function updateCodeUsageTarget(
     >
   > & { aliases?: readonly string[]; groupName?: string },
 ): Promise<CodeUsageTarget> {
-  const { data: existing, error: readError } = await getSupabase()
+  if (patch.displayName !== undefined && Object.keys(patch).length === 1) {
+    const { data, error } = await getSupabase()
+      .from('code_usage_targets')
+      .update({ display_name: normalizeOutboundPartnerName(patch.displayName ?? '') || null })
+      .eq('id', id)
+      .select(COLUMNS + ', display_name')
+      .maybeSingle()
+    if (error) throw rpcError(error, '표시명을 저장하지 못했습니다.')
+    if (!data) throw new CodeUsageTargetStoreError('표시명을 저장할 수 없습니다.', 'not_found')
+    return toTarget(data as unknown as TargetRow)
+  }
+
+  const { data: existing, error: readError } = await readOutboundPartnerDisplayName((column) => getSupabase()
     .from('code_usage_targets')
-    .select(COLUMNS)
+    .select(COLUMNS + column)
     .eq('id', id)
-    .maybeSingle()
+    .maybeSingle())
 
   if (readError) {
     throw new CodeUsageTargetStoreError(
@@ -431,6 +507,7 @@ export async function updateCodeUsageTarget(
   return saveCodeUsageTarget(row.brand_id, {
     id,
     name: patch.name !== undefined ? patch.name : current.name,
+    displayName: patch.displayName,
     active: patch.active ?? current.active,
     isOneTime: patch.isOneTime ?? current.isOneTime,
     channelType: patch.channelType ?? current.channelType,

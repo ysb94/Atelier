@@ -1,5 +1,6 @@
 // Offline fixture: no remote client or credentials. All mutations are audited.
 import { DEFAULT_USAGE_CODE_COLUMNS } from '../../../src/lib/codes/usage-code-columns'
+import { compactOutboundPartnerKey } from '../../../src/lib/codes/outbound-partner'
 const uuid = (n: number) =>
   `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const brand = uuid(1),
@@ -14,7 +15,8 @@ const target = (id: string, name: string, order: number) => ({
   id,
   brand_id: brand,
   name,
-  normalized_name: name,
+  display_name: null as string | null,
+  normalized_name: compactOutboundPartnerKey(name),
   site_name: '',
   normalized_site_name: '',
   active: true,
@@ -111,6 +113,47 @@ const data: Record<string, any[]> = {
   usage_partner_columns: [],
   usage_partner_values: [],
 }
+if (new URLSearchParams(location.search).has('partner-folders')) {
+  const online = uuid(61), fulfillment = uuid(62), supply = uuid(63), distribution = uuid(64), offline = uuid(68)
+  data.code_usage_target_folders = [
+    { id: online, name: '온라인', parent_id: null },
+    { id: fulfillment, name: '풀필먼트', parent_id: online },
+    { id: supply, name: '사입', parent_id: fulfillment },
+    { id: distribution, name: '유통', parent_id: fulfillment },
+    { id: offline, name: '오프라인', parent_id: null },
+  ].map((folder, order) => ({
+    ...folder, brand_id: brand, normalized_name: folder.name, sort_order: order, created_at: now, updated_at: now,
+  }))
+  data.code_usage_targets = [
+    { ...target(a, '쿠팡_MFS', 0), folder_id: supply },
+    { ...target(b, '29CM_MFS', 1), folder_id: distribution },
+    { ...target(uuid(65), '무신사_MFS', 2), folder_id: distribution },
+    {
+      ...target(uuid(66), '롯데면세점 인천공항점', 3),
+      folder_id: distribution,
+      group_id: uuid(67),
+      outbound_partner_groups: { name: '롯데면세점' },
+      site_name: '인천공항점',
+      normalized_site_name: '인천공항점',
+    },
+    {
+      ...target('38ea0156-c5b3-4df7-843c-d71ec0e5540f', 'W컨셉', 4),
+      folder_id: offline,
+      group_id: uuid(69),
+      outbound_partner_groups: { name: 'W컨셉' },
+      channel_type: 'offline',
+    },
+    {
+      ...target(uuid(70), 'W컨셉 · 한남점', 5),
+      folder_id: offline,
+      group_id: uuid(69),
+      outbound_partner_groups: { name: 'W컨셉' },
+      channel_type: 'offline',
+      site_name: '한남점',
+      normalized_site_name: '한남점',
+    },
+  ]
+}
 if (new URLSearchParams(location.search).has('grouped')) {
   data.code_usage_targets.forEach((target, index) =>
     Object.assign(target, {
@@ -134,6 +177,7 @@ if (new URLSearchParams(location.search).has('grouped')) {
   })
 }
 const audit: any[] = []
+let nextRegistrationId = 110
 const fingerprint = () =>
   JSON.stringify(
     Object.fromEntries(
@@ -161,6 +205,7 @@ export function getSupabase() {
         single = false,
         start = 0,
         end = Infinity
+      let displayNameUpdate: { display_name: string | null } | undefined
       const q: any = {
         select: () => q,
         order: () => q,
@@ -196,8 +241,16 @@ export function getSupabase() {
             `Shared or unaudited table mutation forbidden: ${table}.${method}`,
           )
         }
-      q.then = (resolve: any, reject: any) =>
-        Promise.resolve(
+      if (table === 'code_usage_targets') {
+        q.update = (values: { display_name: string | null }) => {
+          if (Object.keys(values).join() !== 'display_name') throw new Error('Unexpected target update')
+          displayNameUpdate = values
+          return q
+        }
+      }
+      q.then = (resolve: any, reject: any) => {
+        if (displayNameUpdate) rows.forEach((row) => Object.assign(row, displayNameUpdate))
+        return Promise.resolve(
           missing && table.startsWith('usage_partner_')
             ? {
                 data: null,
@@ -209,9 +262,55 @@ export function getSupabase() {
                 error: null,
               },
         ).then(resolve, reject)
+      }
       return q
     },
     async rpc(name: string, args: any) {
+      if (name === 'register_outbound_partner') {
+        const rows = data.code_usage_targets
+        const base = rows.find((row) => row.id === args.p_existing_id && row.brand_id === args.p_brand_id)
+        const companyName = base?.outbound_partner_groups?.name ?? base?.name ?? args.p_company_name
+        if (args.p_action === 'new-company' && rows.some((row) => (row.outbound_partner_groups?.name ?? row.name) === companyName)) {
+          return { data: null, error: { code: '23505', message: 'duplicate fixture company' } }
+        }
+        if (args.p_action !== 'new-company' && base?.updated_at !== args.p_expected_updated_at) {
+          return { data: null, error: { code: '40001', message: 'fixture company changed' } }
+        }
+        const groupId = base?.group_id ?? uuid(nextRegistrationId++)
+        const group = { name: companyName }
+        if (base && !base.group_id) {
+          base.group_id = groupId
+          base.outbound_partner_groups = group
+        }
+        const site = args.p_site_name
+        const stamp = new Date().toISOString()
+        audit.push({ name, args: structuredClone(args) })
+        if (args.p_action === 'name-existing' && base) {
+          Object.assign(base, { site_name: site, normalized_site_name: compactOutboundPartnerKey(site), updated_at: stamp })
+          return { data: base.id, error: null }
+        }
+        const created = {
+          ...target(uuid(nextRegistrationId++), [companyName, site].filter(Boolean).join(' '), rows.length),
+          brand_id: args.p_brand_id,
+          group_id: groupId,
+          outbound_partner_groups: group,
+          folder_id: base?.folder_id ?? args.p_folder_id,
+          channel_type: base?.channel_type ?? args.p_channel_type,
+          site_name: site,
+          normalized_site_name: compactOutboundPartnerKey(site),
+          updated_at: stamp,
+        }
+        rows.push(created)
+        return { data: created.id, error: null }
+      }
+      if (name === 'save_outbound_partner_unit_with_display_name') {
+        const row = data.code_usage_targets.find((item) => item.id === args.p_id && item.brand_id === args.p_brand_id)
+        if (!row) return { data: null, error: { message: 'fixture target not found' } }
+        row.display_name = args.p_display_name
+        row.updated_at = new Date().toISOString()
+        audit.push({ name, args: structuredClone(args) })
+        return { data: row.id, error: null }
+      }
       if (name === 'get_usage_partner_access')
         return missing
           ? {

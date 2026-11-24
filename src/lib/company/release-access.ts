@@ -10,11 +10,13 @@ export type ReleaseProfile = {
 export const RELEASE_COMPANY_ID = 'e0000000-0000-4000-8000-000000000001'
 export const RELEASE_OPERATIONS_ID = '2e49ef43-75b9-4c89-b42d-9fd50ad9087b'
 export const RELEASE_LOGISTICS_ID = 'c5d4cfca-97ce-4ca7-b30a-6beed842cf1e'
+export const RELEASE_MD_ID = '919b2c44-afb6-4d7e-a5b8-b7203df9cef9'
+export const RELEASE_VISUAL_ID = '7ac8b7a8-7f12-4f3e-a371-d2dac7e492f1'
 /** 실제 부서 UUID로 화면을 연결한다. 부서 이름은 빈 탭의 표시 용도로만 쓴다. */
 export const RELEASE_DEPARTMENT_SITES = [
   { id: 'ced99f89-ea80-4eeb-8f03-272bf72f5db1', title: '기획', pages: ['/drafts', MATERIAL_REQUESTS_PATH, '/work-requests/planning'] },
-  { id: '7ac8b7a8-7f12-4f3e-a371-d2dac7e492f1', title: 'Visual', pages: ['/work-requests/design', '/design/work-request-management', '/design/styled-cuts', '/design/file-manager'] },
-  { id: '919b2c44-afb6-4d7e-a5b8-b7203df9cef9', title: 'MD', pages: ['/product-work/md', '/work-requests/md'] },
+  { id: RELEASE_VISUAL_ID, title: 'Visual', pages: ['/work-requests/design', '/design/work-request-management', '/design/styled-cuts', '/design/file-manager'] },
+  { id: RELEASE_MD_ID, title: 'MD', pages: ['/product-work/md', '/work-requests/md'] },
   { id: 'bf926822-910c-422f-9c17-5fd3d8ddb3ba', title: '중국팀', pages: ['/china/work-orders'] },
   { id: RELEASE_OPERATIONS_ID, title: '운영지원', pages: [] },
   { id: RELEASE_LOGISTICS_ID, title: '물류', pages: [] },
@@ -48,8 +50,7 @@ export function releaseAccess(profile: ReleaseProfile | null | undefined) {
   }
 }
 export function releasePersonalPart(profile: ReleaseProfile | null | undefined, part: string | null, approver = false) {
-  if (part === 'my-work') return false
-  if (part === 'work') return profile?.status === 'active' && profile.companyId === RELEASE_COMPANY_ID
+  if (part === 'work' || part === 'my-work') return profile?.status === 'active' && profile.companyId === RELEASE_COMPANY_ID
   if ((part === 'overtime' || part === 'attendance') && !isHeadOfficeMember(profile)) return false
   return releaseAccess(profile).unrestricted || !part || part === 'my-attendance' || part === 'overtime' || part === 'meetings' || ((part === 'approvals' || part === 'attendance') && approver)
 }

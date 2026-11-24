@@ -4,7 +4,7 @@ import type { ChatRoom, InboxNotification } from '../inbox/types.ts'
 export const SITE_NAME = 'E&J'
 
 const PERSONAL_TITLES: Record<string, string> = {
-  work: '작업 요청', 'my-work': '내업무', 'my-attendance': 'My Schedule', profile: '내 정보', overtime: '야근',
+  work: '작업 요청', 'my-work': '내 업무', 'my-attendance': 'My Schedule', profile: '내 정보', overtime: '야근',
   approvals: '승인할 신청', 'company-notice': '회사 공지', 'department-notice': '부서 공지',
   meetings: '회의', attendance: '담당 부서 출근시간',
 }

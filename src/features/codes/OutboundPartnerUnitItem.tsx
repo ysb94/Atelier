@@ -29,13 +29,13 @@ export function OutboundPartnerUnitItem({
       className={cn(
         'rounded-md text-left',
         layout === 'chip'
-          ? 'h-7 shrink-0 px-2'
-          : 'h-8 w-full px-1.5',
+          ? 'h-7 shrink-0 px-2 text-sm font-medium'
+          : 'h-8 min-w-0 flex-1 px-1',
         selected ? 'bg-muted' : 'hover:bg-muted/60',
       )}
       onClick={onSelect}
     >
-      <span className="flex min-w-0 flex-wrap items-center gap-1 text-sm font-medium">
+      <span className="flex min-w-0 flex-wrap items-center gap-1">
         <OutboundPartnerIdentity
           target={target}
           variant={identityVariant}

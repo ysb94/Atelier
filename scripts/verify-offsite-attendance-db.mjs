@@ -212,7 +212,9 @@ try {
   assert.equal(night.rows[0].end_next_day,true)
   assert.equal(night.rows[0].status,'pending')
   await assert.rejects(()=>db.query("insert into public.company_leave_requests(employee_id,kind,from_date,to_date,start_time,end_time,end_next_day,note,place) values($1,'overtime','2026-11-05','2026-11-05','10:00','11:00',true,'업무','')",[staff]),/check constraint/)
-  const overlap=await value("insert into public.company_leave_requests(employee_id,kind,from_date,to_date,start_time,end_time,end_next_day,note,place) values($1,'correction',((clock_timestamp() at time zone 'Asia/Seoul')::date-1),((clock_timestamp() at time zone 'Asia/Seoul')::date-1),'22:00','10:00',true,'정정','') returning id",[staff])
+  // Supply the next clock explicitly and keep both records in the past.
+  await db.query("insert into public.attendance_clock_ins(company_id,employee_id,work_date,clock_in) values($1,$2,(clock_timestamp() at time zone 'Asia/Seoul')::date-1,'09:00') on conflict (employee_id,work_date) do update set clock_in=excluded.clock_in",[company,staff])
+  const overlap=await value("insert into public.company_leave_requests(employee_id,kind,from_date,to_date,start_time,end_time,end_next_day,note,place) values($1,'correction',((clock_timestamp() at time zone 'Asia/Seoul')::date-2),((clock_timestamp() at time zone 'Asia/Seoul')::date-2),'22:00','10:00',true,'정정','') returning id",[staff])
   await assert.rejects(()=>db.query("update public.company_leave_requests set status='approved' where id=$1",[overlap]),/다음 출근 기록과 겹칩니다/)
   const future=await value("insert into public.company_leave_requests(employee_id,kind,from_date,to_date,start_time,end_time,end_next_day,note,place) values($1,'correction',(clock_timestamp() at time zone 'Asia/Seoul')::date,(clock_timestamp() at time zone 'Asia/Seoul')::date,'23:55','23:50',true,'정정','') returning id",[staff])
   await assert.rejects(()=>db.query("update public.company_leave_requests set status='approved' where id=$1",[future]),/현재 시각보다 늦을 수 없습니다/)

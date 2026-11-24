@@ -16,4 +16,4 @@
 .draft-sample-next-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:6px}
 .draft-sample-waiting{color:var(--color-muted-foreground);font-size:11px;line-height:1.5}
 .draft-sample-passed{color:var(--color-primary);font-size:12px}
-.draft-sheet-row td:nth-child(2) p.draft-sheet-registered{margin-bottom:8px;color:var(--color-primary);font-size:14px;font-weight:400}
+.draft-sheet-row .draft-sheet-sample-cell p.draft-sheet-registered{margin-bottom:8px;color:var(--color-primary);font-size:14px;font-weight:400}
