@@ -28,6 +28,14 @@ async function card(id) {
   return (await list()).find(item => item.id === id)
 }
 
+async function notices() {
+  return (await db.query('select * from public.personal_work_feedback_notices order by round')).rows
+}
+
+async function readNotice(id, revision) {
+  return (await db.query('select public.read_personal_work_feedback_notice($1,$2) as read_at', [id, revision])).rows[0].read_at
+}
+
 try {
   await db.exec(`
     create role authenticated;
@@ -46,6 +54,9 @@ try {
     create function app.is_approved() returns boolean language sql stable security definer as $$
       select exists(select 1 from public.profiles where id = auth.uid() and status = 'active');
     $$;
+    create function app.permission_company_id() returns uuid language sql stable security definer as $$
+      select company_id from public.profiles where id = auth.uid() and status = 'active';
+    $$;
     create function app.is_company_manager() returns boolean language sql stable as $$ select false; $$;
     create function public.set_updated_at() returns trigger language plpgsql as $$
       begin new.updated_at := now(); return new; end;
@@ -59,7 +70,7 @@ try {
       name === 'outsider' ? ids.otherCompany : ids.company,
       name === 'otherDept' ? ids.otherDepartment : ids.department, name, name === 'inactive' ? 'inactive' : 'active'])
   }
-  for (const migration of ['20260930160000_company_chat.sql', '20261123090000_personal_work_cards.sql']) {
+  for (const migration of ['20260930160000_company_chat.sql', '20261123090000_personal_work_cards.sql', '20261124144812_personal_work_feedback_notifications.sql']) {
     await db.exec(await readFile(new URL(`../supabase/migrations/${migration}`, import.meta.url), 'utf8'))
   }
 
@@ -92,32 +103,57 @@ try {
   await assert.rejects(action(assigned, 'pause', { revision: 2 }), { code: '40001' })
   await assert.rejects(action(assigned, 'complete', { revision: 4 }), { code: '42501' })
   const submitCommand = randomUUID()
-  await action(assigned, 'submit', { revision: 4, reviewer: ids.peer, command: submitCommand })
+  await db.query('select public.submit_personal_work_feedback($1,$2,$3,$4,$5)', [assigned, submitCommand, 4, ids.peer, '검토 부탁드립니다.'])
   await action(assigned, 'submit', { revision: 4, reviewer: ids.peer, command: submitCommand })
   assert.equal((await card(assigned)).reviewer_id, ids.owner)
+  assert.deepEqual(await notices(), [])
   await assert.rejects(action(assigned, 'approve', { revision: 5 }), { code: '42501' })
 
   await actor(ids.peer)
   assert.deepEqual(await list(), [])
+  assert.deepEqual(await notices(), [])
+  assert.equal(await readNotice(submitCommand, 5), null)
   await assert.rejects(action(assigned, 'approve', { revision: 5 }), { code: '42501' })
   for (const id of [ids.outsider, ids.inactive]) {
     await actor(id)
     assert.deepEqual(await list(), [])
+    assert.deepEqual(await notices(), [])
+    assert.equal(await readNotice(submitCommand, 5), null)
     await assert.rejects(action(assigned, 'approve', { revision: 5 }), { code: '42501' })
   }
   await actor(ids.owner, 'anon')
   await assert.rejects(list(), { code: '42501' })
+  await assert.rejects(notices(), { code: '42501' })
+  await assert.rejects(readNotice(submitCommand, 5), { code: '42501' })
 
   await actor(ids.owner)
+  const [firstNotice, ...duplicates] = await notices()
+  assert.deepEqual(duplicates, [])
+  assert.deepEqual([firstNotice.id, firstNotice.card_id, firstNotice.card_revision, firstNotice.round, firstNotice.note],
+    [submitCommand, assigned, 5, 1, '검토 부탁드립니다.'])
+  assert.equal(firstNotice.read_at, null)
+  assert.equal(await readNotice(submitCommand, 4), null)
+  const readAt = await readNotice(submitCommand, 5)
+  assert.ok(readAt)
+  assert.deepEqual(await readNotice(submitCommand, 5), readAt)
+  assert.equal((await notices())[0].resolved_at, null)
+  await assert.rejects(db.query('update public.personal_work_feedback_notices set read_at = null'), { code: '42501' })
   await assert.rejects(action(assigned, 'revise', { revision: 5 }), { code: '22023' })
   await action(assigned, 'revise', { revision: 5, note: '수정할 내용' })
   assert.deepEqual([(await card(assigned)).status, (await card(assigned)).round], ['todo', 2])
   await actor(ids.worker)
   await action(assigned, 'start', { revision: 6 })
-  await action(assigned, 'submit', { revision: 7 })
+  const nextSubmitCommand = randomUUID()
+  await action(assigned, 'submit', { revision: 7, command: nextSubmitCommand })
 
   await actor(ids.owner)
+  assert.ok((await notices())[0].resolved_at)
+  assert.equal((await notices())[1].read_at, null)
+  assert.equal(await readNotice(submitCommand, 8), null)
   await action(assigned, 'approve', { revision: 8 })
+  const secondNotice = (await notices())[1]
+  assert.deepEqual([secondNotice.id, secondNotice.round, secondNotice.card_revision, secondNotice.read_at], [nextSubmitCommand, 2, 8, null])
+  assert.ok(secondNotice.resolved_at)
   const completed = await card(assigned)
   assert.equal(completed.status, 'done')
   assert.deepEqual(completed.events.map(event => [event.round, event.kind]), [
@@ -126,13 +162,29 @@ try {
   ])
   assert.ok(completed.events.every((event, index, history) => index === 0 || Date.parse(event.at) >= Date.parse(history[index - 1].at)))
 
+  const ownFeedbackCard = randomUUID(), ownFeedbackEvent = randomUUID()
+  await actor(ids.worker)
+  await action(ownFeedbackCard, 'create', { title: '직접 담당자를 고른 업무' })
+  await action(ownFeedbackCard, 'start', { revision: 1 })
+  for (const reviewer of [ids.outsider, ids.inactive]) {
+    await assert.rejects(action(ownFeedbackCard, 'submit', { revision: 2, reviewer }), { code: '42501' })
+  }
+  await db.query('select public.submit_personal_work_feedback($1,$2,$3,$4)', [ownFeedbackCard, ownFeedbackEvent, 2, ids.peer])
+  await actor(ids.peer)
+  assert.deepEqual((await notices()).map(notice => notice.id), [ownFeedbackEvent])
+  await db.exec('reset role')
+  await db.query("update public.profiles set status='inactive' where id=$1", [ids.peer])
+  await actor(ids.peer)
+  assert.deepEqual(await notices(), [])
+  assert.equal(await readNotice(ownFeedbackEvent, 3), null)
+
   await db.exec('reset role')
   const messages = (await db.query('select author_id, body from public.chat_messages')).rows
-  assert.equal(messages.length, 5)
+  assert.equal(messages.length, 3)
   assert.equal(messages.filter(message => message.author_id === ids.owner).length, 3)
-  assert.equal(messages.filter(message => message.author_id === ids.worker).length, 2)
+  assert.equal(messages.filter(message => message.author_id === ids.worker).length, 0)
   assert.ok(messages.some(message => message.body.includes('수정할 내용')))
-  console.log('내 업무 DB 검증 통과: 같은 부서 배정, 차수 전환, 권한, 재시도, 사내 채팅')
+  console.log('내 업무 DB 검증 통과: 배정, 차수 전환, 피드백 알림, 권한, 읽음과 처리 상태 분리, 재시도')
 } catch (error) {
   console.error(error.message, error.code ?? '', error.where ?? '')
   process.exitCode = 1

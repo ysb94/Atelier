@@ -151,7 +151,7 @@ export function MyWorkFeedbackDialog({ actorId, settings, cardTitle, recipientId
               <Textarea rows={3} maxLength={3600} className="py-2" value={note} disabled={sending}
                 onChange={event => setNote(event.currentTarget.value)} />
             </label>
-            <p className="text-xs text-muted-foreground">업무 제목과 입력한 내용이 선택한 직원의 사내 채팅으로 전송됩니다.</p>
+            <p className="text-xs text-muted-foreground">선택한 직원에게 피드백 요청 알림이 갑니다.</p>
           </> : <div className="space-y-2">
             <p className="text-sm text-muted-foreground">요청할 직원이 목록에 없습니다.</p>
             <Button type="button" size="sm" variant="outline" onClick={onSettings}>피드백 담당자 설정</Button>

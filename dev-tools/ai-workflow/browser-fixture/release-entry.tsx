@@ -5,5 +5,7 @@ import {CompanyLayout} from '@/components/layout/CompanyLayout'
 import {AuthProvider,releaseFixture} from './release-auth'
 import '@/index.css'
 const client=new QueryClient({defaultOptions:{queries:{retry:false,staleTime:Infinity},mutations:{retry:false}}})
-releaseFixture.refresh=()=>{void client.invalidateQueries({queryKey:['department-approvers']})}
+releaseFixture.refresh=()=>{
+  for(const key of ['department-approvers','personal-work-cards','personal-work-feedback-notices'])void client.invalidateQueries({queryKey:[key]})
+}
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={client}><AuthProvider><BrowserRouter><Routes><Route path="/*" element={<CompanyLayout/>}/></Routes></BrowserRouter></AuthProvider></QueryClientProvider>)

@@ -16,6 +16,7 @@ import {
   draftInformationNoticeItem, readDraftInformationNotice, updateDraftInformationNoticeRead,
   useDraftInformationNoticeDetail, useDraftInformationNotices,
 } from '@/features/drafts/use-draft-information-notices'
+import { personalWorkFeedbackNoticeItem, usePersonalWorkFeedbackNotices } from './use-personal-work-feedback-notices'
 
 export function MyHomeNotificationBadge({ tab }: { tab: string }) {
   const notices=useMyHomeNotifications()
@@ -27,6 +28,12 @@ export function MyHomeNotificationList({ tab }: { tab: MyHomeNotificationTab }) 
   useRenderWatch('MyHomeNotificationList')
   const notices=useMyHomeNotifications()
   return <NotificationRows items={notices.items.filter(item => item.target?.tab === tab)} error={notices.error} />
+}
+
+export function PersonalWorkFeedbackNotificationList() {
+  const notices = usePersonalWorkFeedbackNotices()
+  if (!notices.rows?.length && !notices.error) return null
+  return <NotificationRows items={notices.rows?.map(personalWorkFeedbackNoticeItem) ?? []} error={notices.error} />
 }
 
 export function VisualWorkflowNotificationList() {

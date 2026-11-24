@@ -1,4 +1,4 @@
-import { useRef, useState, type DragEvent } from 'react'
+import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CircleCheck, CircleDashed, CircleDot, GripVertical, MessageSquare, Plus, Settings2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,9 @@ import { listPersonalWorkCards, personalWorkAction, personalWorkErrorMessage, pe
 import { cn } from '@/lib/utils'
 import { MyWorkCardDrawer } from './MyWorkCardDrawer'
 import { MyWorkFeedbackDialog } from './MyWorkFeedbackDialog'
+import {
+  personalWorkCardsKey, personalWorkFeedbackKey, usePersonalWorkFeedbackNoticeDetail, useReadPersonalWorkFeedbackNotice,
+} from './use-personal-work-feedback-notices'
 
 const columns = [
   { id: 'todo', label: 'ToDo', icon: CircleDashed, tone: 'text-muted-foreground' },
@@ -45,9 +48,11 @@ function actionFor(card: PersonalWorkCard, status: PersonalWorkStatus) {
   if (card.status === 'doing' && status === 'done' && card.created_by === card.assignee_id) return 'complete'
 }
 
-export function MyWorkBoard({ feedbackActorId: actorId, active = true }: { feedbackActorId?: string; active?: boolean }) {
+export function MyWorkBoard({ feedbackActorId: actorId, active = true, noticeId, onCloseNotice }: {
+  feedbackActorId?: string; active?: boolean; noticeId?: string; onCloseNotice: () => void
+}) {
   const cache = useQueryClient()
-  const key = ['personal-work-cards', actorId] as const
+  const key = personalWorkCardsKey(actorId)
   const query = useQuery({ ...sharedReadPolicy, queryKey: key, queryFn: listPersonalWorkCards,
     enabled: active && Boolean(actorId), retry: false,
     refetchInterval: readPollInterval(15_000, active && Boolean(actorId)),
@@ -66,7 +71,16 @@ export function MyWorkBoard({ feedbackActorId: actorId, active = true }: { feedb
   const [recipientIds, setRecipientIds] = useState(() => loadFeedbackRecipients(actorId))
   const [feedbackDrop, setFeedbackDrop] = useState<{ cardId: string; revision: number } | null>(null)
   const [feedbackSettings, setFeedbackSettings] = useState(false)
-  const selectedCard = cards.find(card => card.id === selectedId)
+  const noticeDetail = usePersonalWorkFeedbackNoticeDetail(actorId, noticeId, active)
+  const notice = noticeDetail.data ?? undefined
+  const linkedCard = notice && !notice.resolved_at ? cards.find(card => card.id === notice.card_id &&
+    card.revision === notice.card_revision && card.status === 'feedback' && card.reviewer_id === actorId) : undefined
+  const selectedCard = noticeId ? linkedCard : cards.find(card => card.id === selectedId)
+  const showNoticeStatus = active && Boolean(noticeId) && !linkedCard
+  const historyRead = useReadPersonalWorkFeedbackNotice(actorId, notice, showNoticeStatus && Boolean(notice?.resolved_at))
+  useEffect(() => {
+    if (active && actorId && noticeId) void cache.invalidateQueries({ queryKey: personalWorkCardsKey(actorId) })
+  }, [active, actorId, cache, noticeId])
   const feedbackCard = cards.find(card => card.id === feedbackDrop?.cardId)
   const ownCards = cards.filter(card => card.assignee_id === actorId).sort((first, second) => order.indexOf(first.id) - order.indexOf(second.id))
   const reviewCards = cards.filter(card => card.reviewer_id === actorId && card.status === 'feedback')
@@ -80,7 +94,10 @@ export function MyWorkBoard({ feedbackActorId: actorId, active = true }: { feedb
     setError('')
     try {
       await personalWorkAction(input)
-      void cache.invalidateQueries({ queryKey: chatKeys.rooms })
+      if (input.action !== 'submit') void cache.invalidateQueries({ queryKey: chatKeys.rooms })
+      if (input.action === 'approve' || input.action === 'revise') {
+        void cache.invalidateQueries({ queryKey: personalWorkFeedbackKey(actorId) })
+      }
       setAnnouncement('업무에 반영했습니다.')
     } finally {
       await cache.invalidateQueries({ queryKey: key })
@@ -150,6 +167,21 @@ export function MyWorkBoard({ feedbackActorId: actorId, active = true }: { feedb
 
   return <section aria-label="내 업무 보드">
     <p className="sr-only" role="status">{announcement}</p>
+    {showNoticeStatus && <section aria-label="피드백 요청 알림" className="mb-3 rounded-lg border border-border bg-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="wrap-anywhere text-sm font-semibold">{notice?.title ?? '피드백 요청 알림'}</h2>
+          {notice?.resolved_at ? <>
+            <p className="mt-1 text-sm text-muted-foreground">{notice.requester_name} · {notice.round}차 피드백 처리 완료</p>
+            {notice.note && <p className="mt-2 wrap-anywhere whitespace-pre-wrap text-sm">{notice.note}</p>}
+          </> : <p className="mt-1 text-sm text-muted-foreground" role="status">
+            {noticeDetail.isLoading || (notice && query.isFetching) ? '피드백 요청을 불러오는 중입니다.' : '피드백 요청 상세를 열 수 없습니다.'}
+          </p>}
+        </div>
+        <Button type="button" size="sm" variant="ghost" onClick={onCloseNotice}>닫기</Button>
+      </div>
+      {historyRead.error && <Button type="button" size="sm" variant="outline" className="mt-2" onClick={historyRead.retry}>읽음 다시 저장</Button>}
+    </section>}
     {!actorId && <p className="mb-3 text-sm text-muted-foreground">내 업무는 본인 계정에서 사용할 수 있습니다.</p>}
     {actorId && query.isPending && <p role="status" className="mb-3 text-sm text-muted-foreground">내 업무를 불러오는 중입니다.</p>}
     {query.isError && <div className="mb-3 flex flex-wrap items-center gap-2" role="alert">
@@ -233,9 +265,10 @@ export function MyWorkBoard({ feedbackActorId: actorId, active = true }: { feedb
         await save({ id: feedbackDrop.cardId, revision: feedbackDrop.revision, action: 'submit', reviewer, note, command })
         setAnnouncement('피드백 요청을 보냈습니다.')
       }} />}
-    {actorId && (selectedCard || creating) && <MyWorkCardDrawer key={selectedCard?.id ?? 'new'} actorId={actorId}
+    {actorId && (noticeId ? active && linkedCard : selectedCard || creating) && <MyWorkCardDrawer key={noticeId ?? selectedCard?.id ?? 'new'} actorId={actorId}
       card={selectedCard} statusLabel={selectedCard && statusLabel(selectedCard.status)}
-      onClose={() => { setSelectedId(null); setCreating(false) }} onAction={save}
+      feedbackNotice={linkedCard ? notice : undefined}
+      onClose={() => { setSelectedId(null); setCreating(false); if (noticeId) onCloseNotice() }} onAction={save}
       onRequestReview={selectedCard && (() => requestReview(selectedCard))} />}
   </section>
 }

@@ -1,7 +1,7 @@
 /** My home and the bell must consume the same records, never separate read copies. */
-export type MyHomeNotificationTab = 'meetings' | 'my-attendance' | 'approvals' | 'overtime' | 'holiday-work' | 'operations-leave' | 'attendance' | 'work'
+export type MyHomeNotificationTab = 'meetings' | 'my-attendance' | 'approvals' | 'overtime' | 'holiday-work' | 'operations-leave' | 'attendance' | 'work' | 'my-work'
 
-export type MyHomeNotificationSource = 'meeting' | 'leave-notice' | 'late-statement' | 'late-appeal' | 'request' | 'checkout' | 'attendance-start' | 'visual-workflow' | 'draft-information'
+export type MyHomeNotificationSource = 'meeting' | 'leave-notice' | 'late-statement' | 'late-appeal' | 'request' | 'checkout' | 'attendance-start' | 'visual-workflow' | 'draft-information' | 'personal-work-feedback'
 
 export type MyHomeNotificationTarget = {
   source: MyHomeNotificationSource

@@ -15,9 +15,9 @@ const departmentFixtures = {
   marketing: {id:'marketing-department',name:'마케팅팀'},
   executives: {id:'executives-department',name:'운영진'},
 } as const
-type Role = 'staff'|'approver'|'substitute'|'operations'|'logistics'|'logistics-approver'|'developer'|'owner'|'ceo'|keyof typeof departmentFixtures
+type Role = 'staff'|'coworker'|'approver'|'substitute'|'operations'|'logistics'|'logistics-approver'|'developer'|'owner'|'ceo'|keyof typeof departmentFixtures
 let currentRole = (new URLSearchParams(location.search).get('role') || 'staff') as Role
-export const releaseFixture = { get role(){ return currentRole }, approvalError:new URLSearchParams(location.search).has('approval-error'), reads:[] as string[], writes:[] as string[], setRole:(_role:Role)=>{}, refresh:()=>{} }
+export const releaseFixture = { get role(){ return currentRole }, approvalError:new URLSearchParams(location.search).has('approval-error'), reads:[] as string[], writes:[] as string[], workCommands:[] as string[], setRole:(_role:Role)=>{}, refresh:()=>{} }
 Object.assign(window,{__releaseFixture:releaseFixture})
 export function fixtureProfile(role = currentRole) {
   const index = ['developer','owner','ceo'].indexOf(role)
@@ -25,11 +25,11 @@ export function fixtureProfile(role = currentRole) {
     : role.startsWith('logistics')?{id:RELEASE_LOGISTICS_ID,name:'물류팀'}
       : departmentFixtures[role as keyof typeof departmentFixtures]??{id:'other-department',name:'일반팀'}
   return {
-    id:index>=0?RELEASE_EXCEPTION_IDS[index]:'fixture-user',email:index>=0?'owner@example.invalid':'staff@example.invalid',displayName:role,
+    id:index>=0?RELEASE_EXCEPTION_IDS[index]:role==='coworker'?'fixture-coworker':'fixture-user',email:index>=0?'owner@example.invalid':'staff@example.invalid',displayName:role==='coworker'?'부서원':role,
     companyId:RELEASE_COMPANY_ID,status:'active',departmentId:department.id,
     departmentName:department.name,position:'사원',jobGrade:'사원',isAdmin:true,capabilities:[],memberships:[],
     nameConfirmedAt:'2026-01-01',permissionMode:'assigned',
-    permissionGrants:(role==='staff'||role==='approver'||role==='substitute'?PERMISSION_CATALOG.filter(([key])=>key==='basic.use'):PERMISSION_CATALOG).map(([permission])=>({permission,scopeKind:'company',scopeId:RELEASE_COMPANY_ID})),
+    permissionGrants:(role==='staff'||role==='coworker'||role==='approver'||role==='substitute'?PERMISSION_CATALOG.filter(([key])=>key==='basic.use'):PERMISSION_CATALOG).map(([permission])=>({permission,scopeKind:'company',scopeId:RELEASE_COMPANY_ID})),
   } as unknown as Profile
 }
 const Auth = createContext(fixtureProfile())

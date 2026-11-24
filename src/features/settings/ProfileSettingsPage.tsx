@@ -27,11 +27,12 @@ import { WorkspaceTabActivityContext, useWorkspaceTabActivity } from '@/componen
 import { releasePersonalPart } from '@/lib/company/release-access'
 import { isPreviewProfile } from '@/lib/company/profile-preview'
 import { CompanyMeetingsPage } from '@/features/meetings/CompanyMeetingsPage'
-import { MyHomeNotificationBadge, MyHomeNotificationList, MyHomeWorkNoticeDetail, VisualWorkflowNotificationList } from './MyHomeNotificationList'
+import { MyHomeNotificationBadge, MyHomeNotificationList, MyHomeWorkNoticeDetail, PersonalWorkFeedbackNotificationList, VisualWorkflowNotificationList } from './MyHomeNotificationList'
 import { HomeNoticeBoard } from './HomeNoticeBoard'
 import { MyAttendanceStartPanel } from './MyAttendanceStartPanel'
 import { MyAttendancePanel } from './MyAttendancePanel'
 import { MyWorkBoard } from './MyWorkBoard'
+import { PERSONAL_WORK_FEEDBACK_PARAM } from './use-personal-work-feedback-notices'
 import { OvertimePanel } from './OvertimePanel'
 import { RequiredInformationButton } from './RequiredInformationButton'
 import './personal-requests.css'
@@ -84,7 +85,7 @@ function ProfileSettingsContent() {
   function selectPart(next: PersonalPart) {
     if (!releasePersonalPart(release.profile, next, release.approver)) return
     const params = new URLSearchParams(searchParams)
-    if(next!==part) for(const key of ['workNotice','request','leaveNotice','lateStatement','lateRole','meeting','round', ...WORK_REQUEST_VIEW_PARAMS])params.delete(key)
+    if(next!==part) for(const key of ['workNotice','request','leaveNotice','lateStatement','lateRole','meeting','round', PERSONAL_WORK_FEEDBACK_PARAM, ...WORK_REQUEST_VIEW_PARAMS])params.delete(key)
     if (next === 'my-attendance') params.delete('part')
     else params.set('part', next)
     setSearchParams(params, { replace: true })
@@ -121,7 +122,7 @@ function ProfileSettingsContent() {
       <div className="personal-page-tabs" role="tablist" aria-label="My home 메뉴">
         {tabs.filter(tab => releasePersonalPart(release.profile, tab.id, release.approver)).map(tab => <Fragment key={tab.id}>
           {release.scope.unrestricted && tab.id === 'approvals' && <span className="personal-page-tab-split" aria-hidden="true" />}
-          <button type="button" role="tab" id={`personal-${tab.id}-tab`} className={tab.id === 'attendance' ? 'personal-page-tab-end' : undefined} aria-selected={visiblePart === tab.id} aria-controls={`personal-${tab.id}-panel`} onClick={() => selectPart(tab.id)}>{tab.label}{tab.id !== 'my-work' && <MyHomeNotificationBadge tab={tab.id} />}</button>
+          <button type="button" role="tab" id={`personal-${tab.id}-tab`} className={tab.id === 'attendance' ? 'personal-page-tab-end' : undefined} aria-selected={visiblePart === tab.id} aria-controls={`personal-${tab.id}-panel`} onClick={() => selectPart(tab.id)}>{tab.label}<MyHomeNotificationBadge tab={tab.id} /></button>
         </Fragment>)}
       </div>
       {['meetings','my-attendance','approvals','overtime','attendance'].includes(visiblePart) && <MyHomeNotificationList key={visiblePart} tab={visiblePart as 'meetings'|'my-attendance'|'approvals'|'overtime'|'attendance'} />}
@@ -136,8 +137,14 @@ function ProfileSettingsContent() {
       </WorkspaceTabActivityContext.Provider>
       {releasePersonalPart(release.profile, 'my-work') && <div id="personal-my-work-panel" role="tabpanel"
         aria-labelledby="personal-my-work-tab" hidden={visiblePart !== 'my-work'}>
+        {active && visiblePart === 'my-work' && <PersonalWorkFeedbackNotificationList />}
         <MyWorkBoard key={`${release.profile?.id}:${feedbackActorId ?? 'preview'}`} feedbackActorId={feedbackActorId}
-          active={active && visiblePart === 'my-work'} />
+          active={active && visiblePart === 'my-work'}
+          noticeId={searchParams.get(PERSONAL_WORK_FEEDBACK_PARAM) || undefined} onCloseNotice={() => setSearchParams(previous => {
+            const next = new URLSearchParams(previous)
+            next.delete(PERSONAL_WORK_FEEDBACK_PARAM)
+            return next
+          }, { replace: true })} />
       </div>}
       {visiblePart === 'overtime' && <div id="personal-overtime-panel" role="tabpanel" aria-labelledby="personal-overtime-tab"><OvertimePanel /></div>}
       {visiblePart === 'attendance' && showDepartmentTab && <div id="personal-attendance-panel" role="tabpanel" aria-labelledby="personal-attendance-tab">

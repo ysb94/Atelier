@@ -5,14 +5,16 @@ import { Button } from '@/components/ui/button'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { listPersonalWorkMembers, personalWorkErrorMessage, type PersonalWorkCard, type PersonalWorkInput } from '@/lib/supabase/personal-work'
 import { MyWorkCardHistory } from './MyWorkCardHistory'
+import { useReadPersonalWorkFeedbackNotice, type PersonalWorkFeedbackNotice } from './use-personal-work-feedback-notices'
 
 type Command = Omit<PersonalWorkInput, 'id' | 'revision' | 'command'>
 const dateFormat = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short' })
 
-export function MyWorkCardDrawer({ actorId, card, statusLabel, onClose, onAction, onRequestReview }: {
+export function MyWorkCardDrawer({ actorId, card, statusLabel, feedbackNotice, onClose, onAction, onRequestReview }: {
   actorId: string
   card?: PersonalWorkCard
   statusLabel?: string
+  feedbackNotice?: PersonalWorkFeedbackNotice
   onClose: () => void
   onAction: (input: PersonalWorkInput) => Promise<void>
   onRequestReview?: () => void
@@ -44,6 +46,7 @@ export function MyWorkCardDrawer({ actorId, card, statusLabel, onClose, onAction
     element?.showModal()
     return () => element?.close()
   }, [])
+  const feedbackRead = useReadPersonalWorkFeedbackNotice(actorId, feedbackNotice, Boolean(card))
 
   function close() {
     if (inFlight.current) return
@@ -121,6 +124,7 @@ export function MyWorkCardDrawer({ actorId, card, statusLabel, onClose, onAction
           {card?.description && <p className="wrap-anywhere whitespace-pre-wrap text-sm">{card.description}</p>}
         </div>}
         {card && <MyWorkCardHistory card={card} />}
+        {feedbackRead.error && <Button type="button" size="sm" variant="outline" onClick={feedbackRead.retry}>읽음 다시 저장</Button>}
         {confirmation === 'revise' && <label className="grid gap-2 text-sm font-medium">수정할 내용
           <Textarea autoFocus rows={4} value={note} maxLength={3600} disabled={pending} className="py-2"
             onChange={event => setNote(event.currentTarget.value)} />

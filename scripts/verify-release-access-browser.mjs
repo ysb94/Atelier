@@ -7,12 +7,12 @@ import {chromium} from 'playwright-core'
 const root=process.cwd(),fixture=path.join(root,'dev-tools/ai-workflow/browser-fixture'),auth=path.join(fixture,'release-auth.tsx'),client=path.join(fixture,'release-client.ts')
 const server=await createServer({root,configFile:false,envDir:false,cacheDir:path.join(root,'node_modules/.cache/release-vite'),logLevel:'error',
  plugins:[{name:'release-fixture',enforce:'pre',resolveId(source,importer){if(importer&&source.startsWith('.')){const target=path.resolve(path.dirname(importer),source).replace(/\.tsx?$/,'');if(target===path.join(root,'src/lib/supabase/auth'))return auth;if(target===path.join(root,'src/lib/supabase/client'))return client}},configureServer(vite){vite.middlewares.use((req,res,next)=>{if(!req.headers.accept?.includes('text/html'))return next();vite.transformIndexHtml(req.url,'<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module" src="/dev-tools/ai-workflow/browser-fixture/release-entry.tsx"></script></body></html>').then(html=>{res.setHeader('Content-Type','text/html');res.end(html)}).catch(next)})}},react(),tailwindcss()],
- resolve:{alias:[{find:'@/lib/supabase/auth',replacement:auth},{find:'@/lib/supabase/client',replacement:client},{find:'@',replacement:path.join(root,'src')}]},server:{host:'127.0.0.1',port:5195,strictPort:true,hmr:false}})
+ resolve:{alias:[{find:'@/lib/supabase/auth',replacement:auth},{find:'@/lib/supabase/client',replacement:client},{find:'@',replacement:path.join(root,'src')}]},server:{host:'127.0.0.1',port:0,hmr:false}})
 let browser,page
 const errors=[],remote=[]
 try{
  await server.listen();browser=await chromium.launch({executablePath:process.env.ATELIER_CHROMIUM_BIN||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true})
- const context=await browser.newContext({viewport:{width:1440,height:1000}}),origin='http://127.0.0.1:5195'
+ const context=await browser.newContext({viewport:{width:1440,height:1000}}),origin=`http://127.0.0.1:${server.httpServer.address().port}`
  await context.route('**/*',route=>route.request().url().startsWith(origin+'/')?route.continue():(remote.push(route.request().url()),route.abort()))
  page=await context.newPage();page.setDefaultTimeout(15000);page.setDefaultNavigationTimeout(120000);page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{if(message.type()==='error')errors.push(message.text())})
  const tabs=()=>page.getByRole('tablist',{name:'My home 메뉴'}).getByRole('tab').allTextContents()
@@ -108,6 +108,42 @@ try{
  await detail.getByText('업무 담당자 · 부서원',{exact:true}).waitFor()
  await detail.getByText('피드백 담당자 · staff',{exact:true}).waitFor()
  await detail.getByRole('button',{name:'업무 카드 창 닫기',exact:true}).click()
+
+ const assignedTitle='같은 부서원에게 전달한 업무'
+ const feedbackNote='알림 상세에서 검토할 내용'
+ await page.evaluate(()=>window.__releaseFixture.setRole('coworker'))
+ await column('ToDo').getByRole('button',{name:assignedTitle,exact:true}).click()
+ await detail.getByRole('button',{name:'시작',exact:true}).click()
+ await column('ing').getByRole('button',{name:assignedTitle,exact:true}).click()
+ await detail.getByRole('button',{name:'피드백 요청',exact:true}).click()
+ await feedbackRequest.getByText('선택한 직원에게 피드백 요청 알림이 갑니다.',{exact:true}).waitFor()
+ await feedbackRequest.getByRole('textbox',{name:'함께 보낼 내용 (선택)'}).fill(feedbackNote)
+ await feedbackRequest.getByRole('button',{name:'요청 보내기',exact:true}).click()
+ await column('feedback').getByRole('button',{name:assignedTitle,exact:true}).waitFor()
+ assert.deepEqual(await page.evaluate(()=>window.__releaseFixture.workCommands.slice(-2)),['start','submit_personal_work_feedback'])
+ await page.evaluate(()=>window.__releaseFixture.setRole('staff'))
+ const myWorkNotices=page.locator('#personal-my-work-panel').getByRole('region',{name:'이 탭의 알림'})
+ const myWorkNotice=myWorkNotices.getByRole('button',{name:new RegExp(assignedTitle)})
+ await myWorkNotice.getByLabel('새 알림').waitFor()
+ await page.getByRole('button',{name:/^알림(?:,|$)/}).click()
+ const bellNotice=page.locator('#workspace-notification-panel').getByRole('button',{name:new RegExp(assignedTitle)})
+ await bellNotice.getByLabel('안 읽음').waitFor()
+ assert.equal(await page.evaluate(()=>window.__releaseFixture.workCommands.includes('read_personal_work_feedback_notice')),false)
+ await bellNotice.click()
+ await page.waitForURL(url=>url.searchParams.has('personalWorkFeedback'))
+ await detail.getByText(feedbackNote,{exact:true}).waitFor()
+ await page.waitForFunction(()=>window.__releaseFixture.workCommands.includes('read_personal_work_feedback_notice'))
+ await detail.getByRole('button',{name:'업무 카드 창 닫기',exact:true}).click()
+ await myWorkNotice.getByText('피드백 필요',{exact:true}).waitFor()
+ await myWorkNotice.getByLabel('새 알림').waitFor({state:'detached'})
+ await myWorkNotice.click()
+ await detail.getByRole('button',{name:'승인',exact:true}).click()
+ await myWorkNotices.getByText('확인하거나 처리할 알림이 없습니다.',{exact:true}).waitFor()
+ assert.equal(await page.evaluate(()=>window.__releaseFixture.workCommands.filter(action=>action==='read_personal_work_feedback_notice').length),1)
+ await myWorkNotices.getByRole('button',{name:'전체 기록',exact:true}).click()
+ await myWorkNotice.click()
+ await page.getByText('부서원 · 1차 피드백 처리 완료',{exact:true}).waitFor()
+ await page.getByRole('region',{name:'피드백 요청 알림',exact:true}).getByRole('button',{name:'닫기',exact:true}).click()
  await scheduleTab.click()
  await page.getByRole('button',{name:'+추가',exact:true}).click()
  await page.getByRole('menuitem',{name:'월차/연차',exact:true}).click()

@@ -58,11 +58,16 @@ export async function listPersonalWorkMembers() {
 export async function personalWorkAction(input: PersonalWorkInput) {
   const trace = startWorkflow('app', 'personal_work_action', { kind: input.action })
   await trace.run('save_card', async () => {
-    const { error } = await getSupabase().rpc('personal_work_action', {
-      p_id: input.id, p_command: input.command, p_action: input.action, p_revision: input.revision,
-      p_title: input.title, p_description: input.description, p_assignee: input.assignee,
+    const db = getSupabase()
+    const args = {
+      p_id: input.id, p_command: input.command, p_revision: input.revision,
       p_reviewer: input.reviewer, p_note: input.note,
-    })
+    }
+    const { error } = input.action === 'submit'
+      ? await db.rpc('submit_personal_work_feedback', args)
+      : await db.rpc('personal_work_action', {
+        ...args, p_action: input.action, p_title: input.title, p_description: input.description, p_assignee: input.assignee,
+      })
     if (error) throw error
   })
   trace.done()
