@@ -1107,7 +1107,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
         current?.anchor === anchor && current.field === field ? null : { anchor, colorId, field, visualTrigger: field })} />,
     amd: <DraftAmdCell key={editorKey} colors={draft.colors} hidden={hidden.has('amd')} readOnly={readOnly} teamWork={teamWork} />,
     md: <DraftMdTeamCell key={editorKey} draft={draft} hidden={hidden.has('md')} readOnly={readOnly} actorId={informationEditorId}
-      teamWork={teamWork} priceDestinationName={priceDestinationName} />,
+      teamWork={teamWork} priceDestinationName={priceDestinationName} chinaTeamOrder={priceDestination?.value === CHINA_TEAM_DESTINATION.value} />,
     ect: <td hidden={hidden.has('ect')} />,
   }
 

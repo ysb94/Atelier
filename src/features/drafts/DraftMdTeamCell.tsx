@@ -15,6 +15,7 @@ import {
 } from './draft-md-options'
 import { DraftMdOptionDialog } from './DraftMdOptionDialog'
 import { DraftMdOptionEntries } from './DraftMdOptionEntries'
+import { DraftOrderConfirmationDialog } from './DraftOrderConfirmationDialog'
 import { DraftTeamActions, DraftTeamNotice } from './DraftTeamActions'
 import { matchesTeamColors, useDraftTeamSection, type DraftTeamWork } from './use-draft-team-work'
 import { useDraftSabangnetPartners, withSavedDraftPartner } from './use-draft-sabangnet-partners'
@@ -131,13 +132,15 @@ function MdPriceInput({ label, value, disabled, onChange }: {
     }} />
 }
 
-export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, priceDestinationName, children }: {
-  draft: ProductDraft; readOnly: boolean; hidden: boolean; actorId?: string; teamWork: DraftTeamWork; priceDestinationName?: string; children?: ReactNode
+export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, priceDestinationName, chinaTeamOrder, children }: {
+  draft: ProductDraft; readOnly: boolean; hidden: boolean; actorId?: string; teamWork: DraftTeamWork; priceDestinationName?: string
+  chinaTeamOrder: boolean; children?: ReactNode
 }) {
   const catalog = useContext(DraftMdOptionsContext)
   const [editingArrival, setEditingArrival] = useState(false)
   const [managingOptions, setManagingOptions] = useState<DraftMdOptionField | null>(null)
   const [editingPeriod, setEditingPeriod] = useState(false)
+  const [confirmingQuantity, setConfirmingQuantity] = useState(false)
   const listing = useDraftTeamSection(teamWork, 'md-listing', {
     registerType: initialDraftMdOptionId('register', draft.registerType), registerLabel: '',
     openType: initialDraftMdOptionId('open', draft.openType), openLabel: '',
@@ -188,15 +191,15 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
   const surcharge = selectedOption?.id === 'option-surcharge'
   const { arrival } = quantity.value
 
-  function saveQuantities(confirmed: boolean) {
+  function confirmQuantities() {
     let expectedArrival = arrival
-    if (confirmed && !expectedArrival) {
+    if (!expectedArrival) {
       const expectedDay = new Date(`${ORDER_DATE.format(new Date())}T00:00:00Z`)
       expectedDay.setUTCDate(expectedDay.getUTCDate() + 60)
       expectedArrival = expectedDay.toISOString().slice(0, 10)
     }
     setEditingArrival(false)
-    void quantity.save(confirmed, quantityPayload({ ...quantity.value, arrival: expectedArrival }))
+    void quantity.save(true, quantityPayload({ ...quantity.value, arrival: expectedArrival }))
   }
 
   function setPrice(field: keyof Omit<DraftTeamValues['md-price'], 'auto'>, value: string) {
@@ -238,7 +241,7 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
           <div className="draft-color-pad justify-center">
             <DraftTeamActions label="MD 수량" confirmText="수량 확정" showSave={false} className="draft-md-quantity-actions"
               locked={quantity.locked} confirmed={quantityConfirmed} busy={quantity.busy} editing={quantity.editing}
-              conflict={quantity.conflict} onEdit={quantity.startEdit} onSave={saveQuantities} onReset={quantity.reset} />
+              conflict={quantity.conflict} onEdit={quantity.startEdit} onSave={() => setConfirmingQuantity(true)} onReset={quantity.reset} />
           </div>
           <div className="draft-color-lines">
             {draft.colors.map((color, index) => {
@@ -385,6 +388,14 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
           </section>
         </div>
       </div>
+      {confirmingQuantity && !readOnly && !hidden && <DraftOrderConfirmationDialog
+        draft={draft} actorId={actorId} quantities={quantityPayload(quantity.value).quantities}
+        destinationName={priceDestinationName} chinaTeamOrder={chinaTeamOrder}
+        locked={quantity.locked || quantity.conflict || quantityConfirmed}
+        onBack={() => setConfirmingQuantity(false)} onConfirm={() => {
+          setConfirmingQuantity(false)
+          confirmQuantities()
+        }} />}
       {managingOptions && (
         <DraftMdOptionDialog label={DRAFT_MD_OPTION_LABELS[managingOptions]} options={catalog.lists[managingOptions]}
           onChange={items => updateOptionCatalog(managingOptions, items)} onClose={() => setManagingOptions(null)} />
