@@ -526,6 +526,9 @@ try{
  assert.equal(await panel.evaluate(el=>el.parentElement===document.body&&getComputedStyle(el).position==='fixed'),true)
  assert.deepEqual(await geometry(),ownerGeometry,'입력창을 열어도 기획안 표의 행 크기와 위치를 유지한다')
  const panelBox=await panel.boundingBox()
+ const desktopHeight=await page.evaluate(()=>document.documentElement.clientHeight)
+ assert.ok(Math.abs(panelBox.y+panelBox.height/2-Math.max(desktopHeight*0.44,12+panelBox.height/2))<1,
+   'The desktop panel is centered slightly above the viewport midpoint')
  for(const trigger of await triggers.all()) {
    const triggerBox=await trigger.boundingBox()
    assert.ok(triggerBox.x+triggerBox.width<=panelBox.x||triggerBox.x>=panelBox.x+panelBox.width||
@@ -535,6 +538,15 @@ try{
  assert.equal(await fabric.getByLabel('Fabric 값').getAttribute('readonly'),'')
  assert.equal(await fabric.getByRole('button',{name:'확정',exact:true}).isDisabled(),true)
  await fabric.evaluate(form=>form.requestSubmit());assert.equal(await page.getByTestId('writes').textContent(),'0')
+ const fabricTriggerY=(await fabricTrigger.boundingBox()).y
+ await panel.press('Escape')
+ const lowerRow=await page.addStyleTag({content:'main { margin-top: 260px; }'})
+ assert.ok((await fabricTrigger.boundingBox()).y>=fabricTriggerY+250)
+ await fabricTrigger.click()
+ const lowerPanel=await panel.boundingBox()
+ assert.ok(Math.abs(lowerPanel.y-panelBox.y)<1,'Opening the same panel from a lower row keeps its screen position')
+ assert.ok(Math.abs(lowerPanel.x-panelBox.x)<1&&Math.abs(lowerPanel.width-panelBox.width)<1)
+ await lowerRow.evaluate(node=>node.remove())
  const documentButton=row.getByRole('button',{name:'스펙 문서',exact:true})
  assert.equal(await documentButton.count(),1)
  const informationRows=row.locator('.draft-sheet-information .draft-color-lines')

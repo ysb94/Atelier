@@ -45,6 +45,16 @@ function informationPanelPosition(anchor: HTMLButtonElement): CSSProperties | nu
   const gap = 10
   const maxWidth = 992
   const { clientWidth: width, clientHeight: height } = document.documentElement
+  const centerY = height * 0.44
+  function verticalPosition(topLimit: number, bottomLimit: number): CSSProperties {
+    // Percentages in translateY follow the rendered panel height as its contents change.
+    return {
+      top: centerY,
+      transform: `translateY(clamp(${topLimit - centerY}px, -50%, calc(${bottomLimit - centerY}px - 100%)))`,
+      maxHeight: Math.max(0, bottomLimit - topLimit),
+    }
+  }
+
   const trigger = anchor.getBoundingClientRect()
   const board = anchor.closest('.draft-board-scroll')?.getBoundingClientRect()
   if (!anchor.isConnected || trigger.bottom <= 0 || trigger.top >= height ||
@@ -61,12 +71,10 @@ function informationPanelPosition(anchor: HTMLButtonElement): CSSProperties | nu
   const sideWidth = Math.max(leftSpace, rightSpace)
   if (sideWidth >= 640) {
     const panelWidth = Math.min(maxWidth, sideWidth)
-    const top = Math.max(margin, Math.min(column.top - 16, height - 640))
     return {
       left: leftSpace >= rightSpace ? column.left - gap - panelWidth : column.right + gap,
-      top,
       width: panelWidth,
-      maxHeight: height - top - margin,
+      ...verticalPosition(margin, height - margin),
     }
   }
 
@@ -79,9 +87,10 @@ function informationPanelPosition(anchor: HTMLButtonElement): CSSProperties | nu
   const panelWidth = Math.min(maxWidth, width - 2 * margin)
   return {
     left: Math.max(margin, Math.min(trigger.right - panelWidth, width - margin - panelWidth)),
-    ...(below >= above ? { top: keepVisible.bottom + gap } : { bottom: height - keepVisible.top + gap }),
     width: panelWidth,
-    maxHeight: Math.max(above, below),
+    ...(below >= above
+      ? verticalPosition(keepVisible.bottom + gap, height - margin)
+      : verticalPosition(margin, keepVisible.top - gap)),
   }
 }
 
