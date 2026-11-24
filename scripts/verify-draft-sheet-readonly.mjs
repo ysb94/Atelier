@@ -22,7 +22,7 @@ const fixtureClient={
    const modulePath = importer?.replaceAll('\\','/') ?? ''
    if ((/\/lib\/supabase\/client(?:\.ts)?$/.test(source.replaceAll('\\','/')) &&
        /\/(product-drafts|profiles|code-usage-targets|code-usage-target-folders)\.ts$/.test(modulePath)) ||
-       (source === './client' && /\/(attendance-exemptions|draft-information-temporary|draft-visual-content|draft-team-work)\.ts$/.test(modulePath))) return '\0draft-color-client'
+       (source === './client' && /\/(attendance-exemptions|draft-information-temporary|draft-price-requests|draft-visual-content|draft-team-work)\.ts$/.test(modulePath))) return '\0draft-color-client'
  },
  load(id) {
    if(id==='\0draft-color-client') return `import { createClient } from '@supabase/supabase-js'
@@ -94,6 +94,16 @@ try{
  })
  await page.route('**/rpc/list_company_attendance_exempt', route => route.fulfill({json:{data:['fixture-md'],error:null}}))
  const teamRows=new Map()
+ const priceDestinations=[]
+ await page.route('**/rest/v1/draft_price_destinations?*',route=>{
+   if(route.request().method()==='GET') return route.fulfill({json:priceDestinations})
+   assert.equal(route.request().method(),'POST')
+   const {source_draft_id,name}=route.request().postDataJSON()
+   assert.equal(source_draft_id,'fixture')
+   const row={id:crypto.randomUUID(),name}
+   priceDestinations.push(row)
+   return route.fulfill({status:201,json:row})
+ })
  const musinsaPartner=crypto.randomUUID()
  const twentyNinePartner=crypto.randomUUID()
  const kakaoPartner=crypto.randomUUID()
@@ -403,10 +413,11 @@ try{
  const priceCell=row.locator(':scope > td').nth(2)
  await priceCell.getByRole('button',{name:'단가 요청',exact:true}).click()
  const priceDialog=page.getByRole('dialog',{name:'단가 요청',exact:true})
- const priceDestination=page.getByRole('dialog').getByRole('combobox',{name:'제조국·제조처',exact:true})
- assert.equal(await priceDestination.inputValue(),'')
+ const priceDestination=page.getByRole('dialog').getByRole('group',{name:'제조국·제조처',exact:true})
+ const destinationButton=name=>priceDestination.getByRole('button',{name,exact:true})
+ assert.equal(await priceDestination.locator('[aria-pressed=true]').count(),0)
  assert.equal(await priceDialog.getByRole('button',{name:'단가 요청 보내기',exact:true}).count(),0)
- await priceDestination.selectOption({label:'CHINA (김웅사장님)'})
+ await destinationButton('CHINA (김웅사장님)').click()
  await priceDialog.getByRole('button',{name:'단가 요청 보내기',exact:true}).click()
  await page.getByRole('dialog').getByRole('button',{name:'닫기',exact:true}).click()
  const pricePending=priceCell.getByRole('button',{name:'단가 계산중',exact:true})
@@ -484,8 +495,8 @@ try{
  await priceRows.last().getByTitle('아이보리 단가 (위안)').locator('..').hover()
  assert.equal(await opacity(ivoryReRequest),'1')
  await ivoryReRequest.click()
- assert.equal(await priceDestination.inputValue(),'')
- await priceDestination.selectOption({label:'CHINA (김웅사장님)'})
+ assert.equal(await priceDestination.locator('[aria-pressed=true]').count(),0)
+ await destinationButton('CHINA (김웅사장님)').click()
  await page.getByRole('dialog').getByRole('button',{name:'단가 요청 보내기',exact:true}).click()
  const repeatPending=priceCell.getByRole('status').filter({hasText:'재요청중'})
  await repeatPending.waitFor()
@@ -1490,9 +1501,9 @@ try{
  await page.waitForFunction(top=>Math.abs(document.querySelector('.draft-board-table thead').getBoundingClientRect().top-top)<1,headerTop)
  await page.goto(origin,{waitUntil:'domcontentloaded'})
  await priceCell.getByRole('button',{name:'단가 요청',exact:true}).click()
- await priceDestination.selectOption({label:'KOREA'})
+ await destinationButton('KOREA').click()
  assert.equal(await priceDialog.getByRole('combobox',{name:'통화'}).inputValue(),'KRW')
- await priceDestination.selectOption({label:'CHINA (외부 업체)'})
+ await destinationButton('CHINA (외부 업체)').click()
  assert.equal(await priceDialog.getByRole('combobox',{name:'통화'}).inputValue(),'CNY')
  assert.equal(await priceDialog.getByRole('button',{name:'단가 요청 보내기',exact:true}).count(),0)
  await priceDialog.getByRole('textbox',{name:'업체명 (선택)'}).fill('외부 업체 A')
@@ -1514,6 +1525,26 @@ try{
  await manualPriceButton.click()
  await priceDialog.getByText('23.75 CNY',{exact:true}).waitFor()
  assert.equal(await manualSave.count(),0)
+ await priceDialog.getByRole('button',{name:'닫기',exact:true}).click()
+ await page.getByRole('button',{name:'작성자로 전환'}).click()
+ await manualPriceButton.click()
+ assert.equal(await destinationButton('CHINA (외부 업체)').getAttribute('aria-pressed'),'true')
+ assert.equal(await destinationButton('KOREA').evaluate(button=>getComputedStyle(button.parentElement).borderTopWidth),'1px')
+ await destinationButton('제조국 추가').click()
+ await priceDialog.getByRole('textbox',{name:'제조국 이름'}).fill('베트남')
+ await priceDialog.getByRole('button',{name:'공용 제조국 추가',exact:true}).click()
+ await destinationButton('베트남').waitFor()
+ assert.equal(await destinationButton('베트남').getAttribute('aria-pressed'),'true')
+ assert.equal(await priceDialog.getByRole('button',{name:'단가 요청 보내기',exact:true}).count(),0)
+ await priceDialog.getByRole('textbox',{name:'블랙 단가'}).fill('44.25')
+ await priceDialog.getByRole('textbox',{name:'아이보리 단가'}).fill('53')
+ await manualSave.click()
+ await priceDialog.waitFor({state:'hidden'})
+ assert.equal(priceDestinations.length,1)
+ await page.reload()
+ await manualPriceButton.click()
+ assert.equal(await destinationButton('베트남').getAttribute('aria-pressed'),'true')
+ assert.equal(await priceDialog.getByRole('textbox',{name:'블랙 단가'}).inputValue(),'44.25')
  assert.deepEqual(errors,[])
  console.log('draft-sheet-readonly: saved content, permissions, column dragging and visibility, sticky header, and responsive card view passed')
 }finally{await browser?.close();await server?.close()}

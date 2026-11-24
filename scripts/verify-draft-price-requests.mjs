@@ -160,6 +160,25 @@ async function verify() {
     assert.equal((await db.query('select count(*)::int as total from app.draft_price_requests')).rows[0].total, 3)
     assert.deepEqual(await originalState(db), baseline, 'Requests and replies preserve existing draft cost, content and access')
     console.log('Draft price SQL: request/reply, China round history, planning latest reply, immutable snapshots, roles and company isolation passed')
+    await db.exec('create table public.companies(id uuid primary key); insert into public.companies select distinct company_id from public.profiles')
+    await db.exec(await migration('20261124070856_draft_price_destinations'))
+    const readDestinations = actor => as(actor, async tx => (await tx.query('select id,name from public.draft_price_destinations')).rows)
+    const addDestination = (actor, name) => as(actor, async tx => (await tx.query(
+      'insert into public.draft_price_destinations(name,source_draft_id) values ($1,$2) returning id,name', [name, id],
+    )).rows[0])
+    const vietnam = await addDestination(ids.requester, 'Vietnam')
+    assert.deepEqual(await readDestinations(ids.colleague), [vietnam])
+    assert.deepEqual(await readDestinations(ids.viewer), [vietnam])
+    assert.deepEqual(await readDestinations(ids.outside), [])
+    assert.deepEqual(await readDestinations(ids.inactive), [])
+    await assert.rejects(readDestinations(''), { code: '42501' })
+    await assert.rejects(addDestination(ids.colleague, 'Cambodia'), { code: '42501' })
+    await assert.rejects(addDestination(ids.outside, 'Cambodia'), { code: '42501' })
+    await assert.rejects(addDestination(ids.requester, 'VIETNAM'), { code: '23505' })
+    await assert.rejects(addDestination(ids.requester, 'CHINA (김웅사장님)'), { code: '23514' })
+    await db.query('delete from public.product_drafts where id=$1', [id])
+    assert.deepEqual(await readDestinations(ids.colleague), [vietnam])
+    console.log('Shared price destinations SQL: company sharing, role and company isolation, duplicate guard, and persistence after draft deletion passed')
   } finally {
     await db.close()
   }

@@ -302,6 +302,7 @@ export type CostCurrency = 'CNY' | 'USD' | 'KRW'
 
 export type DraftManualPrice = {
   destination: string
+  destinationLabel?: string
   vendor: string
   currency: CostCurrency
   amounts: Record<string, number>

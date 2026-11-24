@@ -5,11 +5,12 @@ import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activ
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { elapsedMaterialRequestDays } from '@/features/planning/material-request-days'
-import { DRAFT_PRICE_DESTINATIONS, isDraftManualPriceDestination, parseDraftManualAmount } from '@/lib/drafts/manual-price'
+import { DRAFT_PRICE_DESTINATIONS, isDraftManualPriceDestination, isSharedDraftPriceDestination, parseDraftManualAmount } from '@/lib/drafts/manual-price'
 import { CHINA_TEAM_DESTINATION } from '@/lib/drafts/sample-receipt'
-import { draftPriceError, type DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
+import { draftPriceError, type DraftPriceRequest, type SharedDraftPriceDestination } from '@/lib/supabase/draft-price-requests'
 import { COST_CURRENCY_LABEL, type CostCurrency, type DraftColorRow, type DraftManualPrice } from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
+import { DraftPriceDestinationPicker } from './DraftPriceDestinationPicker'
 
 export type DraftPriceControls = {
   latest?: DraftPriceRequest
@@ -20,6 +21,13 @@ export type DraftPriceControls = {
   request: () => Promise<unknown>
   confirm?: (reply: DraftPriceRequest) => Promise<void>
   saveManual?: (price: Omit<DraftManualPrice, 'savedAt'>) => Promise<void>
+  destinations?: {
+    rows?: readonly SharedDraftPriceDestination[]
+    ready: boolean
+    error: string
+    retry: () => void
+    add: (name: string) => Promise<SharedDraftPriceDestination>
+  }
 }
 
 const replyDate = new Intl.DateTimeFormat('ko-KR', {
@@ -52,6 +60,7 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   const dialog = useRef<HTMLDialogElement>(null)
   const titleId = useId()
   const latest = controls?.latest
+  const destinations = controls?.destinations
   const reply = controls?.reply
   const amounts = reply?.amounts
   const showingManual = Boolean(manualPrice && (!latest || Date.parse(manualPrice.savedAt) >= Date.parse(latest.requestedAt)))
@@ -68,9 +77,13 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   const ready = hasColors && missingColors.length === 0
   const chinaSelected = destination === CHINA_TEAM_DESTINATION.value
   const manualSelected = isDraftManualPriceDestination(destination)
+  const sharedDestination = isSharedDraftPriceDestination(destination)
+  const sharedLabel = destinations?.rows?.find(row => row.id === destination)?.name ??
+    (manualPrice?.destination === destination ? manualPrice.destinationLabel : undefined)
   const canSend = Boolean(chinaSelected && controls && ready && !readOnly && !waiting && !controls.loading && !controls.error)
   const canSaveManual = Boolean(manualSelected && controls?.saveManual && !readOnly && !waiting &&
-    colors.length && colors.every(color => parseDraftManualAmount(manualAmounts[color.id] ?? '') !== null))
+    (!sharedDestination || sharedLabel) && colors.length &&
+    colors.every(color => parseDraftManualAmount(manualAmounts[color.id] ?? '') !== null))
   const visible = open && active && (!readOnly || Boolean(latest || manualPrice))
 
   useEffect(() => {
@@ -111,7 +124,7 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
     const saved = manualPrice?.destination === value ? manualPrice : undefined
     setDestination(value)
     setVendor(saved?.vendor ?? '')
-    setCurrency(saved?.currency ?? (value === '한국' ? 'KRW' : value === 'other' ? 'USD' : 'CNY'))
+    setCurrency(saved?.currency ?? (value === '한국' ? 'KRW' : value === 'other' || isSharedDraftPriceDestination(value) ? 'USD' : 'CNY'))
     setManualAmounts(saved ? Object.fromEntries(Object.entries(saved.amounts).map(([id, amount]) => [id, String(amount)])) : {})
     setError('')
   }
@@ -132,7 +145,7 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
     setBusy(true)
     setError('')
     try {
-      await controls.saveManual({ destination, vendor: vendor.trim(), currency, amounts })
+      await controls.saveManual({ destination, destinationLabel: sharedDestination ? sharedLabel : undefined, vendor: vendor.trim(), currency, amounts })
       setOpen(false)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '단가를 저장하지 못했습니다.')
@@ -199,13 +212,18 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
         className="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm overflow-y-auto rounded-xl border border-border bg-card p-5 text-left text-card-foreground shadow-xl backdrop:bg-black/40">
         <h2 id={titleId} className="font-semibold">{latest ? `${latest.draftNo} 단가요청` : '단가 요청'}</h2>
         {waiting && <p role="status" className="mt-2 text-sm text-muted-foreground">{latest?.round}차 요청이 접수되어 중국팀 회신을 기다리고 있습니다.</p>}
-        {!waiting && !readOnly && <label className="mt-3 grid gap-1.5 text-sm font-medium">
-          제조국·제조처
-          <Select value={destination} disabled={busy} onChange={event => selectDestination(event.currentTarget.value)}>
-            <option value="" disabled>제조국·제조처 선택</option>
-            {DRAFT_PRICE_DESTINATIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </Select>
-        </label>}
+        {!waiting && !readOnly && <DraftPriceDestinationPicker value={destination} onChange={selectDestination}
+          disabled={busy} shared={destinations?.rows ?? []} ready={Boolean(destinations?.ready)}
+          error={destinations?.error} retry={destinations?.retry}
+          onAdd={destinations ? async name => {
+            setBusy(true)
+            try {
+              const row = await destinations.add(name)
+              selectDestination(row.id)
+            } finally {
+              setBusy(false)
+            }
+          } : undefined} />}
         {reply?.answeredAt && amounts && <div className="mt-3 rounded-lg border border-border px-3 py-2 text-sm">
           <p className="font-medium">{reply.round}차 회신 단가</p>
           <time dateTime={reply.answeredAt} className="text-xs text-muted-foreground">{replyDate.format(new Date(reply.answeredAt))} 회신</time>
@@ -217,7 +235,7 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
           </dl>
         </div>}
         {manualPrice && (readOnly || destination !== manualPrice.destination) && <div className="mt-3 rounded-lg border border-border px-3 py-2 text-sm">
-          <p className="font-medium">{DRAFT_PRICE_DESTINATIONS.find(option => option.value === manualPrice.destination)?.label} 단가 기록</p>
+          <p className="font-medium">{manualPrice.destinationLabel ?? DRAFT_PRICE_DESTINATIONS.find(option => option.value === manualPrice.destination)?.label} 단가 기록</p>
           {manualPrice.vendor && <p className="text-xs text-muted-foreground">{manualPrice.vendor}</p>}
           <dl className="mt-1 divide-y divide-border">
             {colors.map(color => {

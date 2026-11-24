@@ -47,6 +47,7 @@ import { DraftBoardView } from './DraftBoardView'
 import { useDraftSheetLayout } from './draft-sheet-layout'
 import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
 import { useDraftPriceRequests } from './useDraftPriceRequests'
+import { useDraftPriceDestinations } from './use-draft-price-destinations'
 import { useDraftTeamWork } from './use-draft-team-work'
 import { draftVisualBoardKey, useDraftVisualBoard } from './use-draft-visual-board'
 import { useDraftSpecDocumentTemporary } from './use-draft-spec-document-temporary'
@@ -102,7 +103,7 @@ function emptyMessage(
 export function CompanyDraftsPage() {
   useRenderWatch('CompanyDraftsPage')
   const { brands, brandById } = useCompanyBrandScope()
-  const { profile } = useAuth()
+  const { profile, session } = useAuth()
   const workAccess = useBasicWorkAccess()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -135,6 +136,8 @@ export function CompanyDraftsPage() {
     queryFn: () => getCompanyProductDrafts(companyId),
   })
   const prices = useDraftPriceRequests('planning')
+  const priceDestinations = useDraftPriceDestinations(companyId, profileId,
+    profile?.status === 'active' && profile.id === session?.user.id)
   const priceByDraft = useMemo(() => {
     const byDraft = new Map<string, { latest: DraftPriceRequest; reply?: DraftPriceRequest }>()
     for (const request of prices.requests) {
@@ -688,6 +691,7 @@ export function CompanyDraftsPage() {
                     price={{
                       ...price, loading: prices.query.isPending, error: priceListError,
                       retry: () => { void prices.query.refetch() },
+                      destinations: { ...priceDestinations, add: name => priceDestinations.add(draft.id, name) },
                       request: () => prices.change({
                         action: 'request', draftId: draft.id, revision: currentDraft(draft.id)?.updatedAt ?? draft.updatedAt, previousId: price?.latest.id ?? null,
                       }),

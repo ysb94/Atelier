@@ -414,7 +414,7 @@ try {
   await page.getByRole('button',{name:'단가 요청',exact:true}).click()
   const planningPriceDialog=page.getByRole('dialog')
   const sendChinaPriceRequest=async()=>{
-    await planningPriceDialog.getByRole('combobox',{name:'제조국·제조처',exact:true}).selectOption({label:'CHINA (김웅사장님)'})
+    await planningPriceDialog.getByRole('button',{name:'CHINA (김웅사장님)',exact:true}).click()
     await planningPriceDialog.getByRole('button',{name:'단가 요청 보내기',exact:true}).click()
   }
   await sendChinaPriceRequest()

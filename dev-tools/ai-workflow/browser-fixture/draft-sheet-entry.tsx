@@ -7,6 +7,7 @@ import { useDraftSheetLayout } from '@/features/drafts/draft-sheet-layout'
 import { useDraftTeamWork } from '@/features/drafts/use-draft-team-work'
 import { draftVisualBoardKey, useDraftVisualBoard } from '@/features/drafts/use-draft-visual-board'
 import { useDraftSpecDocumentTemporary } from '@/features/drafts/use-draft-spec-document-temporary'
+import { useDraftPriceDestinations } from '@/features/drafts/use-draft-price-destinations'
 import { resolveReleaseSchedule } from '@/features/drafts/release-schedule-preview'
 import { emptyDraftInput, newColorRow } from '@/lib/drafts/empty-draft'
 import { normalizeColorSpecs, writeColorSpec, type SaveColorSpec } from '@/lib/drafts/color-spec'
@@ -56,6 +57,7 @@ function Fixture() {
   const [previousPriceReply, setPreviousPriceReply] = useState<DraftPriceRequest>()
   const [readOnly,setReadOnly]=useState(false)
   const accountId = readOnly ? 'fixture-viewer' : 'fixture-owner'
+  const priceDestinations = useDraftPriceDestinations('fixture-company', accountId, true)
   const sheetLayout = useDraftSheetLayout(accountId)
   const [phase,setPhase]=useState('review')
   const [writes,setWrites]=useState(0)
@@ -127,6 +129,7 @@ function Fixture() {
       price={{
         latest: priceRequest, reply: priceRequest?.answeredAt ? priceRequest : previousPriceReply,
         loading: false, error: '', retry: () => {},
+        destinations: { ...priceDestinations, add: name => priceDestinations.add(draft.id, name) },
         request: async () => {
           if (priceRequest?.answeredAt) setPreviousPriceReply(priceRequest)
           const round = (priceRequest?.round ?? 0) + 1

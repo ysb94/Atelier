@@ -15,6 +15,7 @@ export type DraftPriceRequest = {
 }
 
 export type DraftPriceScope = 'planning' | 'china'
+export type SharedDraftPriceDestination = { id: string; name: string }
 export type DraftPriceChange =
   | { action: 'request'; draftId: string; revision: string; previousId: string | null }
   | { action: 'reply'; requestId: string; amounts: Record<string, number> }
@@ -30,6 +31,16 @@ export function changeDraftPrice(input: DraftPriceChange, context: DiagnosticCon
     ? getSupabase().rpc('request_draft_price', { p_draft: input.draftId, p_revision: input.revision, p_previous: input.previousId })
     : getSupabase().rpc('reply_draft_price', { p_request: input.requestId, p_amounts: input.amounts })
   return diagnosticQuery<DraftPriceRequest>('app', `draft_price_${input.action}`, request, context)
+}
+
+export function listDraftPriceDestinations(signal: AbortSignal) {
+  return diagnosticQuery<SharedDraftPriceDestination[]>('app', 'draft_price_destination_list',
+    getSupabase().from('draft_price_destinations').select('id,name').order('name').abortSignal(signal))
+}
+
+export function addDraftPriceDestination(draftId: string, name: string, context: DiagnosticContext) {
+  return diagnosticQuery<SharedDraftPriceDestination>('app', 'draft_price_destination_add',
+    getSupabase().from('draft_price_destinations').insert({ source_draft_id: draftId, name }).select('id,name').single(), context)
 }
 
 export function getDraftPricePhoto(requestId: string, colorId: string, signal: AbortSignal) {
