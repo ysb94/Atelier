@@ -16,6 +16,7 @@
 .draft-sample-next-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:6px}
 .draft-sample-waiting{color:var(--color-muted-foreground);font-size:11px;line-height:1.5}
 .draft-sample-passed{color:var(--color-primary);font-size:12px}
-.draft-sheet-row .draft-sheet-sample-cell p.draft-sheet-registered{margin-bottom:8px;color:var(--color-primary);font-size:14px;font-weight:400}
+.draft-sheet-row .draft-sheet-sample-cell p.draft-sheet-registered{margin-bottom:8px;color:var(--color-primary);font-weight:400}
+.draft-sheet-sample-cell :is(.draft-sample-heading,.draft-sample-dispatch,.draft-sample-received-elapsed){font-size:inherit}
 .draft-sheet-row .draft-sample-route{padding-block:4px 6px}
 .draft-sheet-row .draft-sample-interval{min-height:0;gap:5px;padding-block:6px}
