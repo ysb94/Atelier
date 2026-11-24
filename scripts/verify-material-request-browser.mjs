@@ -45,7 +45,9 @@ const { outputFiles } = await build({
       const draft=useQuery({queryKey:key,queryFn:()=>readPriceDraft()})
       const requests=prices.requests.filter(row=>row.draftId===priceDraft.id).sort((a,b)=>b.round-a.round)
       const latest=requests[0]
+      const [selectedDestination,setSelectedDestination]=useState()
       return <DraftPriceRequestButton readOnly={false} hasColors missingColors={[]}
+        selectedDestination={selectedDestination} onSelectDestination={setSelectedDestination}
         colors={[{id:priceDraft.black,name:'Black'},{id:priceDraft.yellow,name:'Yellow'}]}
         confirmedRequestId={draft.data?.specs.confirmedPriceRequestId} controls={{
         latest,reply:requests.find(row=>row.answeredAt),loading:prices.query.isPending,error:prices.query.error?.message ?? '',

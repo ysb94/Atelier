@@ -5,7 +5,6 @@ import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activ
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { RELEASE_MD_ID } from '@/lib/company/release-access'
-import { sampleCountry } from '@/lib/drafts/sample-receipt'
 import { listOrgChartMembers } from '@/lib/supabase/profiles'
 import type { DraftTeamValues } from '@/lib/supabase/draft-team-work'
 import type { ProductDraft } from '@/lib/types'
@@ -131,8 +130,8 @@ function MdPriceInput({ label, value, disabled, onChange }: {
     }} />
 }
 
-export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork }: {
-  draft: ProductDraft; readOnly: boolean; hidden: boolean; actorId?: string; teamWork: DraftTeamWork
+export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, priceDestinationName, children }: {
+  draft: ProductDraft; readOnly: boolean; hidden: boolean; actorId?: string; teamWork: DraftTeamWork; priceDestinationName?: string; children?: ReactNode
 }) {
   const catalog = useContext(DraftMdOptionsContext)
   const [editingArrival, setEditingArrival] = useState(false)
@@ -356,7 +355,7 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork }: 
 
           <section className={`draft-md-section draft-md-product${options.confirmed ? ' is-confirmed' : ''}`}
             aria-label="제조국 및 옵션">
-            <div className="draft-md-origin"><span>제조국</span><span>{draft.originCountry.trim() ? sampleCountry(draft.originCountry).label : '미정'}</span></div>
+            <div className="draft-md-origin"><span>제조국</span><span>{priceDestinationName ?? '미정'}</span></div>
             <MdField className="draft-md-option-field" label="옵션유무">
               <MdSelect label="옵션유무" value={selectedOption?.id ?? ''} options={selectableOptions} disabled={optionsLocked}
                 confirmed={options.confirmed} onChange={id => options.change(previous => ({ ...previous,
@@ -381,6 +380,7 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork }: 
         <DraftMdOptionDialog label={DRAFT_MD_OPTION_LABELS[managingOptions]} options={catalog.lists[managingOptions]}
           onChange={items => updateOptionCatalog(managingOptions, items)} onClose={() => setManagingOptions(null)} />
       )}
+      {children}
     </td>
   )
 }

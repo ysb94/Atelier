@@ -4,7 +4,17 @@ import { CHINA_TEAM_DESTINATION, SAMPLE_DESTINATIONS } from './sample-receipt'
 
 export const DRAFT_PRICE_DESTINATIONS = [...SAMPLE_DESTINATIONS, { value: 'other', label: '기타 제조처' }] as const
 
+export type DraftPriceDestinationChoice = { value: string; label?: string }
 export type DraftPriceDestinationOption = { value: string; label: string; revision: string | null }
+
+export function draftPriceDestinationLabel(choice: DraftPriceDestinationChoice, rows?: readonly SharedDraftPriceDestination[]) {
+  return rows?.find(row => !row.removed && (row.preset_key ?? row.id) === choice.value)?.name ??
+    choice.label ?? DRAFT_PRICE_DESTINATIONS.find(option => option.value === choice.value)?.label
+}
+
+export function currentDraftManualPrice(manualPrice?: DraftManualPrice, requestedAt?: string) {
+  return manualPrice && (!requestedAt || Date.parse(manualPrice.savedAt) >= Date.parse(requestedAt)) ? manualPrice : undefined
+}
 
 export function resolveDraftPriceDestinationOptions(rows: readonly SharedDraftPriceDestination[]) {
   const presets = DRAFT_PRICE_DESTINATIONS.flatMap(option => {

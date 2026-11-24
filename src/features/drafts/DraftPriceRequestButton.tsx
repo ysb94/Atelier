@@ -6,8 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { elapsedMaterialRequestDays } from '@/features/planning/material-request-days'
 import {
-  DRAFT_PRICE_DESTINATIONS, isDraftManualPriceDestination, isSharedDraftPriceDestination, parseDraftManualAmount,
-  type DraftPriceDestinationOption,
+  currentDraftManualPrice, draftPriceDestinationLabel, isDraftManualPriceDestination, isSharedDraftPriceDestination, parseDraftManualAmount,
+  type DraftPriceDestinationChoice, type DraftPriceDestinationOption,
 } from '@/lib/drafts/manual-price'
 import { CHINA_TEAM_DESTINATION } from '@/lib/drafts/sample-receipt'
 import { draftPriceError, type DraftPriceRequest, type SharedDraftPriceDestination } from '@/lib/supabase/draft-price-requests'
@@ -44,7 +44,7 @@ const requestClock = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: true,
 })
 
-export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, controls, confirmedRequestId, colors = [], manualPrice }: {
+export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, controls, confirmedRequestId, colors = [], manualPrice, selectedDestination, onSelectDestination }: {
   readOnly: boolean
   hasColors: boolean
   missingColors: string[]
@@ -52,11 +52,12 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   confirmedRequestId?: string
   colors?: readonly Pick<DraftColorRow, 'id' | 'name'>[]
   manualPrice?: DraftManualPrice
+  selectedDestination?: DraftPriceDestinationChoice
+  onSelectDestination: (choice?: DraftPriceDestinationChoice) => void
 }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [destination, setDestination] = useState('')
   const [pendingDestination, setPendingDestination] = useState<{ value: string; label: string }>()
   const [vendor, setVendor] = useState('')
   const [currency, setCurrency] = useState<CostCurrency>('CNY')
@@ -64,15 +65,17 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   const active = useWorkspaceTabActivity()
   const dialog = useRef<HTMLDialogElement>(null)
   const confirmation = useRef<HTMLDialogElement>(null)
+  const firstAmount = useRef<HTMLInputElement>(null)
   const titleId = useId()
   const confirmationTitleId = useId()
   const latest = controls?.latest
   const destinations = controls?.destinations
   const reply = controls?.reply
   const amounts = reply?.amounts
-  const showingManual = Boolean(manualPrice && (!latest || Date.parse(manualPrice.savedAt) >= Date.parse(latest.requestedAt)))
-  const displayedAmounts = showingManual ? manualPrice?.amounts : amounts
-  const manualCurrency = showingManual && manualPrice ? COST_CURRENCY_LABEL[manualPrice.currency] : undefined
+  const currentManualPrice = currentDraftManualPrice(manualPrice, latest?.requestedAt)
+  const showingManual = Boolean(currentManualPrice)
+  const displayedAmounts = currentManualPrice?.amounts ?? amounts
+  const manualCurrency = currentManualPrice && COST_CURRENCY_LABEL[currentManualPrice.currency]
   const hasReply = Boolean(reply?.answeredAt && reply.id === latest?.id)
   const confirmed = !showingManual && hasReply && reply?.id === confirmedRequestId
   const confirm = controls?.confirm
@@ -83,12 +86,12 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   const sentAt = requestedAt && Number.isFinite(requestedAt.getTime()) ? requestedAt : null
   const ready = hasColors && missingColors.length === 0
   const confirmingChina = pendingDestination?.value === CHINA_TEAM_DESTINATION.value
-  const manualSelected = isDraftManualPriceDestination(destination)
+  const destination = selectedDestination?.value ?? ''
+  const editingManual = isDraftManualPriceDestination(destination) && !readOnly && !waiting && Boolean(controls?.saveManual)
   const sharedDestination = isSharedDraftPriceDestination(destination)
-  const destinationLabel = destinations?.rows?.find(row => (row.preset_key ?? row.id) === destination)?.name ??
-    (manualPrice?.destination === destination ? manualPrice.destinationLabel : undefined)
+  const destinationLabel = selectedDestination && draftPriceDestinationLabel(selectedDestination, destinations?.rows)
   const canSend = Boolean(confirmingChina && controls && ready && !readOnly && !waiting && !controls.loading && !controls.error)
-  const canSaveManual = Boolean(manualSelected && controls?.saveManual && !readOnly && !waiting &&
+  const canSaveManual = Boolean(editingManual &&
     (!sharedDestination || destinationLabel) && colors.length &&
     colors.every(color => parseDraftManualAmount(manualAmounts[color.id] ?? '') !== null))
   const visible = open && active && (!readOnly || Boolean(latest || manualPrice))
@@ -108,6 +111,10 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
     return () => current?.close()
   }, [showingConfirmation])
 
+  useEffect(() => {
+    if (editingManual && active && !visible) firstAmount.current?.focus({ preventScroll: true })
+  }, [editingManual, active, visible, destination])
+
   async function send() {
     if (!controls || !canSend || busy) return
     setBusy(true)
@@ -115,6 +122,7 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
     try {
       await controls.request()
       setPendingDestination(undefined)
+      selectDestination()
       if (latest) setOpen(false)
     } catch (cause) {
       setError(draftPriceError(cause, '단가요청을 저장하지 못했습니다. 요청 상태를 확인하고 다시 시도해 주세요.'))
@@ -136,17 +144,18 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
     }
   }
 
-  function selectDestination(value: string) {
+  function selectDestination(option?: DraftPriceDestinationChoice) {
+    const value = option?.value ?? ''
     const saved = manualPrice?.destination === value ? manualPrice : undefined
-    setDestination(value)
+    onSelectDestination(option)
     setVendor(saved?.vendor ?? '')
     setCurrency(saved?.currency ?? (value === '한국' ? 'KRW' : value === 'other' || isSharedDraftPriceDestination(value) ? 'USD' : 'CNY'))
     setManualAmounts(saved ? Object.fromEntries(Object.entries(saved.amounts).map(([id, amount]) => [id, String(amount)])) : {})
     setError('')
   }
 
-  function openDetails(value = '') {
-    selectDestination(value)
+  function openDetails() {
+    setError('')
     setPendingDestination(undefined)
     setOpen(true)
   }
@@ -168,7 +177,7 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
     setError('')
     try {
       await controls.saveManual({ destination, destinationLabel, vendor: vendor.trim(), currency, amounts })
-      setOpen(false)
+      selectDestination()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '단가를 저장하지 못했습니다.')
     } finally {
@@ -177,7 +186,41 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   }
 
   return <>
-    {displayedAmounts && colors.length ? <>
+    {editingManual && <form className="draft-price-manual" onSubmit={event => { event.preventDefault(); void saveManual() }}>
+      <div className="draft-color-pad justify-center">
+        <Select aria-label="통화" value={currency} disabled={busy} className="h-7 w-full max-w-24 px-1 text-xs"
+          onChange={event => setCurrency(event.currentTarget.value as CostCurrency)}>
+          {Object.entries(COST_CURRENCY_LABEL).map(([value, label]) => <option key={value} value={value} title={label}>{value}</option>)}
+        </Select>
+      </div>
+      <div className="draft-color-lines draft-price-amounts">
+        {colors.map((color, index) => <div key={color.id} className={cn('draft-color-line', index % 2 === 1 && 'is-alt')}>
+          <Input ref={index === 0 ? firstAmount : undefined} className="h-7 min-w-0 max-w-24 px-1 text-center text-xs tabular-nums"
+            aria-label={`${color.name.trim() || `${index + 1}번 컬러`} 단가`} inputMode="decimal" maxLength={11}
+            value={manualAmounts[color.id] ?? ''} disabled={busy}
+            aria-invalid={Boolean(manualAmounts[color.id]) && parseDraftManualAmount(manualAmounts[color.id]) === null}
+            onChange={event => {
+              const value = event.currentTarget.value
+              setManualAmounts(current => ({ ...current, [color.id]: value }))
+            }} />
+        </div>)}
+      </div>
+      <div className="mx-auto grid w-full max-w-28 gap-1.5">
+        <p className="break-words text-xs font-medium" title={destinationLabel}>{destinationLabel}</p>
+        <Input aria-label="업체명 (선택)" placeholder="업체명 (선택)" value={vendor} maxLength={120} disabled={busy}
+          className="h-7 min-w-0 px-1 text-xs" onChange={event => setVendor(event.currentTarget.value)} />
+        {!colors.length && <p className="text-xs text-muted-foreground">컬러를 먼저 추가해 주세요.</p>}
+        <Button size="sm" type="submit" disabled={busy || !canSaveManual} className="h-7 px-1">
+          {busy ? '저장 중' : '저장'}
+        </Button>
+        <Button size="sm" type="button" variant="outline" className="h-7 px-1" disabled={busy}
+          aria-haspopup="dialog" onClick={openDetails}>제조국 변경</Button>
+        <Button size="sm" type="button" variant="ghost" className="h-6 px-1 text-muted-foreground" disabled={busy}
+          onClick={() => selectDestination()}>취소</Button>
+        {error && !visible && <p role="alert" className="break-words text-xs text-danger">{error}</p>}
+      </div>
+    </form>}
+    {!editingManual && displayedAmounts && colors.length ? <>
       <div className="draft-color-pad justify-center">
         {showingManual && manualPrice && <span className="text-xs text-muted-foreground">{manualPrice.currency}</span>}
         {confirmed && <span role="img" aria-label="단가 확정" className="text-primary">
@@ -206,7 +249,7 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
         })}
       </div>
     </> : null}
-    {(!confirmed || (error && !visible)) && <div className="grid justify-items-center gap-2.5 text-center">
+    {!editingManual && (!confirmed || (error && !visible)) && <div className="grid justify-items-center gap-2.5 text-center">
       {sentAt && <time dateTime={latest?.requestedAt} className="whitespace-nowrap text-xs leading-snug text-muted-foreground">
         {requestDay.format(sentAt)}<br />{requestClock.format(sentAt)} 발송
       </time>}
@@ -217,7 +260,11 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
         : <Button type="button" size="sm" variant={waiting || showReplyActions ? 'ghost' : ready && !readOnly ? 'default' : 'outline'}
           className={waiting || showReplyActions ? 'h-7 bg-blue-700 px-1.5 text-white hover:bg-blue-800' : 'h-7 px-2.5'}
           disabled={busy || (readOnly && !latest && !manualPrice) || (showReplyActions && controls?.loading)}
-          aria-haspopup="dialog" onClick={() => openDetails(showingManual ? manualPrice?.destination : undefined)}>
+          aria-haspopup={showingManual && !readOnly && controls?.saveManual ? undefined : 'dialog'} onClick={() => {
+            if (showingManual && manualPrice && !readOnly && !waiting && controls?.saveManual) {
+              selectDestination({ value: manualPrice.destination, label: manualPrice.destinationLabel })
+            } else openDetails()
+          }}>
           {waiting ? '단가 계산중' : showingManual ? '단가 기록' : showReplyActions ? '단가 재요청' : reply ? '단가 확인' : '단가 요청'}
         </Button>)}
       {!confirmed && showReplyActions && confirm && <Button type="button" size="sm" className="h-7"
@@ -250,7 +297,7 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
             setBusy(true)
             try {
               await destinations.change(option, name)
-              if (name === null && option.value === destination) selectDestination('')
+              if (name === null && option.value === destination) selectDestination()
             } finally {
               setBusy(false)
             }
@@ -266,7 +313,7 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
           </dl>
         </div>}
         {manualPrice && (readOnly || destination !== manualPrice.destination) && <div className="mt-3 rounded-lg border border-border px-3 py-2 text-sm">
-          <p className="font-medium">{manualPrice.destinationLabel ?? DRAFT_PRICE_DESTINATIONS.find(option => option.value === manualPrice.destination)?.label} 단가 기록</p>
+          <p className="font-medium">{draftPriceDestinationLabel({ value: manualPrice.destination, label: manualPrice.destinationLabel })} 단가 기록</p>
           {manualPrice.vendor && <p className="text-xs text-muted-foreground">{manualPrice.vendor}</p>}
           <dl className="mt-1 divide-y divide-border">
             {colors.map(color => {
@@ -278,35 +325,12 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
             })}
           </dl>
         </div>}
-        {!waiting && !readOnly && manualSelected && <div className="mt-3 space-y-3 text-sm">
-          <label className="grid gap-1.5">업체명 (선택)
-            <Input value={vendor} maxLength={120} disabled={busy} onChange={event => setVendor(event.currentTarget.value)} />
-          </label>
-          <label className="grid gap-1.5">통화
-            <Select value={currency} disabled={busy} onChange={event => setCurrency(event.currentTarget.value as CostCurrency)}>
-              {Object.entries(COST_CURRENCY_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </Select>
-          </label>
-          {!colors.length && <p className="text-muted-foreground">컬러를 먼저 추가해 주세요.</p>}
-          {colors.map((color, index) => <label key={color.id} className="grid grid-cols-[minmax(0,1fr)_8rem] items-center gap-2">
-            <span className="break-words">{color.name.trim() || `${index + 1}번 컬러`} 단가</span>
-            <Input inputMode="decimal" maxLength={11} value={manualAmounts[color.id] ?? ''} disabled={busy}
-              aria-invalid={Boolean(manualAmounts[color.id]) && parseDraftManualAmount(manualAmounts[color.id]) === null}
-              onChange={event => {
-                const value = event.currentTarget.value
-                setManualAmounts(current => ({ ...current, [color.id]: value }))
-              }} />
-          </label>)}
-        </div>}
-        {!manualSelected && controls?.loading && <p role="status" className="mt-2 text-sm text-muted-foreground">단가요청을 불러오는 중입니다.</p>}
-        {!manualSelected && controls?.error && <p role="alert" className="mt-2 text-sm text-danger">{controls.error}</p>}
+        {controls?.loading && <p role="status" className="mt-2 text-sm text-muted-foreground">단가요청을 불러오는 중입니다.</p>}
+        {controls?.error && <p role="alert" className="mt-2 text-sm text-danger">{controls.error}</p>}
         {error && !showingConfirmation && <p role="alert" className="mt-2 text-sm text-danger">{error}</p>}
         <div className="mt-4 flex flex-wrap justify-end gap-2">
           <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setOpen(false)}>닫기</Button>
-          {!manualSelected && controls?.error && <Button type="button" size="sm" variant="outline" onClick={controls.retry}>다시 조회</Button>}
-          {!waiting && !readOnly && manualSelected && <Button type="button" size="sm" disabled={busy || !canSaveManual} onClick={() => void saveManual()}>
-            {busy ? '저장 중' : '단가 기록 저장'}
-          </Button>}
+          {controls?.error && <Button type="button" size="sm" variant="outline" onClick={controls.retry}>다시 조회</Button>}
         </div>
         {showingConfirmation && pendingDestination && <dialog ref={confirmation} aria-labelledby={confirmationTitleId}
           aria-describedby={`${confirmationTitleId}-description`}
@@ -343,8 +367,9 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
             {confirmingChina ? <Button type="button" size="sm" disabled={!canSend || busy} onClick={() => void send()}>
               {busy ? '요청 저장 중' : '중국팀에 요청 보내기'}
             </Button> : <Button type="button" size="sm" disabled={waiting || busy} onClick={() => {
-              if (pendingDestination.value !== destination) selectDestination(pendingDestination.value)
+              if (pendingDestination.value !== destination) selectDestination(pendingDestination)
               setPendingDestination(undefined)
+              setOpen(false)
             }}>수기 입력 계속</Button>}
           </div>
         </dialog>}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ChinaAssignmentWarning } from './ChinaAssignmentWarning'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Download, FileText, Send } from 'lucide-react'
+import { Download, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Select } from '@/components/ui/input'
@@ -14,6 +14,7 @@ import { applyChinaWorkOrder } from '@/lib/supabase/china-work-orders'
 import { listOrgChartMembers, type OrgChartMember } from '@/lib/supabase/profiles'
 import { cn, emptyList, formatNumber } from '@/lib/utils'
 import type { WorkOrderGroup, WorkOrderRow } from './work-order-types'
+import { ChinaWorkOrderPreviewButton } from './ChinaWorkOrderPreview'
 
 function roundClosed(row: Pick<WorkOrderRow, 'shipped' | 'passed' | 'receivedAt'>) {
   return Boolean(row.shipped || row.passed || row.receivedAt)
@@ -119,8 +120,6 @@ export function ChinaWorkOrderBoard({ groups, brandById, emptyMessage }: { group
   const queryClient = useQueryClient()
   const [receivingId, setReceivingId] = useState<string | null>(null)
   const [receiveError, setReceiveError] = useState('')
-  const [shippingId, setShippingId] = useState<string | null>(null)
-  const [shipError, setShipError] = useState('')
   const [choices, setChoices] = useState<Record<string, { assigneeId: string; saving: boolean }>>({})
   const [handingOffId, setHandingOffId] = useState<string | null>(null)
   const [assignmentWarning, setAssignmentWarning] = useState<string[]>([])
@@ -152,30 +151,6 @@ export function ChinaWorkOrderBoard({ groups, brandById, emptyMessage }: { group
       setReceiveError('파일을 받았지만 받기 기록을 저장하지 못했습니다.')
     } finally {
       setReceivingId(null)
-    }
-  }
-
-  async function ship(row: WorkOrderRow) {
-    if (!row.url || roundClosed(row)) return
-    setShippingId(row.rowId)
-    setShipError('')
-    const trace = startWorkflow('app', 'china_work_ship')
-    try {
-      trace.step('validate_input')
-      await trace.run('save', () => applyChinaWorkOrder(row.draft, row.rowId, row.kind, 'ship'))
-      trace.step('refresh')
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['product-drafts'] }),
-        queryClient.invalidateQueries({ queryKey: ['china-work-screen'] }),
-      ])
-      trace.done({ writeOutcome: 'committed' })
-    } catch (cause) {
-      trace.fail(cause)
-      console.warn('[china-work] 샘플 발송 실패', { code: 'ship' })
-      const message = assigneeError(cause)
-      setShipError(message === '담당자를 저장하지 못했습니다.' ? '샘플 발송을 기획안에 저장하지 못했습니다.' : message)
-    } finally {
-      setShippingId(null)
     }
   }
 
@@ -254,14 +229,13 @@ export function ChinaWorkOrderBoard({ groups, brandById, emptyMessage }: { group
                 <td className="border-r border-border px-3 py-3 align-middle">
                   <div className={cn('flex min-w-0 flex-wrap items-center gap-3', done && 'text-muted-foreground')}>
                     <FileText className="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                    <div className="min-w-0 flex-1 basis-40"><p className="break-words" title={row.fileName}>{row.url ? row.fileName : '작업 지시서 미등록'}</p><p className="mt-1 text-xs text-muted-foreground">{received ? `${received} 본사 수령 완료` : sent && !row.passed ? `${sent} 발송 · 본사로 이동 중` : sent ? `${sent} 샘플 발송` : registered ? `${registered} 지시서 발송` : '발송일 미등록'}</p></div>
+                    <div className="min-w-0 flex-1 basis-40"><p className="break-words" title={row.fileName}>{row.url ? row.fileName : '작업 지시서 미등록'}</p><p className="mt-1 text-xs text-muted-foreground">{received ? `${received} 본사 수령 완료` : sent || row.shipped ? [sent, row.passed ? '샘플 발송' : '발송 · 본사로 이동 중'].filter(Boolean).join(' ') : registered ? `${registered} 지시서 발송` : '발송일 미등록'}</p></div>
                     <div className="flex shrink-0 gap-2">
                       <Button type="button" variant={receivedFile ? 'secondary' : 'outline'} size="sm" disabled={!canReceive || receivingId === row.rowId} onClick={() => void receive(row)} className={cn('disabled:opacity-100', receivedFile || done ? 'text-muted-foreground' : 'text-primary')}><Download className="size-3.5" aria-hidden="true" />받기</Button>
-                      {done ? <Button type="button" variant="secondary" size="sm" disabled aria-pressed className="text-muted-foreground disabled:opacity-100"><Check className="size-3.5" aria-hidden="true" />발송 완료</Button> : <Button type="button" variant="outline" size="sm" disabled={!row.url || shippingId === row.rowId} onClick={() => void ship(row)} className="text-primary disabled:opacity-100"><Send className="size-3.5" aria-hidden="true" />발송 하기</Button>}
+                      <ChinaWorkOrderPreviewButton url={row.url} name={row.fileName} />
                     </div>
                   </div>
                   {receiveError && row.rowId === current?.rowId ? <p className="mt-3 text-xs text-danger">{receiveError}</p> : null}
-                  {shipError && row.rowId === current?.rowId ? <p className="mt-3 text-xs text-danger">{shipError}</p> : null}
                   {note && <p className="mt-3 whitespace-pre-wrap rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">진행 메모: {note}</p>}
                 </td>
                 {index === 0 && <td rowSpan={rows.length} className="px-3 py-3 text-center align-middle">

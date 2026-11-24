@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from 'react'
 import { GripVertical } from 'lucide-react'
 import { DEFAULT_DRAFT_SHEET_LAYOUT, DRAFT_SHEET_COLUMNS, type DraftSheetColumnId, type DraftSheetLayout } from './draft-sheet-layout'
 
@@ -159,7 +159,7 @@ export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, 
     if (target) onMoveColumn?.(current.id, target.id, target.after)
   }
 
-  return <table className="draft-board-table" style={{ width }}>
+  return <table className="draft-board-table" style={{ width, '--draft-sheet-width': `${width}px` } as CSSProperties}>
     {caption && <caption className="sr-only">{caption}</caption>}
     <colgroup>{columns.map(({ id }) => <col key={id} className={`draft-column-${id}`}
       style={{ width: DRAFT_SHEET_COLUMNS[id].width }} />)}</colgroup>

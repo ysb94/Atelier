@@ -1,6 +1,6 @@
-import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEventHandler, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { Fragment, cloneElement, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEventHandler, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { FileText, GripVertical, Heart, ImageOff, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
+import { Eye, FileText, GripVertical, Heart, ImageOff, Plus, Save, SquarePen, Trash2, X } from 'lucide-react'
 import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
@@ -14,7 +14,8 @@ import {
 } from '@/lib/drafts/color-spec'
 import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
 import { colorSampleLineStatus, resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
-import { sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
+import { CHINA_TEAM_DESTINATION, sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
+import { currentDraftManualPrice, draftPriceDestinationLabel, type DraftPriceDestinationChoice } from '@/lib/drafts/manual-price'
 import { sheetRegisteredDay } from '@/lib/drafts/sample-work-order'
 import { readFileAsDataUrl } from '@/lib/images'
 import type { DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
@@ -820,12 +821,14 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   } | null>(null)
   const fromVisual = Boolean(information?.visualTrigger)
   const [informationEdits, setInformationEdits] = useState<InformationDrafts>({})
+  const [priceEdit, setPriceEdit] = useState<{ editorKey: string; destination: DraftPriceDestinationChoice }>()
   const editorKey = `${informationEditorId ?? ''}:${readOnly}`
   const previousEditorKey = useRef(editorKey)
   useEffect(() => {
     if (previousEditorKey.current === editorKey) return
     previousEditorKey.current = editorKey
     setInformationEdits({})
+    setPriceEdit(undefined)
   }, [editorKey])
   function updateInformationEdits(key: string, update: UpdateInformationEdits) {
     if (!readOnly && !fromVisual) setInformationEdits(current => ({ ...current, [key]: update(current[key]) }))
@@ -853,6 +856,16 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   const documentOpen = !fromVisual && information?.field === 'specDoc'
   const colorRows: Array<DraftColorRow | null> = draft.colors.length ? draft.colors : [null]
   const priceAmounts = price?.reply?.amounts ?? draft.specs.manualPrice?.amounts
+  const latestPriceRequest = price?.latest
+  const manualPrice = draft.specs.manualPrice
+  const savedManualPrice = currentDraftManualPrice(manualPrice, latestPriceRequest?.requestedAt)
+  const editingPriceDestination = priceEdit?.editorKey === editorKey && !readOnly && price?.saveManual &&
+    (!latestPriceRequest || latestPriceRequest.answeredAt) ? priceEdit.destination : undefined
+  const savedPriceDestination = savedManualPrice
+    ? { value: savedManualPrice.destination, label: savedManualPrice.destinationLabel }
+    : latestPriceRequest ? CHINA_TEAM_DESTINATION : undefined
+  const priceDestination = editingPriceDestination ?? savedPriceDestination
+  const priceDestinationName = priceDestination && draftPriceDestinationLabel(priceDestination, price?.destinations?.rows)
   function colorSampleDone(colorId: string) {
     return colorId in pendingDone ? pendingDone[colorId] : doneColorIds.has(colorId)
   }
@@ -877,6 +890,11 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
     })
   }
 
+  const editLabel = readOnly ? '기획안 조회' : '기획안 편집'
+  const EditIcon = readOnly ? Eye : SquarePen
+  const editButton = <button type="button" className="draft-sheet-edit" aria-label={`${draft.draftNo} ${editLabel}`} title={editLabel} onClick={onOpen}>
+    <EditIcon size={14} aria-hidden="true" />
+  </button>
   const brandContent = <div className="draft-sheet-image-cell">
       {mode === 'card'
         ? <p className="draft-card-brand-name">{brand?.name || '브랜드 미정'}</p>
@@ -906,15 +924,15 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
       >
         {named ? '네임확정' : '네임 미정'}
       </SheetConfirmButton>
-      <div className="draft-sheet-brand-actions">
-        <button type="button" className="draft-sheet-edit" aria-label={`${draft.draftNo} 기획안 ${readOnly ? '조회' : '편집'}`} onClick={onOpen}><Pencil size={12} />기획안 {readOnly ? '조회' : '편집'}</button>
-        {mode === 'table' && <button type="button" className="draft-sheet-schedule-button" disabled={readOnly} onClick={onSchedule}>{schedule?.group ? '일정 수정' : '일정 정하기'}</button>}
-      </div>
+      {mode === 'card' && <div className="draft-sheet-brand-actions">{editButton}</div>}
       {mode === 'table' && (draft.releaseIssue.trim() || schedule?.group) && (
         <details className="draft-sheet-release">
           <summary>발매 이슈</summary>
           <p>{draft.releaseIssue.trim() || '등록된 이슈 없음'}</p>
-          {schedule?.group && <div className="draft-sheet-schedule">{formatReleaseGroupLabel(schedule.group)}{schedule.certainty ? ` · ${RELEASE_CERTAINTY_LABEL[schedule.certainty]}` : ''}{schedule.targetDate ? ` · ${formatTargetDate(schedule.targetDate)}` : ''}{schedule.isPreview ? ' · 미리보기' : ''}</div>}
+          {schedule?.group && <>
+            <div className="draft-sheet-schedule">{formatReleaseGroupLabel(schedule.group)}{schedule.certainty ? ` · ${RELEASE_CERTAINTY_LABEL[schedule.certainty]}` : ''}{schedule.targetDate ? ` · ${formatTargetDate(schedule.targetDate)}` : ''}{schedule.isPreview ? ' · 미리보기' : ''}</div>
+            <button type="button" className="draft-sheet-schedule-button" disabled={readOnly} onClick={onSchedule}>일정 수정</button>
+          </>}
         </details>
       )}
     </div>
@@ -950,12 +968,14 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   }
 
   const hidden = new Set(layout.filter(column => !column.visible).map(column => column.id))
-  const cells: Record<DraftSheetColumnId, ReactNode> = {
+  const lastVisibleColumn = layout.filter(column => column.visible).at(-1)?.id
+  const cells: Record<DraftSheetColumnId, ReactElement<{ children?: ReactNode }>> = {
     brand: <td className="draft-sheet-brand-cell" hidden={hidden.has('brand')}>{brandContent}</td>,
     sample: <td className="draft-sheet-sample-cell" hidden={hidden.has('sample')}>{sampleContent}</td>,
     price: <td className={`draft-sheet-price-cell${priceAmounts && hasColor ? ' has-reply' : ''}`} hidden={hidden.has('price')}>
-      <DraftPriceRequestButton readOnly={readOnly} hasColors={hasColor} colors={draft.colors} missingColors={missingPriceColors} controls={price}
-        confirmedRequestId={draft.specs.confirmedPriceRequestId} manualPrice={draft.specs.manualPrice} />
+      <DraftPriceRequestButton key={editorKey} readOnly={readOnly} hasColors={hasColor} colors={draft.colors} missingColors={missingPriceColors} controls={price}
+        confirmedRequestId={draft.specs.confirmedPriceRequestId} manualPrice={manualPrice} selectedDestination={editingPriceDestination}
+        onSelectDestination={destination => setPriceEdit(destination ? { editorKey, destination } : undefined)} />
     </td>,
     color: <td className="draft-sheet-color-cell" hidden={hidden.has('color')}>
       <div className="draft-color-pad draft-sheet-color-tools">
@@ -1057,12 +1077,17 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
       onOpenVisualTab={(anchor, colorId, field) => setInformation(current =>
         current?.anchor === anchor && current.field === field ? null : { anchor, colorId, field, visualTrigger: field })} />,
     amd: <DraftAmdCell key={editorKey} colors={draft.colors} hidden={hidden.has('amd')} readOnly={readOnly} teamWork={teamWork} />,
-    md: <DraftMdTeamCell key={editorKey} draft={draft} hidden={hidden.has('md')} readOnly={readOnly} actorId={informationEditorId} teamWork={teamWork} />,
+    md: <DraftMdTeamCell key={editorKey} draft={draft} hidden={hidden.has('md')} readOnly={readOnly} actorId={informationEditorId}
+      teamWork={teamWork} priceDestinationName={priceDestinationName} />,
     ect: <td hidden={hidden.has('ect')} />,
   }
 
   return <><tr className="draft-sheet-row">
-      {layout.map(({ id }) => <Fragment key={id}>{cells[id]}</Fragment>)}
+      {layout.map(({ id }) => {
+        const cell = cells[id]
+        return <Fragment key={id}>{id === lastVisibleColumn ? cloneElement(cell, {}, cell.props.children,
+          <div className="draft-sheet-edit-anchor">{editButton}</div>) : cell}</Fragment>
+      })}
     </tr>
     {information && !hidden.has(fromVisual ? 'visual' : 'information') && (
       <DraftInformationPanel key={informationEditorId} id={informationId} anchor={information.anchor}

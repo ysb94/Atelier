@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { DraftTeamRecord, DraftTeamValues } from '@/lib/supabase/draft-team-work'
@@ -45,11 +45,12 @@ function AmdNumbers({ name, fields, locked, saving, onSave, onReset }: {
   </>
 }
 
-export function DraftAmdCell({ colors, readOnly, hidden, teamWork }: {
+export function DraftAmdCell({ colors, readOnly, hidden, teamWork, children }: {
   colors: DraftColorRow[]
   readOnly: boolean
   hidden: boolean
   teamWork: DraftTeamWork
+  children?: ReactNode
 }) {
   const amd = teamWork.records?.get('amd') as DraftTeamRecord<'amd'> | undefined
   const saved: AmdValues = amd?.payload ?? { collection: '', colors: {} }
@@ -102,5 +103,6 @@ export function DraftAmdCell({ colors, readOnly, hidden, teamWork }: {
       })}
     </div>
     {error && <p role="alert" className="draft-team-notice">{error}</p>}
+    {children}
   </td>
 }
