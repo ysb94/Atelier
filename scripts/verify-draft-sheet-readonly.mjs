@@ -1417,6 +1417,12 @@ try{
  })
  await row.getByRole('button',{name:'컬러 문서',exact:true}).click()
  const colorForm=row.locator('.draft-color-add-form')
+ const colorFormAppearance=await colorForm.evaluate(form=>{
+   const {backgroundColor,opacity,zIndex}=getComputedStyle(form)
+   const header=form.closest('table').querySelector('thead th')
+   return {backgroundColor,opacity,aboveHeader:Number(zIndex)>Number(getComputedStyle(header).zIndex)}
+ })
+ assert.deepEqual(colorFormAppearance,{backgroundColor:'rgb(255, 255, 255)',opacity:'1',aboveHeader:true})
  assert.deepEqual(await colorForm.locator('.draft-color-add-header span').allTextContents(),['영문','한글명'])
  assert.equal(await colorForm.getByRole('textbox',{name:'컬러 1 한글명',exact:true}).inputValue(),'블랙')
  assert.equal(await colorForm.getByRole('textbox',{name:'컬러 1 영문',exact:true}).inputValue(),'')
