@@ -445,29 +445,37 @@ try{
  }),'The supplier, sample date and elapsed days fit in the same line')
  assert.equal(await revisionPreview.isDisabled(),true)
  assert.equal(await receiptPreview.isDisabled(),true)
- assert.equal(await dispatchPreview.evaluate(element=>{
-   const heading=element.parentElement.querySelector('.draft-sample-heading')
-   return parseFloat(getComputedStyle(element).fontSize)/parseFloat(getComputedStyle(heading).fontSize)
- }),1.125)
- assert.equal(await dispatchPreview.evaluate(element=>{
-   const probe=document.createElement('span')
-   probe.style.color='var(--color-blue-700)'
-   element.append(probe)
-   const matches=getComputedStyle(element).color===getComputedStyle(probe).color
-   probe.remove()
-   return matches
- }),true)
  const [dispatchBox, revisionBox, receiptBox]=await Promise.all([dispatchPreview.boundingBox(),revisionPreview.boundingBox(),receiptPreview.boundingBox()])
  assert.ok(revisionBox.y+revisionBox.height<=receiptBox.y&&revisionBox.x>=dispatchBox.x+dispatchBox.width)
  assert.ok(Math.abs(revisionBox.x+revisionBox.width-receiptBox.x-receiptBox.width)<1,'SAMPLE actions share the right edge')
- const dispatchTypography=element=>{
-   const {color,fontSize}=getComputedStyle(element)
-   return {color,fontSize}
+ for(const [phase,status] of [
+   ['china-waiting','중국팀 제작·발송 대기'],
+   ['china-sent','26.10.31 중국 발송 완료'],
+   ['external-sample','외부 업체 샘플 · 기록용'],
+   ['promotion-sample','프로모션 샘플 · 기록용'],
+   ['korea-sample','국내 샘플'],
+ ]){
+   await phaseSelect.selectOption(phase)
+   const statusLine=samplePreview.getByText(status,{exact:true})
+   const layout=await statusLine.evaluate(element=>{
+     const heading=element.parentElement.querySelector('.draft-sample-heading')
+     const headingBox=heading.getBoundingClientRect()
+     const statusBox=element.getBoundingClientRect()
+     const {color,fontSize,textAlign}=getComputedStyle(element)
+     const probe=document.createElement('span')
+     probe.style.color='var(--color-blue-700)'
+     element.append(probe)
+     const blue=getComputedStyle(probe).color
+     probe.remove()
+     return {
+       sameSize:fontSize===getComputedStyle(heading).fontSize,
+       blue:color===blue,
+       leftAligned:textAlign==='left'&&Math.abs(statusBox.left-headingBox.left)<1,
+       below:Math.abs(statusBox.top-headingBox.bottom)<1,
+     }
+   })
+   assert.deepEqual(layout,{sameSize:true,blue:true,leftAligned:true,below:true},status)
  }
- const waitingTypography=await dispatchPreview.evaluate(dispatchTypography)
- await phaseSelect.selectOption('external-sample')
- const externalPreview=samplePreview.getByText('외부 업체 샘플 · 기록용',{exact:true})
- assert.deepEqual(await externalPreview.evaluate(dispatchTypography),waitingTypography)
  await phaseSelect.selectOption('review')
  assert.equal(await row.getByRole('button',{name:'수정 작업지시서',exact:true}).count(),0)
  assert.equal(await confirmName.isEnabled(),true)

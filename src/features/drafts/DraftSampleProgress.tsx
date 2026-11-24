@@ -63,7 +63,7 @@ export function DraftSampleProgress({ orders, kind = 'sample', joined = false, o
               {`${order.receivedAt ? '' : '+'}${registered} day`}
             </span>}
           </div>
-          {!order.receivedAt && <p className={`draft-sample-dispatch${awaitingChinaDispatch ? ' is-china-waiting' : isExternalSample ? ' is-external-sample' : ''}`}>{country.code === 'CN'
+          {!order.receivedAt && <p className="draft-sample-dispatch">{country.code === 'CN'
             ? order.shipped ? `${sampleHistoryDay(order.returnedAt).slice(2) || '날짜 기록 없음'} 중국 발송 완료` : '중국팀 제작·발송 대기'
             : country.code === 'PROMO' ? '프로모션 샘플 · 기록용'
               : isExternalSample ? '외부 업체 샘플 · 기록용' : '국내 샘플'}</p>}
