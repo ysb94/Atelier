@@ -36,6 +36,50 @@ export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, 
     drag.current = null
   }, [])
 
+  useEffect(() => {
+    const section = header.current
+    const table = section?.closest('table')
+    if (!section || !table) return
+    const viewport = table.closest<HTMLElement>('[data-brand-page-scroll]')
+    const scrollRoot = viewport ?? window
+    let frame = 0
+    let offset = 0
+
+    // The horizontal overflow wrapper also captures CSS sticky on the vertical axis.
+    // Move the actual header within the table so column widths and drag targets stay shared.
+    const update = () => {
+      frame = 0
+      const bounds = section.getBoundingClientRect()
+      const naturalTop = bounds.top - offset
+      const viewportTop = viewport ? Math.max(0, viewport.getBoundingClientRect().top + viewport.clientTop) : 0
+      const nextOffset = Math.max(0, Math.min(viewportTop, table.getBoundingClientRect().bottom - bounds.height) - naturalTop)
+      if (nextOffset === offset) return
+      offset = nextOffset
+      section.style.transform = offset ? `translateY(${offset}px)` : ''
+    }
+
+    function scheduleUpdate() {
+      if (!frame) frame = requestAnimationFrame(update)
+    }
+
+    const observer = new ResizeObserver(scheduleUpdate)
+    observer.observe(table)
+    observer.observe(section)
+    if (viewport) observer.observe(viewport)
+    const boardContent = table.closest('.draft-board-scroll')?.parentElement
+    if (boardContent && boardContent !== viewport) observer.observe(boardContent)
+    scrollRoot.addEventListener('scroll', scheduleUpdate, { passive: true })
+    window.addEventListener('resize', scheduleUpdate)
+    update()
+    return () => {
+      scrollRoot.removeEventListener('scroll', scheduleUpdate)
+      window.removeEventListener('resize', scheduleUpdate)
+      observer.disconnect()
+      cancelAnimationFrame(frame)
+      section.style.transform = ''
+    }
+  }, [])
+
   function targetAtPointer({ id, x, y }: HeaderDrag): DropTarget | null {
     const target = document.elementFromPoint(x, y)?.closest<HTMLTableCellElement>('th[data-column]')
     if (!target || !header.current?.contains(target)) return null

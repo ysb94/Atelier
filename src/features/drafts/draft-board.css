@@ -19,6 +19,7 @@
 .draft-folder-editor button:disabled{cursor:not-allowed;opacity:.6}
 .draft-folder-editor p{flex-basis:100%;margin:0;font-size:11px;color:#c60920}
 .draft-board-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:12px;line-height:1.6;color:#343a40}
+.draft-board-table thead{position:relative;z-index:5;background:var(--color-card)}
 .draft-board-table th{height:44px;padding:10px 16px;font-size:12px;font-weight:500;letter-spacing:.025em;text-align:left;color:white;background:#c60920}
 .draft-board-table th.draft-column-visual{@apply bg-blue-900/75; padding-inline:38px}
 .draft-board-table th.draft-column-amd{@apply bg-green-800/80; text-align:center}

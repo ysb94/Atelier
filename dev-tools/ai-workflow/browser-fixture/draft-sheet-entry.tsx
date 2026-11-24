@@ -19,6 +19,7 @@ import '@/index.css'
 const temporaryKey = 'atelier-fixture-information-temporary'
 const withoutProposer = window.location.hash === '#without-proposer'
 const savedRelease = window.location.hash === '#saved-release'
+const stickyHeader = new URLSearchParams(window.location.search).has('sticky-header')
 const brand: Brand = {
   id: 'fixture-brand', slug: 'mas', name: 'MAS', nameKo: '마스', description: '',
   color: '#b21c29', styleCount: 0, foundedYear: 2026, createdAt: '', updatedAt: '',
@@ -99,7 +100,9 @@ function Fixture() {
     clearTemporary(revision)
     await write()
   }
-  return <main className="p-6"><button onClick={()=>setReadOnly(v=>!v)}>{readOnly?'작성자로 전환':'다른 직원으로 전환'}</button><select aria-label="검증 단계" value={phase} onChange={event=>setPhase(event.target.value)}><option value="review">샘플 검토</option><option value="new">최초 지시서</option><option value="color-upload">컬러 지시서</option></select><output data-testid="writes">{writes}</output><output data-testid="opened">{opened}</output>
+  return <main data-brand-page-scroll={stickyHeader ? '' : undefined} className={stickyHeader ? 'mt-16 h-[60vh] overflow-auto p-6' : 'p-6'}>
+    {stickyHeader && <style>{'.draft-sheet-row { height: 1100px; }'}</style>}
+    <button onClick={()=>setReadOnly(v=>!v)}>{readOnly?'작성자로 전환':'다른 직원으로 전환'}</button><select aria-label="검증 단계" value={phase} onChange={event=>setPhase(event.target.value)}><option value="review">샘플 검토</option><option value="new">최초 지시서</option><option value="color-upload">컬러 지시서</option></select><output data-testid="writes">{writes}</output><output data-testid="opened">{opened}</output>
     <output data-testid="saved-spec">{savedSpec}</output>
     <button type="button" onClick={() => setPriceRequest(current => current && {
       ...current, answeredAt: current.round === 1 ? '2026-11-02T10:00:00Z' : '2026-11-02T15:00:30Z',
@@ -133,6 +136,8 @@ function Fixture() {
           ...current, specs: { ...current.specs, confirmedPriceRequestId: reply.id },
         })),
       }}
-      onOpen={()=>setOpened(n=>n+1)} onSchedule={()=>{void write()}} onSaveColors={saveColors} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={saveSpec} onSaveSpecDocument={saveDocument} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/>} /></main>
+      onOpen={()=>setOpened(n=>n+1)} onSchedule={()=>{void write()}} onSaveColors={saveColors} onRenameProduct={async(field,name)=>{await write();setDraft(d=>({...d,[field]:name}))}} onRenameColor={write} onSaveSheetValue={saveSpec} onSaveSpecDocument={saveDocument} onUploadSampleWorkOrder={write} onReceiveSample={write} onRequestNextSampleRound={write} onUploadColorWorkOrder={write} onReceiveColorSample={write} onSetColorSampleDone={write} onToggleConfirm={write}/>} />
+    {stickyHeader && <div aria-hidden="true" className="h-[550px]" />}
+  </main>
 }
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={new QueryClient()}><Fixture /></QueryClientProvider>)

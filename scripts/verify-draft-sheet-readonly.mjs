@@ -67,7 +67,7 @@ try{
    if(asset){
      res.setHeader('Content-Type',asset.type==='chunk'?'text/javascript':asset.fileName.endsWith('.css')?'text/css':'application/octet-stream')
      res.end(asset.type==='chunk'?asset.code:asset.source)
-   }else if(req.url==='/'){
+   }else if(req.url==='/' || req.url==='/?sticky-header=1'){
      res.setHeader('Content-Type','text/html; charset=utf-8')
      res.end(`<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/${css.fileName}"><div id="root"></div><script type="module" src="/${entry.fileName}"></script>`)
    }else{res.statusCode=404;res.end()}
@@ -1326,6 +1326,46 @@ try{
  assert.equal(await draftCard.count(),0)
  assert.equal(await mdRetail.inputValue(),'43,002','Switching views preserves unsaved table input')
  assert.deepEqual(await columnHeaders.allTextContents(),defaultHeaders.filter(header=>header!=='BRAND'))
+
+ await page.setViewportSize({width:1000,height:760})
+ await page.goto(origin+'/?sticky-header=1')
+ const scrollViewport=page.locator('[data-brand-page-scroll]')
+ const sheetHeader=board.locator('thead')
+ await sheetHeader.waitFor()
+ const headerTop=(await sheetHeader.boundingBox()).y
+ const viewportTop=(await scrollViewport.boundingBox()).y
+ assert.ok(headerTop > viewportTop,'The header initially stays in its normal position below the controls')
+ await scrollViewport.evaluate(node=>{node.scrollTop=250})
+ await page.waitForFunction(()=>{
+   const viewport=document.querySelector('[data-brand-page-scroll]').getBoundingClientRect()
+   const header=document.querySelector('.draft-board-table thead').getBoundingClientRect()
+   return Math.abs(viewport.top-header.top)<1
+ })
+ await scrollViewport.evaluate(node=>{node.scrollTop=560})
+ await board.evaluate(node=>{node.scrollLeft=330})
+ await page.waitForFunction(()=>{
+   const viewport=document.querySelector('[data-brand-page-scroll]').getBoundingClientRect()
+   const table=document.querySelector('.draft-board-table')
+   const header=table.tHead.getBoundingClientRect()
+   const cells=Array.from(table.tBodies[0].rows[0].cells).filter(cell=>!cell.hidden)
+   const x=document.querySelector('.draft-board-scroll').getBoundingClientRect().left+40
+   return Math.abs(viewport.top-header.top)<1 && Array.from(table.tHead.rows[0].cells).every((cell,index)=>
+     Math.abs(cell.getBoundingClientRect().left-cells[index].getBoundingClientRect().left)<1) &&
+     document.elementFromPoint(x,header.top+10)?.closest('thead')===table.tHead
+ })
+ assert.ok(await board.evaluate(node=>node.scrollLeft>0),'Horizontal scrolling is retained while the header is pinned')
+ await scrollViewport.evaluate(node=>{
+   const table=node.querySelector('.draft-board-table')
+   node.scrollTop+=table.getBoundingClientRect().bottom-node.getBoundingClientRect().top-table.tHead.getBoundingClientRect().height/2
+ })
+ await page.waitForFunction(()=>{
+   const table=document.querySelector('.draft-board-table')
+   const header=table.tHead.getBoundingClientRect()
+   const viewport=document.querySelector('[data-brand-page-scroll]').getBoundingClientRect()
+   return header.top<viewport.top && Math.abs(header.bottom-table.getBoundingClientRect().bottom)<1
+ })
+ await scrollViewport.evaluate(node=>{node.scrollTop=0})
+ await page.waitForFunction(top=>Math.abs(document.querySelector('.draft-board-table thead').getBoundingClientRect().top-top)<1,headerTop)
  assert.deepEqual(errors,[])
- console.log('draft-sheet-readonly: saved content, permissions, column dragging and visibility, and responsive card view passed')
+ console.log('draft-sheet-readonly: saved content, permissions, column dragging and visibility, sticky header, and responsive card view passed')
 }finally{await browser?.close();await server?.close()}
