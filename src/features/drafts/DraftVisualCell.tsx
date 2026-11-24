@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { DraftColorRow } from '@/lib/types'
@@ -5,7 +6,7 @@ import { DRAFT_VISUAL_INFORMATION_TABS, type DraftVisualInformationField } from 
 import { DraftVisualAssignees } from './DraftVisualAssignees'
 import type { DraftVisualBoardRow } from './use-draft-visual-board'
 
-export function DraftVisualCell({ colors, colorPhotos, readOnly, hidden, panelId, activeTrigger, onOpenVisualTab, visualBoard }: {
+export function DraftVisualCell({ colors, colorPhotos, readOnly, hidden, panelId, activeTrigger, onOpenVisualTab, visualBoard, children }: {
   colors: DraftColorRow[]
   colorPhotos?: Readonly<Record<string, string>>
   readOnly: boolean
@@ -14,6 +15,7 @@ export function DraftVisualCell({ colors, colorPhotos, readOnly, hidden, panelId
   activeTrigger: { colorId: string | null; field: DraftVisualInformationField } | null
   onOpenVisualTab: (anchor: HTMLButtonElement, colorId: string, field: DraftVisualInformationField) => void
   visualBoard: DraftVisualBoardRow
+  children?: ReactNode
 }) {
   return (
     <td className="draft-sheet-visual-cell" hidden={hidden}>
@@ -41,6 +43,7 @@ export function DraftVisualCell({ colors, colorPhotos, readOnly, hidden, panelId
           </div>
         })}
       </div>
+      {children}
     </td>
   )
 }

@@ -196,12 +196,13 @@ try{
  await page.clock.setFixedTime(new Date('2026-11-02T15:01:00Z'))
  await page.goto(origin,{waitUntil:'commit',timeout:45000});const row=page.locator('.draft-sheet-row');await row.waitFor({timeout:60000})
  assert.deepEqual(await page.getByRole('columnheader').allTextContents(),
-   ['BRAND','SAMPLE','PRICE','COLOR','INFORMATION','VISUAL TEAM','AMD','MD TEAM','e.c.t','기획안'])
- assert.equal(await row.locator(':scope > td').count(),10)
- assert.equal(await row.locator(':scope > td').nth(8).textContent(),'','The reserved ECT area stays blank')
+   ['BRAND','SAMPLE','PRICE','COLOR','INFORMATION','VISUAL TEAM','AMD','MD TEAM','e.c.t'])
+ assert.equal(await row.locator(':scope > td').count(),9)
  assert.equal(await row.locator('.draft-sheet-brand-cell').locator('.draft-sheet-edit:visible,.draft-sheet-schedule-button:visible').count(),0,'BRAND shows no standalone edit or schedule button')
- const actionCell=row.locator(':scope > td.draft-sheet-action-column')
- assert.equal(await actionCell.getByRole('button',{name:'PL-TEST 기획안 편집',exact:true}).count(),1)
+ const editAnchor=row.locator('.draft-sheet-edit-anchor')
+ const editIcon=editAnchor.getByRole('button',{name:'PL-TEST 기획안 편집',exact:true})
+ assert.equal(await editIcon.textContent(),'','The edit action is icon only')
+ assert.equal(await editIcon.getAttribute('title'),'기획안 편집')
  const visualCell=row.locator('.draft-sheet-visual-cell')
  const amdCell=row.locator('.draft-sheet-amd-cell')
  const mdCell=row.locator('.draft-sheet-md-cell')
@@ -553,7 +554,7 @@ try{
  await page.getByRole('button',{name:'단가 회신 반영',exact:true}).click()
  await confirmPrice.waitFor()
  assert.deepEqual(await priceRows.allTextContents(),['16','0'])
- const geometry=()=>row.locator(':scope > td:not(.draft-sheet-action-column)').evaluateAll(cells=>{
+ const geometry=()=>row.locator(':scope > td').evaluateAll(cells=>{
    const rowLeft=cells[0].parentElement.getBoundingClientRect().left
    return cells.map(cell=>{
      const {left,width,height}=cell.getBoundingClientRect()
@@ -1386,7 +1387,7 @@ try{
  await page.mouse.move(amdTarget.x+amdTarget.width/4,amdTarget.y+amdTarget.height/2,{steps:8})
  await page.locator('th[data-column="amd"][data-drop="before"]').waitFor()
  await page.mouse.up()
- const customHeaders=['BRAND','SAMPLE','COLOR','INFORMATION','VISUAL TEAM','MD TEAM','AMD','e.c.t','기획안']
+ const customHeaders=['BRAND','SAMPLE','COLOR','INFORMATION','VISUAL TEAM','MD TEAM','AMD','e.c.t']
  assert.deepEqual(await columnHeaders.allTextContents(),customHeaders)
  assert.equal(await row.getByRole('cell').count(),customHeaders.length)
  assert.equal(await row.locator('.draft-sheet-price-cell').isVisible(),false)
@@ -1447,14 +1448,16 @@ try{
  await headerFor('BRAND').scrollIntoViewIfNeeded()
  const brandStart=await headerFor('BRAND').boundingBox()
  const headerY=brandStart.y+brandStart.height/2
- const edgeX=(await headerFor('기획안').boundingBox()).x-10
+ const scroller=await board.boundingBox()
+ const edgeX=scroller.x+scroller.width-10
  await page.mouse.move(brandStart.x+brandStart.width/2,headerY)
  await page.mouse.down()
  await page.mouse.move(edgeX,headerY,{steps:12})
  await page.locator('th[data-column="ect"][data-drop="after"]').waitFor()
  assert.ok(await board.evaluate(element=>element.scrollLeft>0),'Dragging at the edge scrolls to offscreen columns')
  await page.mouse.up()
- assert.deepEqual(await columnHeaders.allTextContents(),[...defaultHeaders.slice(1,-1),'BRAND','기획안'])
+ assert.deepEqual(await columnHeaders.allTextContents(),[...defaultHeaders.slice(1),'BRAND'])
+ assert.equal(await row.locator('.draft-sheet-brand-cell').locator('.draft-sheet-edit-anchor').count(),1,'The icon follows the last visible column')
  await openLayout()
  await layoutDialog.getByRole('button',{name:'기본값 복원',exact:true}).click()
  await applyLayout.click()
@@ -1469,19 +1472,27 @@ try{
  await applyLayout.click()
  await layoutDialog.waitFor({state:'hidden'})
  assert.equal(await headerFor('BRAND').count(),0)
- assert.equal(await columnHeaders.last().textContent(),'기획안')
- const visibleEdit=actionCell.getByRole('button',{name:'PL-TEST 기획안 편집',exact:true})
- const actionPosition=await actionCell.evaluate(cell=>{
-   const board=cell.closest('.draft-board-scroll')
+ assert.equal(await columnHeaders.last().textContent(),'e.c.t')
+ await openLayout()
+ await showColumn('e.c.t').uncheck()
+ await applyLayout.click()
+ await layoutDialog.waitFor({state:'hidden'})
+ assert.equal(await mdCell.locator('.draft-sheet-edit-anchor').count(),1,'Hiding the last column relocates the icon to the next visible cell')
+ const actionPosition=await editIcon.evaluate(button=>{
+   const board=button.closest('.draft-board-scroll')
    board.scrollLeft=0
-   const start=cell.getBoundingClientRect().right
+   const start=button.getBoundingClientRect().right
    board.scrollLeft=board.scrollWidth-board.clientWidth
-   return {start,end:cell.getBoundingClientRect().right,edge:board.getBoundingClientRect().right}
+   return {start,end:button.getBoundingClientRect().right,edge:board.getBoundingClientRect().right}
  })
- assert.ok(Math.abs(actionPosition.start-actionPosition.end)<2&&Math.abs(actionPosition.end-actionPosition.edge)<2,'The edit action stays at the right edge while the table scrolls')
+ assert.ok(Math.abs(actionPosition.start-actionPosition.end)<2&&Math.abs(actionPosition.end-actionPosition.edge)<10,'The edit icon stays at the right edge while the table scrolls')
  const beforeEdit=Number(await page.getByTestId('opened').textContent())
- await visibleEdit.click()
+ await editIcon.click()
  assert.equal(Number(await page.getByTestId('opened').textContent()),beforeEdit+1)
+ await openLayout()
+ await showColumn('e.c.t').check()
+ await applyLayout.click()
+ await layoutDialog.waitFor({state:'hidden'})
  const viewPicker=page.getByRole('group',{name:'기획안 보기 방식'})
  const cardsButton=viewPicker.getByRole('button',{name:'카드 보기',exact:true})
  const tableButton=viewPicker.getByRole('button',{name:'표 보기',exact:true})
@@ -1510,9 +1521,9 @@ try{
  const cardFits=await draftCard.evaluate(node=>node.scrollWidth<=node.clientWidth+1)
  assert.equal(cardFits,true,'The two panes fit a narrow card without horizontal scrolling')
  await tableButton.click()
- const mobileEdit=await visibleEdit.boundingBox()
+ const mobileEdit=await editIcon.boundingBox()
  assert.ok(mobileEdit.x>=0&&mobileEdit.x+mobileEdit.width<=390,'The fixed edit action fits on mobile with BRAND hidden')
- await visibleEdit.click()
+ await editIcon.click()
  assert.equal(Number(await page.getByTestId('opened').textContent()),beforeOpen+2)
  await page.setViewportSize({width:1800,height:950})
  await mdRetail.waitFor()

@@ -1,6 +1,6 @@
-import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEventHandler, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { Fragment, cloneElement, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEventHandler, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { FileText, GripVertical, Heart, ImageOff, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
+import { Eye, FileText, GripVertical, Heart, ImageOff, Plus, Save, SquarePen, Trash2, X } from 'lucide-react'
 import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
@@ -889,8 +889,10 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
     })
   }
 
-  const editButton = <button type="button" className="draft-sheet-edit" aria-label={`${draft.draftNo} 기획안 ${readOnly ? '조회' : '편집'}`} onClick={onOpen}>
-    <Pencil size={12} aria-hidden="true" />기획안 {readOnly ? '조회' : '편집'}
+  const editLabel = readOnly ? '기획안 조회' : '기획안 편집'
+  const EditIcon = readOnly ? Eye : SquarePen
+  const editButton = <button type="button" className="draft-sheet-edit" aria-label={`${draft.draftNo} ${editLabel}`} title={editLabel} onClick={onOpen}>
+    <EditIcon size={14} aria-hidden="true" />
   </button>
   const brandContent = <div className="draft-sheet-image-cell">
       {mode === 'card'
@@ -962,7 +964,8 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   }
 
   const hidden = new Set(layout.filter(column => !column.visible).map(column => column.id))
-  const cells: Record<DraftSheetColumnId, ReactNode> = {
+  const lastVisibleColumn = layout.filter(column => column.visible).at(-1)?.id
+  const cells: Record<DraftSheetColumnId, ReactElement<{ children?: ReactNode }>> = {
     brand: <td className="draft-sheet-brand-cell" hidden={hidden.has('brand')}>{brandContent}</td>,
     sample: <td className="draft-sheet-sample-cell" hidden={hidden.has('sample')}>{sampleContent}</td>,
     price: <td className={`draft-sheet-price-cell${priceAmounts && hasColor ? ' has-reply' : ''}`} hidden={hidden.has('price')}>
@@ -1076,8 +1079,11 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   }
 
   return <><tr className="draft-sheet-row">
-      {layout.map(({ id }) => <Fragment key={id}>{cells[id]}</Fragment>)}
-      <td className="draft-sheet-action-column">{editButton}</td>
+      {layout.map(({ id }) => {
+        const cell = cells[id]
+        return <Fragment key={id}>{id === lastVisibleColumn ? cloneElement(cell, {}, cell.props.children,
+          <div className="draft-sheet-edit-anchor">{editButton}</div>) : cell}</Fragment>
+      })}
     </tr>
     {information && !hidden.has(fromVisual ? 'visual' : 'information') && (
       <DraftInformationPanel key={informationEditorId} id={informationId} anchor={information.anchor}

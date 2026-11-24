@@ -130,8 +130,8 @@ function MdPriceInput({ label, value, disabled, onChange }: {
     }} />
 }
 
-export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, priceDestinationName }: {
-  draft: ProductDraft; readOnly: boolean; hidden: boolean; actorId?: string; teamWork: DraftTeamWork; priceDestinationName?: string
+export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, priceDestinationName, children }: {
+  draft: ProductDraft; readOnly: boolean; hidden: boolean; actorId?: string; teamWork: DraftTeamWork; priceDestinationName?: string; children?: ReactNode
 }) {
   const catalog = useContext(DraftMdOptionsContext)
   const [editingArrival, setEditingArrival] = useState(false)
@@ -380,6 +380,7 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
         <DraftMdOptionDialog label={DRAFT_MD_OPTION_LABELS[managingOptions]} options={catalog.lists[managingOptions]}
           onChange={items => updateOptionCatalog(managingOptions, items)} onClose={() => setManagingOptions(null)} />
       )}
+      {children}
     </td>
   )
 }
