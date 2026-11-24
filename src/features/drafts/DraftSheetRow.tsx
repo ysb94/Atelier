@@ -658,17 +658,18 @@ function SheetInlineField({
   )
 }
 
-function InformationButton({ label, value, tone, expanded, panelId, disabled, icon, onClick }: {
+function InformationButton({ label, value, tone, temporarilySaved, expanded, panelId, disabled, icon, onClick }: {
   label: string; value: string; tone: ReturnType<typeof specTone>; expanded: boolean
-  panelId: string; disabled: boolean; icon?: ReactNode; onClick: MouseEventHandler<HTMLButtonElement>
+  panelId: string; disabled: boolean; temporarilySaved?: boolean; icon?: ReactNode; onClick: MouseEventHandler<HTMLButtonElement>
 }) {
   const activeRing = tone === 'editing' ? 'ring-2 ring-border' : 'ring-2 ring-primary/40'
   const tooltip = value.trim() || label
+  const description = temporarilySaved ? '임시 저장됨' : tone === 'editing' ? '기입 중' : undefined
   return (
     <button type="button" className={`draft-sheet-action draft-information-action is-${tone}${expanded ? ` ${activeRing}` : ''}`}
       aria-haspopup="dialog" aria-expanded={expanded} aria-controls={expanded ? panelId : undefined}
-      aria-label={label} aria-description={tone === 'editing' ? '기입 중' : undefined}
-      title={tone === 'editing' ? `${tooltip} · 기입 중` : tooltip} disabled={disabled} onClick={onClick}>
+      aria-label={label} aria-description={description}
+      title={description ? `${tooltip} · ${description}` : tooltip} disabled={disabled} onClick={onClick}>
       {icon}
       {label}
     </button>
@@ -767,7 +768,7 @@ function DraftReleaseFolderSelect({ draft, folders, readOnly, onChange }: {
   </>
 }
 
-export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout = DEFAULT_DRAFT_SHEET_LAYOUT, schedule, brand, releaseFolders, onChangeReleaseFolder, price, teamWork, visualBoard, informationEditorId, informationTemporaryStore, onOpen, onNextSample, onSchedule, onSaveColors, onSharedPhotoChange, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout = DEFAULT_DRAFT_SHEET_LAYOUT, schedule, brand, releaseFolders, onChangeReleaseFolder, price, teamWork, visualBoard, informationEditorId, informationTemporaryStore, specDocumentTemporarySource, onOpen, onNextSample, onSchedule, onSaveColors, onSharedPhotoChange, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
   readOnly?: boolean
   mode?: DraftBoardMode
   layout?: DraftSheetLayout
@@ -788,6 +789,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   onSaveSpecDocument: (value: string, temporaryRevision?: string) => Promise<void>
   informationEditorId?: string
   informationTemporaryStore?: DraftInformationTemporaryStore
+  specDocumentTemporarySource?: string
   onUploadSampleWorkOrder: (file: { url: string; name: string }) => Promise<void>
   onReceiveSample: (id: string) => Promise<void>
   onRequestNextSampleRound: (file: { url: string; name: string }, country?: string) => Promise<void>
@@ -843,6 +845,8 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   const specDocument = draft.specs.coating.note
   const documentEditing = !readOnly &&
     informationEditText(specDocument, informationEdits[documentEditKey]?.specDoc).trim() !== specDocument.trim()
+  const documentTemporarilySaved = !readOnly && specDocumentTemporarySource === specDocument
+  const documentInProgress = documentEditing || documentTemporarilySaved
   const documentOpen = !fromVisual && information?.field === 'specDoc'
   const colorRows: Array<DraftColorRow | null> = draft.colors.length ? draft.colors : [null]
   const priceAmounts = price?.reply?.amounts
@@ -992,8 +996,9 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
     information: <td className="draft-sheet-information-cell" hidden={hidden.has('information')}>
       <div className="draft-sheet-information">
         <div className="draft-color-pad px-2">
-          <InformationButton label={documentConfirmed && specDocument.trim() && !documentEditing ? '스펙 확정' : '스펙 문서'}
-            value={specDocument} tone={specTone(specDocument, documentConfirmed, documentEditing)} panelId={informationId}
+          <InformationButton label={documentConfirmed && specDocument.trim() && !documentInProgress ? '스펙 확정' : '스펙 문서'}
+            value={specDocument} tone={specTone(specDocument, documentConfirmed, documentInProgress)} panelId={informationId}
+            temporarilySaved={documentTemporarilySaved && !documentEditing}
             expanded={documentOpen} disabled={false} icon={<FileText size={16} aria-hidden="true" />}
             onClick={event => setInformation(documentOpen ? null : { anchor: event.currentTarget, colorId: null, field: 'specDoc' })} />
         </div>

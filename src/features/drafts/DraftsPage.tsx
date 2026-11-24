@@ -48,6 +48,7 @@ import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
 import { useDraftPriceRequests } from './useDraftPriceRequests'
 import { useDraftTeamWork } from './use-draft-team-work'
 import { draftVisualBoardKey, useDraftVisualBoard } from './use-draft-visual-board'
+import { useDraftSpecDocumentTemporary } from './use-draft-spec-document-temporary'
 import {
   formatReleaseGroupLabel,
   isUnassignedReleaseFolder,
@@ -389,6 +390,9 @@ export function CompanyDraftsPage() {
   }, [boardFilter, folderDrafts, scheduleByDraft])
   const teamWork = useDraftTeamWork(profileId, visible, !showingCompleted)
   const visualBoard = useDraftVisualBoard(profileId, visible, !showingCompleted)
+  const editableVisible = useMemo(() => showingCompleted ? [] : visible.filter(draft => canWriteDraft(workAccess.access, draft)),
+    [showingCompleted, visible, workAccess.access])
+  const specDocumentTemporarySources = useDraftSpecDocumentTemporary(profileId, editableVisible)
 
   const scheduleDraft = scheduleDraftId
     ? (ownerDrafts.find((draft) => draft.id === scheduleDraftId) ??
@@ -675,6 +679,7 @@ export function CompanyDraftsPage() {
                     visualBoard={visualBoard.forDraft(draft.id)}
                     readOnly={!canWriteDraft(workAccess.access,draft)}
                     informationEditorId={profile?.id}
+                    specDocumentTemporarySource={specDocumentTemporarySources.get(draft.id)}
                     schedule={schedule}
                     brand={brand}
                     releaseFolders={(draft.brandId && releaseFoldersByBrand.get(draft.brandId)) || emptyList<Season>()}

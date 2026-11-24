@@ -6,6 +6,7 @@ import { DraftBoardView } from '@/features/drafts/DraftBoardView'
 import { useDraftSheetLayout } from '@/features/drafts/draft-sheet-layout'
 import { useDraftTeamWork } from '@/features/drafts/use-draft-team-work'
 import { draftVisualBoardKey, useDraftVisualBoard } from '@/features/drafts/use-draft-visual-board'
+import { useDraftSpecDocumentTemporary } from '@/features/drafts/use-draft-spec-document-temporary'
 import { resolveReleaseSchedule } from '@/features/drafts/release-schedule-preview'
 import { emptyDraftInput, newColorRow } from '@/lib/drafts/empty-draft'
 import { normalizeColorSpecs, writeColorSpec, type SaveColorSpec } from '@/lib/drafts/color-spec'
@@ -77,6 +78,7 @@ function Fixture() {
   const shown={...draft,sampleWorkOrders:phase==='new'?[]:draft.sampleWorkOrders,specs:{...draft.specs,colorSampleRounds:phase==='review'?draft.specs.colorSampleRounds:[]}}
   const teamWork=useDraftTeamWork(readOnly?'fixture-viewer':'fixture-owner',[draft])
   const visualBoard=useDraftVisualBoard('fixture-owner',[draft])
+  const specDocumentTemporarySources = useDraftSpecDocumentTemporary(accountId, readOnly ? [] : [draft])
   const write=async()=>{setWrites(n=>n+1)}
   const saveColors = async (rows: DraftColorEdit[], revision: string) => {
     setDraft(await saveDraftColors(draft, rows, revision))
@@ -111,6 +113,7 @@ function Fixture() {
     <DraftBoardView accountId={accountId} layout={sheetLayout} label="기획안 목록" renderRows={mode => <DraftSheetRow mode={mode} draft={shown} layout={sheetLayout} readOnly={readOnly} brand={brand} schedule={savedRelease?resolveReleaseSchedule(shown,releaseSeasonMap,[],{}):{group:{id:'group',brandId:'fixture-brand',name:'11월 출시',releaseTiming:''},targetDate:'2026-11-03',certainty:'confirmed',brandId:null,isPreview:false}}
       releaseFolders={releaseFolders} onChangeReleaseFolder={async seasonId => { setDraft(await saveDraftReleaseFolder(draft, seasonId)) }}
       informationEditorId="fixture-owner" informationTemporaryStore={temporaryStore} teamWork={teamWork.forDraft(draft.id)} visualBoard={visualBoard.forDraft(draft.id)}
+      specDocumentTemporarySource={specDocumentTemporarySources.get(draft.id)}
       onSharedPhotoChange={async saved => {
         if (!saved) return
         setDraft(current => ({ ...current, specs: { ...current.specs,

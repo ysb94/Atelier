@@ -22,7 +22,7 @@ const fixtureClient={
    const modulePath = importer?.replaceAll('\\','/') ?? ''
    if ((/\/lib\/supabase\/client(?:\.ts)?$/.test(source.replaceAll('\\','/')) &&
        /\/(product-drafts|profiles|code-usage-targets|code-usage-target-folders)\.ts$/.test(modulePath)) ||
-       (source === './client' && /\/(attendance-exemptions|draft-visual-content|draft-team-work)\.ts$/.test(modulePath))) return '\0draft-color-client'
+       (source === './client' && /\/(attendance-exemptions|draft-information-temporary|draft-visual-content|draft-team-work)\.ts$/.test(modulePath))) return '\0draft-color-client'
  },
  load(id) {
    if(id==='\0draft-color-client') return `import { createClient } from '@supabase/supabase-js'
@@ -121,6 +121,18 @@ try{
  await page.route('**/rest/v1/draft_team_work?*',route=>{
    assert.equal(new URL(route.request().url()).searchParams.get('draft_id'),'in.(fixture)')
    return route.fulfill({json:[...teamRows.values()]})
+ })
+ await page.route('**/rest/v1/draft_information_temporary?*',async route=>{
+   const params=new URL(route.request().url()).searchParams
+   assert.equal(params.get('select'),'draft_id,source:edits->specDoc->>source')
+   assert.equal(params.get('editor_id'),'eq.fixture-owner')
+   assert.equal(params.get('field'),'eq.specDoc')
+   assert.equal(params.get('color_id'),'is.null')
+   assert.equal(params.get('edits->specDoc->>source'),'not.is.null')
+   assert.equal(params.get('draft_id'),'in.(fixture)')
+   const temporary=await page.evaluate(()=>JSON.parse(sessionStorage.getItem('atelier-fixture-information-temporary')??'[]'))
+   return route.fulfill({json:temporary.flatMap(row=>row.field==='specDoc'&&row.edits.specDoc
+     ? [{draft_id:'fixture',source:row.edits.specDoc.source}] : [])})
  })
  await page.route('**/rpc/save_draft_team_work',route=>{
    const {p_draft_id,p_section,p_payload,p_confirmed,p_revision}=route.request().postDataJSON()
@@ -697,10 +709,23 @@ try{
  await documentInput.fill('임시 공통 문서')
  await specDocument.getByRole('button',{name:'임시 저장',exact:true}).click()
  await specDocument.getByText('임시 저장됨',{exact:true}).waitFor()
+ const savedDocumentButton=documentButton.and(row.locator('[aria-description="임시 저장됨"]'))
+ await savedDocumentButton.waitFor()
+ await panel.press('Escape')
+ assert.deepEqual(await cornerMarker(savedDocumentButton),orderMarker,'스펙 문서 창을 닫아도 목록에 임시 저장 표시가 남는다')
+ await page.getByRole('button',{name:'다른 직원으로 전환'}).click()
+ assert.equal(await savedDocumentButton.count(),0)
+ await page.reload()
+ await savedDocumentButton.waitFor()
+ assert.deepEqual(await cornerMarker(savedDocumentButton),orderMarker,'새로고침 후 편집창을 열기 전에도 표시된다')
+ await savedDocumentButton.click()
+ await specDocument.getByText('임시 저장됨',{exact:true}).waitFor()
+ assert.equal(await documentInput.inputValue(),'임시 공통 문서')
  assert.deepEqual(await cornerMarker(documentButton),orderMarker)
  await specDocument.getByRole('button',{name:'확정',exact:true}).click()
  await modifyDocument.waitFor()
  assert.equal(await specDocument.getByRole('button',{name:'임시 저장',exact:true}).count(),0)
+ assert.equal((await cornerMarker(row.getByRole('button',{name:'스펙 확정',exact:true}))).content,'none')
  await page.reload()
  await fabricTrigger.click()
  await fabric.getByText('임시 저장됨',{exact:true}).waitFor()

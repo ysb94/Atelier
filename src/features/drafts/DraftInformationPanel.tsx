@@ -26,6 +26,7 @@ import { DRAFT_INFORMATION_PANEL_TAB_GROUPS, type DraftInformationPanelField } f
 import { DraftVendorHtmlDialog } from './DraftVendorHtmlDialog'
 import { useDraftSabangnetPartners } from './use-draft-sabangnet-partners'
 import { draftVisualBoardKey } from './use-draft-visual-board'
+import { draftSpecDocumentTemporaryKey } from './use-draft-spec-document-temporary'
 import type { DraftTeamWork } from './use-draft-team-work'
 import { DraftVisualImagePanel } from './DraftVisualImagePanel'
 
@@ -697,6 +698,9 @@ export function DraftInformationPanel({
     await cache.cancelQueries({ queryKey, exact: true })
     cache.setQueryData<DraftInformationTemporary[]>(queryKey, current =>
       [...(current ?? []).filter(row => row.field !== field || row.color_id !== colorId), copy])
+    if (field === 'specDoc') {
+      await cache.invalidateQueries({ queryKey: draftSpecDocumentTemporaryKey(editorId) })
+    }
     if (visualField && colorId) {
       const boardQuery = { queryKey: draftVisualBoardKey(editorId) }
       const temporaryColors = field === 'image' ? 'temporary_images' : 'temporary_html'
@@ -896,6 +900,7 @@ export function DraftInformationPanel({
             onSave={async (value, revision) => {
               await onSaveSpecDocument(value, revision)
               removeConfirmedTemporary(revision)
+              void cache.invalidateQueries({ queryKey: draftSpecDocumentTemporaryKey(editorId) })
             }}
             onSaveTemporary={canSaveTemporary ? next => saveTemporary('specDoc', null, next) : undefined}
             edits={edits[documentEditKey] ?? savedDocument?.edits}
