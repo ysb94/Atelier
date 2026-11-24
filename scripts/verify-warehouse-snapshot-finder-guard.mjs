@@ -1281,6 +1281,42 @@ try {
   assert.ok(!popularJob.picking.includes(popularSlot), 'sheet writer skips exclusive picking occupancy on popular slots')
   assert.ok(!popularJob.before.some(entry => entry.id === 'popular-old-aa'))
   console.log('PASS: popular picking allows multiple distinct QR rows and Atelier moves; regular picking remains exclusive; sheet refresh preserves neighbors')
+
+  query(finderSql('20261124093952_finder_existing_box_photo_review'))
+  query(atelierSql('20261124094309_warehouse_audit_require_verified_source'))
+  const reviewQr = 'FIXTURE-INCOMPLETE-QR'
+  const reviewId = randomUUID()
+  query(asReader + unplaced(reviewQr, null, '수량 확인할 박스'))
+  const incomplete = lookup(reviewQr, popularSlot).qrLink
+  assert.equal(incomplete.needsPhotoReview, true)
+  const reviewRequest = { jobId: reviewId, qr: reviewQr, place: popularSlot, sourceToken: incomplete.placementReviewToken }
+  const submitReview = action => asService + `select public.run_finder_placement_review_background(
+    '${brand}','${actor}',${quote(action)},${json(reviewRequest)});`
+  assert.equal(JSON.parse(query(submitReview('read'))).linked, false)
+  const reviewPath = `${brand}/${actor}/${reviewId}/${reviewId}.jpg`
+  query(asReader + `insert into storage.objects(bucket_id,name) values ('warehouse-qr-audit',${quote(reviewPath)});`)
+  assert.equal(JSON.parse(query(submitReview('save'))).pendingReview, true)
+  assert.equal(lookup(reviewQr, popularSlot).qrLink.placementReviewPlace, popularSlot)
+  const manualReview = (action, request) => asEditor + `select public.review_warehouse_qr_audit(
+    '${brand}',${quote(action)},${json(request)});`
+  const queuedReview = JSON.parse(query(manualReview('list', { includeUnplaced: true }))).items
+    .find(item => item.external_row_id === reviewId)
+  assert.equal(queuedReview?.photo_path, reviewPath)
+  assert.equal(queuedReview?.placement_review, true)
+  query(manualReview('link_placement_review', { rowId: reviewId, styleId: style, units: 14 }))
+  const corrected = lookup(reviewQr, popularSlot)
+  assert.equal(corrected.qrLink.photoLinked, true)
+  assert.equal(corrected.qrLink.pendingReview, false)
+  assert.equal(corrected.box, null)
+  const receiveReviewedBox = () => JSON.parse(query(asReader + `select public.finder_place_photo_qr(
+    '${brand}',${quote(reviewQr)},${quote(popularSlot)},null);`))
+  assert.deepEqual(receiveReviewedBox(), { pendingReview: false, alreadyPlaced: false })
+  assert.deepEqual(receiveReviewedBox(), { pendingReview: false, alreadyPlaced: true })
+  assert.equal(lookup(reviewQr, popularSlot).box.place, popularSlot)
+  assert.equal(query(`select count(*) from public.warehouse_stock_positions
+    where set_id='${activeId()}' and box_qr=${quote(reviewQr)} and normalized_style_no='M1234'
+      and units_per_box=14 and remaining_boxes=1;`), '1')
+  console.log('PASS: real Finder QR photo and Atelier review leave the box unplaced until the next scan; retry keeps a single reviewed box')
 } finally {
   if (started) command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore' })
   assert.equal(path.dirname(fixture), tempRoot)
