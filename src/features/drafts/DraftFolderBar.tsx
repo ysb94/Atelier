@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Folder, FolderOpen, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
@@ -42,8 +42,10 @@ export function DraftFolderBar({
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const folderScroll = useRef<HTMLDivElement>(null)
 
   function openCreate() {
+    if (folderScroll.current) folderScroll.current.scrollLeft = 0
     setCreating(true)
     setBrandId(defaultBrandId ?? brands[0]?.id ?? '')
     setName('')
@@ -82,13 +84,36 @@ export function DraftFolderBar({
   return (
     <nav className="min-w-0 flex-1" aria-label="브랜드별 기획안 폴더">
       <div className="flex min-w-0 items-start gap-1.5">
-        <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto [scrollbar-width:thin]">
-          <Button type="button" variant="outline" size="sm" className={cn(folderChipClass, folderScopeClass)} aria-pressed={selectedIds.includes('all')} onClick={() => onSelect('all')}>
-            전체 폴더
-          </Button>
-          <Button type="button" variant="outline" size="sm" className={cn(folderChipClass, folderScopeClass)} aria-pressed={selectedIds.includes('unassigned')} onClick={() => onSelect('unassigned')}>
-            폴더 미지정 <span className="tabular-nums text-danger">{formatNumber(unassignedCount)}</span>
-          </Button>
+        <Button type="button" variant="outline" size="sm" className={cn(folderChipClass, folderScopeClass)} aria-pressed={selectedIds.includes('all')} onClick={() => onSelect('all')}>
+          전체 폴더
+        </Button>
+        <Button type="button" variant="outline" size="sm" className={cn(folderChipClass, folderScopeClass)} aria-pressed={selectedIds.includes('unassigned')} onClick={() => onSelect('unassigned')}>
+          폴더 미지정 <span className="tabular-nums text-danger">{formatNumber(unassignedCount)}</span>
+        </Button>
+        <Button type="button" variant="outline" size="icon" className="size-7 shrink-0 text-muted-foreground shadow-none" aria-expanded={creating} aria-label="기획안 폴더 추가" onClick={() => (creating ? closeEditor() : openCreate())}>
+          <Plus className="size-3.5" aria-hidden="true" />
+        </Button>
+        <div ref={folderScroll} className="flex min-w-0 flex-1 items-start gap-1.5 overflow-x-auto [scrollbar-width:thin]">
+          {creating && (
+            <form className={cn('draft-folder-editor min-w-0 max-w-full shrink-0', defaultBrandId ? 'w-60' : 'w-80')} onSubmit={(event) => {
+              event.preventDefault()
+              void save()
+            }}>
+              {!defaultBrandId && (
+                <Select aria-label="브랜드" className="max-w-full shadow-none" value={brandId} disabled={busy} onChange={(event) => setBrandId(event.target.value)}>
+                  <option value="">브랜드 선택</option>
+                  {brands.map((brand) => (
+                    <option key={brand.id} value={brand.id}>{brand.name}</option>
+                  ))}
+                </Select>
+              )}
+              <Input aria-label="폴더 이름" placeholder="폴더 이름" className="min-w-16 flex-1 shadow-none"
+                autoFocus value={name} disabled={busy} onChange={(event) => setName(event.target.value)} />
+              <Button type="submit" size="sm" disabled={busy}>{busy ? '저장 중' : '저장'}</Button>
+              <Button type="button" size="sm" variant="outline" disabled={busy} onClick={closeEditor}>취소</Button>
+              {error && <p role="alert">{error}</p>}
+            </form>
+          )}
           {folders.map(folder => {
             const selected = selectedIds.includes(folder.id)
             const Icon = selected ? FolderOpen : Folder
@@ -111,29 +136,6 @@ export function DraftFolderBar({
             )
           })}
         </div>
-        <Button type="button" variant="outline" size="icon" className="size-7 shrink-0 text-muted-foreground shadow-none" aria-expanded={creating} aria-label="기획안 폴더 추가" onClick={() => (creating ? closeEditor() : openCreate())}>
-          <Plus className="size-3.5" aria-hidden="true" />
-        </Button>
-        {creating && (
-          <form className={cn('draft-folder-editor min-w-0 max-w-[70%] shrink-0', defaultBrandId ? 'w-60' : 'w-80')} onSubmit={(event) => {
-            event.preventDefault()
-            void save()
-          }}>
-            {!defaultBrandId && (
-              <Select aria-label="브랜드" className="max-w-full shadow-none" value={brandId} disabled={busy} onChange={(event) => setBrandId(event.target.value)}>
-                <option value="">브랜드 선택</option>
-                {brands.map((brand) => (
-                  <option key={brand.id} value={brand.id}>{brand.name}</option>
-                ))}
-              </Select>
-            )}
-            <Input aria-label="폴더 이름" placeholder="폴더 이름" className="min-w-16 flex-1 shadow-none"
-              value={name} disabled={busy} onChange={(event) => setName(event.target.value)} />
-            <Button type="submit" size="sm" disabled={busy}>{busy ? '저장 중' : '저장'}</Button>
-            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={closeEditor}>취소</Button>
-            {error && <p role="alert">{error}</p>}
-          </form>
-        )}
       </div>
     </nav>
   )
