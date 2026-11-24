@@ -180,6 +180,18 @@ try{
  const mdCell=row.locator('.draft-sheet-md-cell')
  const board=page.locator('.draft-board-scroll')
  assert.equal(await board.evaluate(node=>node.scrollWidth>node.clientWidth),true)
+ const dividerStyles=async (columns,pseudo)=>columns.evaluateAll((cells,part)=>cells.map(cell=>{
+   const {content,backgroundColor,width}=getComputedStyle(cell,part)
+   return {content,backgroundColor,width}
+ }),pseudo)
+ const headerDividers=await dividerStyles(page.getByRole('columnheader'),'::before')
+ const cellDividers=await dividerStyles(row.getByRole('cell'),'::after')
+ assert.equal(headerDividers[0].content,'none')
+ assert.equal(cellDividers[0].content,'none')
+ assert.notEqual(headerDividers[1].backgroundColor,'rgba(0, 0, 0, 0)')
+ for(const divider of [...headerDividers.slice(1),...cellDividers.slice(1)]) {
+   assert.deepEqual(divider,{content:'""',backgroundColor:headerDividers[1].backgroundColor,width:'1px'})
+ }
  async function assertCompactColumns() {
    for (const [id, width] of [['color',128],['information',174],['visual',154],['amd',232]]) {
      const header=await page.locator(`th[data-column="${id}"]`).boundingBox()
