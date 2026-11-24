@@ -10,6 +10,7 @@ import { DepartmentApproversPanel } from '@/features/operations-support/Departme
 import { useRenderWatch } from '@/lib/diagnostics'
 import { emptyList } from '@/lib/utils'
 import { PermissionAssignmentCatalog } from './PermissionAssignmentCatalog'
+import { PermissionMatrix } from './PermissionMatrix'
 
 type PendingGrant = { profileId: string; permission: PermissionCode; scopeKind: PermissionScope; scopeId: string; enabled: boolean }
 export function PermissionSettingsPage() {
@@ -19,13 +20,13 @@ export function PermissionSettingsPage() {
   const manage = fullAccess || hasPermission(profile, 'partner.manage')
   const approvers = hasPermission(profile, 'approvers.manage')
   if (!manage && !approvers) return <><PageHeader title="권한·담당자 설정"/><p role="status">권한 지정 관리 또는 승인자 지정 권한이 필요합니다.</p></>
-  return <PermissionSettingsContent key={fullAccess ? 'all' : 'delegated'} manage={manage} fullAccess={fullAccess} approvers={approvers}/>
+  return <PermissionSettingsContent key={`${profile?.id}:${profile?.companyId}:${fullAccess ? 'all' : 'delegated'}`} manage={manage} fullAccess={fullAccess} approvers={approvers}/>
 }
 
 function PermissionSettingsContent({ manage, fullAccess, approvers }: { manage: boolean; fullAccess: boolean; approvers: boolean }) {
   const { profile, refreshProfile } = useAuth()
   const client = useQueryClient()
-  const [view, setView] = useState<'features' | 'people' | 'approvers'>(manage ? 'features' : 'approvers')
+  const [view, setView] = useState<'matrix' | 'features' | 'people' | 'approvers'>(fullAccess ? 'matrix' : manage ? 'features' : 'approvers')
   const catalogRef = useRef<HTMLDetailsElement>(null)
   const [permission, setPermission] = useState<PermissionCode>(fullAccess ? 'work.manage' : 'partner.edit')
   const [person, setPerson] = useState('')
@@ -34,7 +35,7 @@ function PermissionSettingsContent({ manage, fullAccess, approvers }: { manage: 
   const [search, setSearch] = useState('')
   const [pending, setPending] = useState<PendingGrant | null>(null)
   const [message, setMessage] = useState('')
-  const directory = useQuery({ queryKey: ['permission-directory', profile?.id], queryFn: getPermissionDirectory, enabled: manage, retry: false })
+  const directory = useQuery({ queryKey: ['permission-directory', profile?.id, profile?.companyId], queryFn: getPermissionDirectory, enabled: manage, retry: false })
   const grants = directory.data?.grants ?? emptyList<PermissionGrant>()
   const members = directory.data?.profiles ?? []
   const scopes = directory.data?.scopes ?? []
@@ -57,14 +58,16 @@ function PermissionSettingsContent({ manage, fullAccess, approvers }: { manage: 
   const disabled = mutation.isPending || directory.isFetching || Boolean(directory.error)
   return <div className="space-y-5">
     <PageHeader title="권한·담당자 설정" description="직책·직급과 관계없이 사람과 대상 범위를 지정합니다."/>
-    {directory.data?.activation==='pending' && <p role="status" className="rounded-lg border border-border bg-muted/40 p-3 text-sm">담당자 지정·저장·해제가 연결되었습니다. 저장한 새 지정은 실제 기능별 권한 전환 전까지 적용 대기 상태이며, 현재 이용 권한과 로그인·가입 승인·근태 승인자 내역은 유지됩니다.</p>}
+    {view !== 'matrix' && directory.data?.activation==='pending' && <p role="status" className="rounded-lg border border-border bg-muted/40 p-3 text-sm">담당자 지정·저장·해제가 연결되었습니다. 저장한 새 지정은 실제 기능별 권한 전환 전까지 적용 대기 상태이며, 현재 이용 권한과 로그인·가입 승인·근태 승인자 내역은 유지됩니다.</p>}
     <div role="tablist" aria-label="권한 설정 보기" className="flex flex-wrap gap-2 border-b border-border pb-3">
+      {fullAccess && <Button role="tab" aria-selected={view === 'matrix'} variant={view === 'matrix' ? 'default' : 'outline'} onClick={() => { setView('matrix'); setPending(null) }}>한눈에 보기</Button>}
       {manage && <><Button role="tab" aria-selected={view === 'features'} variant={view === 'features' ? 'default' : 'outline'} onClick={() => { setView('features'); setPending(null) }}>기능별 담당자</Button><Button role="tab" aria-selected={view === 'people'} variant={view === 'people' ? 'default' : 'outline'} onClick={() => { setView('people'); setPending(null) }}>직원별 권한</Button></>}
       {approvers && <Button role="tab" aria-selected={view === 'approvers'} variant={view === 'approvers' ? 'default' : 'outline'} onClick={() => { setView('approvers'); setPending(null) }}>야근·출퇴근 정정 승인자</Button>}
-      {manage && <Button variant="outline" disabled={directory.isFetching || mutation.isPending} onClick={() => { setPending(null); void directory.refetch() }}>지정 내역 새로 불러오기</Button>}
+      {manage && view !== 'matrix' && <Button variant="outline" disabled={directory.isFetching || mutation.isPending} onClick={() => { setPending(null); void directory.refetch() }}>지정 내역 새로 불러오기</Button>}
     </div>
-    {manage && <details ref={catalogRef} className="rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-semibold">전체 승인·담당 업무 목록</summary><div className="mt-4"><PermissionAssignmentCatalog pendingActivation={directory.data?.activation==='pending'} delegated={!fullAccess} canEditApprovers={approvers} grants={grants} loading={directory.isPending} error={Boolean(directory.error)} onApprovers={()=>{setView('approvers');setPending(null);if(catalogRef.current)catalogRef.current.open=false}} onPermission={code=>{choosePermission(code);setView('features');if(catalogRef.current)catalogRef.current.open=false}}/></div></details>}
-    {view === 'approvers' ? <DepartmentApproversPanel/> : <>
+    {manage && view !== 'matrix' && <details ref={catalogRef} className="rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-semibold">전체 승인·담당 업무 목록</summary><div className="mt-4"><PermissionAssignmentCatalog pendingActivation={directory.data?.activation==='pending'} delegated={!fullAccess} canEditApprovers={approvers} grants={grants} loading={directory.isPending} error={Boolean(directory.error)} onApprovers={()=>{setView('approvers');setPending(null);if(catalogRef.current)catalogRef.current.open=false}} onPermission={code=>{choosePermission(code);setView('features');if(catalogRef.current)catalogRef.current.open=false}}/></div></details>}
+    {view === 'matrix' && fullAccess ? <PermissionMatrix directory={directory.data} loading={directory.isPending} failed={Boolean(directory.error)} refreshing={directory.isFetching} onRefresh={() => { void directory.refetch() }}/>
+    : view === 'approvers' ? <DepartmentApproversPanel/> : <>
       <p className="text-sm text-muted-foreground">권한이 있는 행동만 허용됩니다. 지정 승인자·대체 승인자는 담당 부서의 본인 야근·출퇴근 정정을 승인할 수 있습니다. 기존 검수·업무 단계는 유지됩니다.</p>
       {directory.error && <div role="alert" className="rounded-xl border border-danger p-4">{directory.error.message}<Button className="ml-3" variant="outline" onClick={() => void directory.refetch()}>다시 불러오기</Button></div>}
       <section aria-label="담당 권한 지정" className="grid gap-4 rounded-xl border border-border bg-card p-5 sm:grid-cols-2 xl:grid-cols-4 shadow-sm">

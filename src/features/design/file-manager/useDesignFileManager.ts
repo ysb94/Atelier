@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useOptionalBrand } from '@/components/layout/brand-context'
 import {
-  assertKeyAllowedForBrand,
   brandFileCapability,
+  topLevelFolderNameError,
 } from '@/lib/design/file-manager-brand'
 import {
   DEFAULT_BROWSE_TYPES, GLOBAL_SEARCH_KEY, GRID_BATCH_SIZE, GRID_SORT_KEY,
@@ -85,8 +85,11 @@ export function useDesignFileManager() {
   const loadBrowseTypes = useCallback(async () => {
     try {
       const folders = await fetchTopLevelFolders()
-      setBrowseTypes([...DEFAULT_BROWSE_TYPES, ...folders.filter((x) => x && x !== 'logs' && !DEFAULT_BROWSE_TYPES.includes(x))])
-    } catch { setBrowseTypes(DEFAULT_BROWSE_TYPES) }
+      setBrowseTypes([...new Set([...DEFAULT_BROWSE_TYPES, ...folders.filter((name) => !topLevelFolderNameError(name))])])
+    } catch {
+      // 기본 목록 또는 마지막으로 확인한 폴더를 유지한다.
+      setSidebarStatus({ message: '폴더 목록을 새로고침하지 못했습니다.', kind: 'error' })
+    }
   }, [])
   const busyCountRef = useRef(0)
   busyCountRef.current = busyCount
@@ -220,7 +223,25 @@ export function useDesignFileManager() {
     setUploadQueue((queue) => queue.filter((x) => x.status !== 'completed')); await uiAlert(`일괄 업로드 완료\n성공: ${success}개\n실패: ${failed}개`)
   }, [uiAlert, uiConfirm, uploadQueue, uploadSingle, withBusy])
   const refreshAfterCrud = useCallback(async (reload = false) => { invalidateServerListCache(activeBrowseType ?? undefined); clearSelection(); if (reload) await loadBrowseTypes(); if (activeBrowseType) await refreshServerFiles(true) }, [activeBrowseType, clearSelection, loadBrowseTypes, refreshServerFiles])
-  const createFolder = useCallback(async () => { const name = sanitizeNameInput(await uiPrompt('새 폴더 이름을 입력하세요.')); if (!name) return;     const path = currentUploadPath ? `${currentUploadPath}/${name}/` : `${name}/`; if (brandSlug) assertKeyAllowedForBrand(path, brandSlug); await withBusy('폴더 생성 중...', async () => { await apiMkdir(path, brandSlug); await refreshAfterCrud(!activeBrowseType) }) }, [activeBrowseType, brandSlug, currentUploadPath, refreshAfterCrud, uiPrompt, withBusy])
+  const createFolder = useCallback(async () => {
+    const isRoot = !currentUploadPath
+    const input = await uiPrompt('새 폴더 이름을 입력하세요.', '', {
+      validateInput: isRoot ? topLevelFolderNameError : undefined,
+    })
+    if (!input) return
+    const name = isRoot ? input : sanitizeNameInput(input)
+    if (!name) return
+    const path = currentUploadPath ? `${currentUploadPath}/${name}/` : `${name}/`
+    try {
+      await withBusy('폴더 생성 중...', async () => {
+        await apiMkdir(path, brandSlug)
+        if (isRoot) setBrowseTypes((types) => types.includes(name) ? types : [...types, name])
+        await refreshAfterCrud(isRoot)
+      })
+    } catch (error) {
+      await uiAlert(error instanceof Error ? error.message : '잠시 후 다시 시도해 주세요.', { title: '폴더 생성 실패' })
+    }
+  }, [brandSlug, currentUploadPath, refreshAfterCrud, uiAlert, uiPrompt, withBusy])
   const renameFile = useCallback(async (item: ServerFileItem, type: string) => { const old = getItemStorageKey(item, type, activeFolder, activeBrowseType); const name = sanitizeNameInput(await uiPrompt('새 파일 이름을 입력하세요.', item.displayName || item.name || '')); if (!name) return; const next = `${old.slice(0, old.lastIndexOf('/') + 1)}${name}`; await withBusy('파일 이름 변경 중...', async () => { await apiMove(old, next, brandSlug); await refreshAfterCrud() }) }, [activeBrowseType, activeFolder, brandSlug, refreshAfterCrud, uiPrompt, withBusy])
   const deleteFile = useCallback(async (item: ServerFileItem, type: string, options: { skipConfirm?: boolean } = {}) => {
     const name = item.displayName || item.name || '파일'

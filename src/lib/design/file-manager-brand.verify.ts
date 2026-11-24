@@ -1,5 +1,5 @@
 /**
- * 디자인 파일 브랜드 루트 격리 검증.
+ * 마스마룰즈 파일 관리의 최상위 폴더와 브랜드 접근 범위 검증.
  * 실행: npx tsx src/lib/design/file-manager-brand.verify.ts
  */
 import {
@@ -9,6 +9,7 @@ import {
   buildBrandUploadPath,
   filterItemsForBrand,
   isKeyAllowedForBrand,
+  topLevelFolderNameError,
 } from './file-manager-brand'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -27,10 +28,6 @@ assert(
   isKeyAllowedForBrand('masmarulez/image/a.jpg', 'atelier'),
   'ATELIER masmarulez 별칭 키',
 )
-assert(
-  !isKeyAllowedForBrand('bbb/image/a.jpg', 'atelier'),
-  'ATELIER가 다른 브랜드 키를 보지 않는다',
-)
 assert(!isKeyAllowedForBrand('embed/foo.html', 'bbb'), '다른 브랜드는 작업 불가')
 
 for (const [type, name] of [
@@ -39,12 +36,19 @@ for (const [type, name] of [
   ['common', 'bottom/a-bottom.jpg'],
   ['product', 'Acc/keyring/AlohaBB/01_AlohaBB_keyring.jpg'],
   ['renew', '1.jpg'],
+  ['z_neeoru', '신상품/상세.사진.jpg'],
+  ['z_voyatton', '제품-1.png'],
+  ['새브랜드-2026', '샘플/가방.jpg'],
 ]) {
   const key = `${type}/${name}`
-  assert(isKeyAllowedForBrand(key, 'atelier'), `${type} 기존 파일 경로 허용`)
-  assert(isKeyAllowedForBrand(key, 'masmarulez'), `${type} 브랜드 별칭 허용`)
+  assert(topLevelFolderNameError(type) === null, `${type} 최상위 이름 허용`)
+  for (const slug of ['atelier', 'masmarulez']) {
+    assertKeyAllowedForBrand(`${type}/`, slug)
+    assertKeyAllowedForBrand(key, slug)
+    assert(buildBrandUploadPath(slug, type) === type, `${slug} ${type} 경로 유지`)
+  }
   assert(!isKeyAllowedForBrand(key, 'bbb'), `${type} 다른 브랜드 작업 차단`)
-  const legacyItems = filterItemsForBrand(
+  const items = filterItemsForBrand(
     [
       { key, name },
       { name: 'fallback.jpg' },
@@ -55,12 +59,21 @@ for (const [type, name] of [
     'atelier',
   )
   assert(
-    legacyItems.length === 2 && legacyItems[0]?.key === key,
-    `${type} 실제 키와 이름 기반 목록을 복원하고 교차 브랜드 파일은 제외`,
+    items.length === 2 && items[0]?.key === key && items[1]?.name === 'fallback.jpg',
+    `${type} 조회 결과에는 요청한 폴더의 파일만 표시`,
   )
+  assert(filterItemsForBrand([{ key, name }], type, 'bbb').length === 0, '미연결 브랜드 목록 비공개')
 }
 
-assert(!isKeyAllowedForBrand('unknown/file.jpg', 'atelier'), '임의 최상위 경로는 차단')
+for (const name of ['z.neeoru', 'z voyatton', 'a/b', 'logs', 'static', 'masmarulez']) {
+  assert(Boolean(topLevelFolderNameError(name)), `최상위 폴더 이름 오류 안내: ${name}`)
+}
+for (const key of [
+  'z.neeoru/', 'z voyatton/', '../', 'z_neeoru/../image/a.jpg', 'z_neeoru/./a.jpg',
+  'z_neeoru//a.jpg', 'z_neeoru/ab\\c.jpg', 'logs/history.json', 'static/app.js',
+]) {
+  assert(!isKeyAllowedForBrand(key, 'atelier'), `잘못된 경로 차단: ${key}`)
+}
 
 assert(
   buildBrandUploadPath('atelier', 'image', 'bags') === 'image/bags',
@@ -77,7 +90,7 @@ assert(threw, '다른 브랜드 업로드 경로는 만들지 않는다')
 
 threw = false
 try {
-  assertKeyAllowedForBrand('bbb/image/a.jpg', 'atelier')
+  assertKeyAllowedForBrand('z_neeoru/image/a.jpg', 'bbb')
 } catch {
   threw = true
 }
@@ -87,10 +100,12 @@ const filtered = filterItemsForBrand(
   [
     { key: 'embed/a.html', name: 'a.html' },
     { key: 'bbb/embed/b.html', name: 'b.html' },
+    { key: 'masmarulez/embed/c.html', name: 'c.html' },
+    { key: 'masmarulez/image/d.jpg', name: 'd.jpg' },
   ],
   'embed',
   'atelier',
 )
-assert(filtered.length === 1 && filtered[0]?.name === 'a.html', '목록 필터')
+assert(filtered.map((item) => item.name).join(',') === 'a.html,c.html', '요청한 폴더와 그 기존 별칭 경로만 표시')
 
 console.log('file-manager-brand.verify ok')

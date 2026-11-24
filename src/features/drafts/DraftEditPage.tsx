@@ -30,6 +30,7 @@ import {
 } from '@/lib/api'
 import { readFileAsDataUrl, readImageFile } from '@/lib/images'
 import { SampleWorkOrderRegistration } from './SampleWorkOrderRegistration'
+import { SampleWorkOrderFileField, SAMPLE_WORK_ORDER_ACCEPT, SAMPLE_WORK_ORDER_MAX_BYTES, type SampleWorkOrderFile } from './SampleWorkOrderFileField'
 import { RegisteredSampleCard } from './RegisteredSampleCard'
 import { RegisteredColorSampleCards } from './RegisteredColorSampleCards'
 import { DraftProposerPicker } from './DraftProposerPicker'
@@ -64,7 +65,6 @@ import {
   latestFilledSampleWorkOrder,
   legacyWorkOrderFields,
   patchSampleWorkOrder,
-  samplePhase,
   sampleWorkOrderFileName,
   withPendingNextSampleWorkOrder,
 } from '@/lib/drafts/sample-work-order'
@@ -77,10 +77,6 @@ import {
 import { draftDetailPath } from '@/lib/workspace/company-paths'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { cn, formatNumber } from '@/lib/utils'
-
-const SAMPLE_WORK_ORDER_ACCEPT =
-  'application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp,.xls,.xlsx'
-const SAMPLE_WORK_ORDER_MAX_BYTES = 8 * 1024 * 1024
 
 const EMPTY_SEASONS: Season[] = []
 const EMPTY_STYLES: Style[] = []
@@ -298,8 +294,6 @@ export function DraftEditPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const basicWorkOrderInputRef = useRef<HTMLInputElement>(null)
-  const sampleFileTargetRef = useRef<string | null>(null)
   const location = useLocation()
   const workOrderInputRef = useRef<HTMLInputElement>(null)
   const uploadOrderIdRef = useRef<string | null>(null)
@@ -425,83 +419,38 @@ export function DraftEditPage() {
     })
   }
 
-  const currentSample = latestFilledSampleWorkOrder(form.sampleWorkOrders)
   const savedSamples = filledSampleWorkOrders(form.sampleWorkOrders).slice().sort((left, right) => left.round - right.round)
   const savedColorSamples = resolveColorSampleRounds(form)
-  const sampleRound = currentSample?.round ?? 1
   useEffect(() => {
     if (location.hash !== '#next-sample') return
     document.getElementById('next-sample')?.scrollIntoView({ block: 'start' })
   }, [location.hash, loaded?.id])
-  const samplePhaseNow = samplePhase(form.sampleWorkOrders)
-  const sampleStatus =
-    samplePhaseNow === 'received'
-      ? `${sampleRound}차샘플 수령`
-      : samplePhaseNow === 'shipped'
-        ? `${sampleRound}차샘플 발송`
-        : `${sampleRound}차샘플 진행`
-  const sampleFileName = currentSample?.url ? sampleWorkOrderFileName(currentSample) : ''
-  const sampleUploadLocked = Boolean(currentSample && (currentSample.shipped || currentSample.receivedAt || currentSample.passed))
-
-  async function uploadBasicWorkOrder(file: File) {
-    if (sampleUploadLocked) return
-    if (!isSampleDestination(form.originCountry)) {
-      setError('샘플 진행처를 먼저 선택해 주세요.')
-      return
-    }
-    if (file.size > SAMPLE_WORK_ORDER_MAX_BYTES) {
-      setError('작업 지시서는 8MB 이하만 올릴 수 있습니다.')
-      return
-    }
-    try {
-      const url = await readFileAsDataUrl(file)
-      const attached =
-        currentSample && !currentSample.shipped && !currentSample.receivedAt && !currentSample.passed
-          ? patchSampleWorkOrder(form.sampleWorkOrders, currentSample.id, {
-              url,
-              name: file.name,
-              shipped: false,
-              shippedAt: new Date().toISOString(),
-              returnedAt: null,
-            })
-          : attachSampleWorkOrderFile(form.sampleWorkOrders, { url, name: file.name })
-      const next = applySampleOrigin(attached, form.originCountry)
-      const nextForm = {
-        ...form,
-        sampleWorkOrders: next,
-        ...legacyWorkOrderFields(next),
-      }
-      patchWorkOrders(next)
-      if (!isNew) saveMutation.mutate(nextForm)
-    } catch (err) {
-      console.warn('[drafts] 샘플 작업 지시서 업로드 실패', err)
-      setError('작업 지시서를 불러오지 못했습니다.')
-    }
+  async function saveSampleAttachment(nextForm: ProductDraftInput) {
+    if (saveMutation.isPending) throw new Error('기획안 저장이 끝난 뒤 다시 등록해 주세요.')
+    const saved = await saveMutation.mutateAsync(nextForm)
+    if (!isNew) setForm(draftToInput(saved))
   }
 
-  async function replaceSavedSampleFile(orderId: string, file: File) {
+  async function registerFirstSample(file: SampleWorkOrderFile) {
+    if (!isSampleDestination(form.originCountry)) {
+      throw new Error('샘플 진행처를 먼저 선택해 주세요.')
+    }
+    const sampleWorkOrders = applySampleOrigin(attachSampleWorkOrderFile(form.sampleWorkOrders, file), form.originCountry)
+    await saveSampleAttachment({ ...form, sampleWorkOrders, ...legacyWorkOrderFields(sampleWorkOrders) })
+  }
+
+  async function replaceSavedSampleFile(orderId: string, file: SampleWorkOrderFile) {
     const order = form.sampleWorkOrders.find((item) => item.id === orderId)
-    if (!order || order.shipped || order.receivedAt || order.passed) return
-    if (file.size > SAMPLE_WORK_ORDER_MAX_BYTES) {
-      setError('작업 지시서는 8MB 이하만 올릴 수 있습니다.')
-      return
+    if (!order || order.shipped || order.receivedAt || order.passed) {
+      throw new Error('발송 전 작업지시서만 교체할 수 있습니다.')
     }
-    try {
-      const url = await readFileAsDataUrl(file)
-      const sampleWorkOrders = patchSampleWorkOrder(form.sampleWorkOrders, orderId, {
-        url,
-        name: file.name,
-        shipped: false,
-        shippedAt: order.shippedAt ?? new Date().toISOString(),
-        returnedAt: null,
-      })
-      const nextForm = { ...form, sampleWorkOrders, ...legacyWorkOrderFields(sampleWorkOrders) }
-      patchWorkOrders(sampleWorkOrders)
-      if (!isNew) saveMutation.mutate(nextForm)
-    } catch (err) {
-      console.warn('[drafts] 샘플 작업 지시서 교체 실패', err)
-      setError('작업 지시서를 불러오지 못했습니다.')
-    }
+    const sampleWorkOrders = patchSampleWorkOrder(form.sampleWorkOrders, orderId, {
+      ...file,
+      shipped: false,
+      shippedAt: order.shippedAt ?? new Date().toISOString(),
+      returnedAt: null,
+    })
+    await saveSampleAttachment({ ...form, sampleWorkOrders, ...legacyWorkOrderFields(sampleWorkOrders) })
   }
 
   function updateSavedSampleCountry(orderId: string, originCountry: string) {
@@ -519,18 +468,8 @@ export function DraftEditPage() {
     if (!isNew) saveMutation.mutate(nextForm)
   }
 
-  async function replaceSavedColorSampleFile(id: string, file: File) {
-    if (!editable || saveMutation.isPending) return
-    if (file.size > SAMPLE_WORK_ORDER_MAX_BYTES) { setError('작업 지시서는 8MB 이하만 올릴 수 있습니다.'); return }
-    try {
-      const url = await readFileAsDataUrl(file)
-      const nextForm = updateDraftColorSample(form, id, { file: { url, name: file.name } })
-      patch({ specs: nextForm.specs, colors: nextForm.colors })
-      if (!isNew) await saveMutation.mutateAsync(nextForm)
-    } catch (cause) {
-      console.warn('[drafts] 컬러샘플 작업지시서 교체 실패', cause)
-      setError(cause instanceof Error ? cause.message : '작업지시서를 바꾸지 못했습니다.')
-    }
+  async function replaceSavedColorSampleFile(id: string, file: SampleWorkOrderFile) {
+    await saveSampleAttachment(updateDraftColorSample(form, id, { file }))
   }
 
   function updateSavedColorSampleCountry(id: string, country: string) {
@@ -839,21 +778,6 @@ export function DraftEditPage() {
                   </div>
                 </div>
               </div>
-          <input
-            ref={basicWorkOrderInputRef}
-            type="file"
-            accept={SAMPLE_WORK_ORDER_ACCEPT}
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0]
-              const orderId = sampleFileTargetRef.current
-              event.target.value = ''
-              sampleFileTargetRef.current = null
-              if (!file) return
-              if (orderId) void replaceSavedSampleFile(orderId, file)
-              else void uploadBasicWorkOrder(file)
-            }}
-          />
           <div className="mt-2 grid gap-5 border-t border-border pt-5 sm:grid-cols-[12rem_minmax(0,1fr)]">
             <div className="space-y-2">
               <Select aria-label="브랜드 선택" className="h-8 w-full text-xs" value={form.brandId ?? ''}
@@ -883,44 +807,22 @@ export function DraftEditPage() {
                 readOnly={!editable || saveMutation.isPending}
                 onChange={proposer => patch({ specs: { ...form.specs, proposer } })} />
               {savedSamples.length === 0 && <p className="text-xs text-muted-foreground">
-                CHINA의 지시서는 중국팀에 전달됩니다. KOREA와 PROMOTION [중국]은 기획안에 기록만 남습니다.
+                CHINA (김웅사장님)의 지시서는 중국팀에 전달됩니다. 다른 진행처는 기획안에 기록됩니다.
               </p>}
             </div>
             <div className="min-w-0">
               {savedSamples.length === 0 ? (
-                <div>
-                  <p className="text-center">
-                    <span className="inline-flex rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">{sampleStatus}</span>
-                  </p>
-                  <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-                    <span />
-                    <p className="text-sm text-muted-foreground">{sampleRound}차샘플 작업지시서 업로드</p>
-                    <div className="justify-self-end">
-                      <Button type="button" variant="outline" size="sm"
-                        disabled={!editable || sampleUploadLocked || saveMutation.isPending}
-                        onClick={() => basicWorkOrderInputRef.current?.click()}>
-                        <Upload className="size-3.5" />
-                        올리기
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="mt-4 flex min-h-16 items-center justify-center rounded-xl border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
-                    {sampleFileName && currentSample?.url ? (
-                      <a href={currentSample.url} download={sampleFileName} className="max-w-full truncate text-foreground underline-offset-2 hover:underline">
-                        {sampleFileName}
-                      </a>
-                    ) : '올린 파일이 없습니다.'}
-                  </div>
-                </div>
+                <SampleWorkOrderFileField label="1차 샘플" readOnly={!editable}
+                  saving={saveMutation.isPending} onRegister={registerFirstSample} />
               ) : savedSamples.map((order) => (
                 <RegisteredSampleCard key={order.id} id={order.id} label={sampleOrderLabel(order, savedSamples)}
                   status={order.receivedAt ? '수령' : order.shipped ? '발송' : '진행'}
                   country={order.originCountry || form.originCountry} url={order.url} name={sampleWorkOrderFileName(order)}
                   locked={Boolean(order.shipped || order.receivedAt || order.passed)} readOnly={!editable} saving={saveMutation.isPending}
-                  onUpload={file => { void replaceSavedSampleFile(order.id, file) }} onCountry={country => updateSavedSampleCountry(order.id, country)} />
+                  onRegister={file => replaceSavedSampleFile(order.id, file)} onCountry={country => updateSavedSampleCountry(order.id, country)} />
               ))}
               <RegisteredColorSampleCards rounds={savedColorSamples} originCountry={form.originCountry} readOnly={!editable} saving={saveMutation.isPending}
-                onUpload={(id, file) => { void replaceSavedColorSampleFile(id, file) }} onCountry={updateSavedColorSampleCountry} />
+                onRegister={replaceSavedColorSampleFile} onCountry={updateSavedColorSampleCountry} />
               {savedSamples.length > 0 && (
                 <div id="next-sample">
                   <SampleWorkOrderRegistration originCountry={form.originCountry}

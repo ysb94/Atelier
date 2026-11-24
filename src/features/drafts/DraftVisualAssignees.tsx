@@ -79,10 +79,12 @@ export function DraftVisualAssignees({ board, readOnly }: { board: DraftVisualBo
   }
 
   return <div className="draft-color-pad draft-visual-assignee">
-    <div className="grid gap-0.5">
+    <div className="grid min-w-0 gap-0.5">
       <span className="text-[10px] leading-none text-muted-foreground">담당자</span>
       <Button type="button" variant="outline" className="draft-team-control min-w-16" aria-label="비주얼 팀 담당자"
-        aria-haspopup="dialog" title={names.join(', ') || undefined} disabled={locked} onClick={showEmployees}>{summary}</Button>
+        aria-haspopup="dialog" title={names.join(', ') || undefined} disabled={locked} onClick={showEmployees}>
+        <span className="truncate">{summary}</span>
+      </Button>
     </div>
     <Button type="button" variant="outline" size="icon" className="draft-team-control draft-visual-assignee-add"
       aria-label="비주얼 팀 담당자 추가" aria-haspopup="dialog" disabled={locked} onClick={showEmployees}><Plus size={13} aria-hidden="true" /></Button>

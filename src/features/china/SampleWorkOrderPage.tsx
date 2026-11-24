@@ -12,7 +12,7 @@ import { getCompanyProductDrafts } from '@/lib/api'
 import { DEFAULT_COMPANY_ID } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
-import { sampleCountry, sampleSentToChinaTeam } from '@/lib/drafts/sample-receipt'
+import { CHINA_EXTERNAL_DESTINATION, sampleCountry, sampleSentToChinaTeam } from '@/lib/drafts/sample-receipt'
 import { colorSampleLabel, sampleOrderLabel } from '@/lib/drafts/sample-registration'
 import {
   draftHasSampleWorkOrder,
@@ -47,8 +47,11 @@ function closedRound(row: Pick<WorkOrderRow, 'shipped' | 'passed' | 'receivedAt'
 
 function flattenDraftWorkOrders(draft: ProductDraft): WorkOrderRow[] {
   const allSamples = filledSampleWorkOrders(draft.sampleWorkOrders)
-  const isPromotion = (originCountry?: string) => sampleCountry(originCountry?.trim() || draft.originCountry).code === 'PROMO'
-  const samples = allSamples.filter(order => !isPromotion(order.originCountry)).map((order) => ({
+  const isRecordedOnly = (originCountry?: string) => {
+    const { code } = sampleCountry(originCountry?.trim() || draft.originCountry)
+    return code === 'PROMO' || code === CHINA_EXTERNAL_DESTINATION.value
+  }
+  const samples = allSamples.filter(order => !isRecordedOnly(order.originCountry)).map((order) => ({
     china: sampleSentToChinaTeam(order.originCountry, draft.originCountry),
     row: {
       draft,
@@ -73,7 +76,7 @@ function flattenDraftWorkOrders(draft: ProductDraft): WorkOrderRow[] {
       assigneeCheckedAt: order.assigneeCheckedAt ?? null,
     },
   }))
-  const colors = resolveColorSampleRounds(draft).filter(round => !isPromotion(round.originCountry)).map((round) => {
+  const colors = resolveColorSampleRounds(draft).filter(round => !isRecordedOnly(round.originCountry)).map((round) => {
     const returned = Boolean(round.returnedAt || round.passed)
     return {
       china: sampleSentToChinaTeam(round.originCountry, draft.originCountry),

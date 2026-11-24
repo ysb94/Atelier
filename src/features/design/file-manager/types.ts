@@ -58,6 +58,7 @@ export interface UiDialogConfig {
   okText?: string
   cancelText?: string
   defaultValue?: string
+  validateInput?: (value: string) => string | null
   danger?: boolean
 }
 
