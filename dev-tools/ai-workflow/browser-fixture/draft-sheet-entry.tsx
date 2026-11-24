@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import { DraftSheetRow } from '@/features/drafts/DraftSheetRow'
 import { DraftBoardView } from '@/features/drafts/DraftBoardView'
+import { DraftFolderBar } from '@/features/drafts/DraftFolderBar'
 import { useDraftSheetLayout } from '@/features/drafts/draft-sheet-layout'
 import { useDraftTeamWork } from '@/features/drafts/use-draft-team-work'
 import { draftVisualBoardKey, useDraftVisualBoard } from '@/features/drafts/use-draft-visual-board'
@@ -161,4 +162,20 @@ function Fixture() {
     {stickyHeader && <div aria-hidden="true" className="h-[550px]" />}
   </main>
 }
-createRoot(document.getElementById('root')!).render(<QueryClientProvider client={new QueryClient()}><Fixture /></QueryClientProvider>)
+function FolderBarFixture() {
+  const [folders, setFolders] = useState(Array.from({ length: 12 }, (_, index) => ({
+    id: String(index), brandId: brand.id, name: `테스트 출시 폴더 ${index + 1}`, label: `테스트 출시 폴더 ${index + 1}`,
+    total: 0, editable: true,
+  })))
+  return <main className="p-4">
+    <DraftFolderBar folders={folders} brands={[brand]} defaultBrandId={brand.id} selectedIds={['all']} unassignedCount={0}
+      onSelect={() => {}} onCreate={async ({ brandId, name }) => {
+        setFolders(current => [...current, { id: name, brandId, name, label: name, total: 0, editable: true }])
+      }} />
+  </main>
+}
+
+const folderBarOnly = new URLSearchParams(location.search).has('folder-create')
+createRoot(document.getElementById('root')!).render(<QueryClientProvider client={new QueryClient()}>
+  {folderBarOnly ? <FolderBarFixture /> : <Fixture />}
+</QueryClientProvider>)

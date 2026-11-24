@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Folder, FolderOpen, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input, Select } from '@/components/ui/input'
 import { cn, formatNumber } from '@/lib/utils'
 import './draft-board.css'
 
@@ -113,35 +114,27 @@ export function DraftFolderBar({
         <Button type="button" variant="outline" size="icon" className="size-7 shrink-0 text-muted-foreground shadow-none" aria-expanded={creating} aria-label="기획안 폴더 추가" onClick={() => (creating ? closeEditor() : openCreate())}>
           <Plus className="size-3.5" aria-hidden="true" />
         </Button>
-      </div>
-      {creating ? (
-        <form
-          className="draft-folder-editor mt-2"
-          onSubmit={(event) => {
+        {creating && (
+          <form className={cn('draft-folder-editor min-w-0 max-w-[70%] shrink-0', defaultBrandId ? 'w-60' : 'w-80')} onSubmit={(event) => {
             event.preventDefault()
             void save()
-          }}
-        >
-          {!defaultBrandId ? (
-            <label>
-              <span>브랜드</span>
-              <select value={brandId} disabled={busy} onChange={(event) => setBrandId(event.target.value)}>
+          }}>
+            {!defaultBrandId && (
+              <Select aria-label="브랜드" className="max-w-full shadow-none" value={brandId} disabled={busy} onChange={(event) => setBrandId(event.target.value)}>
                 <option value="">브랜드 선택</option>
                 {brands.map((brand) => (
                   <option key={brand.id} value={brand.id}>{brand.name}</option>
                 ))}
-              </select>
-            </label>
-          ) : null}
-          <label>
-            <span>폴더 이름</span>
-            <input value={name} disabled={busy} onChange={(event) => setName(event.target.value)} />
-          </label>
-          <button type="submit" disabled={busy}>{busy ? '저장 중' : '저장'}</button>
-          <button type="button" disabled={busy} onClick={closeEditor}>취소</button>
-          {error ? <p>{error}</p> : null}
-        </form>
-      ) : null}
+              </Select>
+            )}
+            <Input aria-label="폴더 이름" placeholder="폴더 이름" className="min-w-16 flex-1 shadow-none"
+              value={name} disabled={busy} onChange={(event) => setName(event.target.value)} />
+            <Button type="submit" size="sm" disabled={busy}>{busy ? '저장 중' : '저장'}</Button>
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={closeEditor}>취소</Button>
+            {error && <p role="alert">{error}</p>}
+          </form>
+        )}
+      </div>
     </nav>
   )
 }

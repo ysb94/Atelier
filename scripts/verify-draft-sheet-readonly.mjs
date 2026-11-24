@@ -87,6 +87,32 @@ async function verifyStickyHeader(page,origin){
  await page.waitForFunction(top=>Math.abs(document.querySelector('.draft-board-table th').getBoundingClientRect().top-top)<1,headerTop)
 }
 
+async function verifyFolderCreatePlacement(page,origin){
+ await page.setViewportSize({width:1200,height:800})
+ await page.goto(origin+'/?folder-create=1')
+ const folders=page.getByRole('navigation',{name:'브랜드별 기획안 폴더'})
+ const add=folders.getByRole('button',{name:'기획안 폴더 추가'})
+ const name=folders.getByRole('textbox',{name:'폴더 이름'})
+ async function assertInline(){
+   const [buttonBox,nameBox]=await Promise.all([add.boundingBox(),name.boundingBox()])
+   assert.ok(nameBox.x>=buttonBox.x+buttonBox.width&&Math.abs(nameBox.y-buttonBox.y)<1,
+     'Folder name stays to the right of the add button on the same row')
+   assert.ok(await folders.evaluate(node=>node.scrollWidth<=node.clientWidth+1),'The folder bar fits its viewport')
+ }
+ await add.click()
+ await assertInline()
+ await name.fill('신규 출시 폴더')
+ await name.press('Enter')
+ await folders.getByRole('button',{name:/신규 출시 폴더/}).waitFor()
+ await name.waitFor({state:'detached'})
+ await page.setViewportSize({width:360,height:780})
+ await add.click()
+ await assertInline()
+ await folders.getByRole('button',{name:'취소',exact:true}).click()
+ await name.waitFor({state:'detached'})
+ await page.setViewportSize({width:1800,height:950})
+}
+
 try{
  const bundle=await build({
    root,configFile:false,envFile:false,logLevel:'error',plugins:[react(),tailwindcss(),fixtureClient],
@@ -118,7 +144,7 @@ try{
    if(asset){
      res.setHeader('Content-Type',asset.type==='chunk'?'text/javascript':asset.fileName.endsWith('.css')?'text/css':'application/octet-stream')
      res.end(asset.type==='chunk'?asset.code:asset.source)
-   }else if(req.url==='/' || req.url==='/?sticky-header=1'){
+   }else if(req.url==='/' || req.url==='/?sticky-header=1' || req.url==='/?folder-create=1'){
      res.setHeader('Content-Type','text/html; charset=utf-8')
      res.end(`<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/${css.fileName}"><div id="root"></div><script type="module" src="/${entry.fileName}"></script>`)
    }else{res.statusCode=404;res.end()}
@@ -135,6 +161,7 @@ try{
    assert.deepEqual(errors,[])
    console.log(`draft sticky header (${useWebKit?'WebKit':'Chromium'}): alignment, stacking, horizontal scroll and table exit passed`)
  }else{
+ await verifyFolderCreatePlacement(page,origin)
  const mdDepartment = '919b2c44-afb6-4d7e-a5b8-b7203df9cef9'
  const visualDepartment = '7ac8b7a8-7f12-4f3e-a371-d2dac7e492f1'
  let directoryReads = 0
