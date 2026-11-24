@@ -12,11 +12,12 @@ const viewTabs: FilterTab<DraftBoardMode>[] = [
   { value: 'card', label: '카드 보기' },
 ]
 
-export function DraftBoardView({ layout, accountId, label, emptyMessage, tableNotice, renderRows }: {
+export function DraftBoardView({ layout, accountId, label, emptyMessage, folderControls, tableNotice, renderRows }: {
   layout: DraftSheetLayout
   accountId?: string
   label: string
   emptyMessage?: string
+  folderControls?: ReactNode
   tableNotice?: ReactNode
   renderRows: (mode: DraftBoardMode) => ReactNode
 }) {
@@ -31,11 +32,14 @@ export function DraftBoardView({ layout, accountId, label, emptyMessage, tableNo
   }
 
   return <>
-    {mode === 'table' && tableNotice}
-    <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
-      <FilterTabs tabs={viewTabs} value={mode} onChange={setMode} ariaLabel="기획안 보기 방식" />
-      {mode === 'table' && <DraftSheetColumnSettings key={accountId} accountId={accountId} layout={layout} />}
+    <div role="group" aria-label="기획안 목록 도구" className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs">
+      {folderControls && <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">{folderControls}</div>}
+      <div className="ml-auto flex max-w-full flex-wrap items-center gap-1.5">
+        <FilterTabs size="compact" tabs={viewTabs} value={mode} onChange={setMode} ariaLabel="기획안 보기 방식" />
+        {mode === 'table' && <DraftSheetColumnSettings key={accountId} accountId={accountId} layout={layout} />}
+      </div>
     </div>
+    {mode === 'table' && tableNotice}
     {mode === 'table' && layoutError && <p role="alert" className="mb-2 text-right text-xs text-danger">브라우저에 열 순서를 저장하지 못했습니다.</p>}
     <Activity mode={mode === 'table' ? 'visible' : 'hidden'}>
       <div className="draft-board-scroll" role="region" aria-label={label} tabIndex={0}>

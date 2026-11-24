@@ -193,25 +193,30 @@ export function DraftFolderHeading({
   }
 
   return (
-    <div className="draft-folder-heading">
+    <div className="min-w-0">
       {editing && folder.editable ? (
         <form
+          className="flex flex-wrap items-center gap-1.5"
           onSubmit={(event) => {
             event.preventDefault()
             void save()
           }}
         >
-          <input
+          <Input
             aria-label="폴더 이름"
+            className="h-7 w-40 max-w-full px-2 text-xs"
             value={name}
             disabled={busy}
             autoFocus
             onChange={(event) => setName(event.target.value)}
           />
-          <button type="submit" disabled={busy}>{busy ? '저장 중' : '저장'}</button>
-          <button type="button" disabled={busy} onClick={() => void remove()}>삭제</button>
-          <button
+          <Button type="submit" size="sm" className="h-7 px-2" disabled={busy}>{busy ? '저장 중' : '저장'}</Button>
+          <Button type="button" variant="outline" size="sm" className="h-7 px-2" disabled={busy} onClick={() => void remove()}>삭제</Button>
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2"
             disabled={busy}
             onClick={() => {
               setEditing(false)
@@ -220,13 +225,13 @@ export function DraftFolderHeading({
             }}
           >
             취소
-          </button>
+          </Button>
         </form>
       ) : (
-        <h2>
-          {folder.brandName ? <small>{folder.brandName}</small> : null}
+        <h2 className="flex min-h-7 flex-wrap items-center gap-x-1.5 break-words text-xs font-semibold text-foreground">
+          {folder.brandName && <span className="font-medium text-muted-foreground">{folder.brandName}</span>}
           {folder.editable ? (
-            <button type="button" onClick={() => setEditing(true)}>
+            <button type="button" className="min-w-0 text-left hover:underline" onClick={() => setEditing(true)}>
               {folder.label}
             </button>
           ) : (
@@ -234,7 +239,7 @@ export function DraftFolderHeading({
           )}
         </h2>
       )}
-      {error ? <p>{error}</p> : null}
+      {error && <p role="alert" className="text-xs text-danger">{error}</p>}
     </div>
   )
 }

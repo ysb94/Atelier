@@ -535,8 +535,16 @@ export function CompanyDraftsPage() {
         <p className="mb-3 text-sm text-danger">기획안을 불러오지 못했습니다.</p>
       ) : null}
 
-      {activeFolder ? (
-        <div className="mb-3 flex flex-wrap items-end gap-x-3 gap-y-2">
+      <DraftBoardView
+        key={profileId}
+        accountId={profileId}
+        layout={sheetLayout}
+        label={showingCompleted ? '완료된 기획안 목록' : '기획안 목록'}
+        emptyMessage={showingCompleted ? '이 폴더에 완료된 기획안이 없습니다.'
+          : loading ? '불러오는 중...'
+          : visible.length === 0 ? emptyMessage(folderDrafts.length > 0, myOnly, folderFilter, boardFilter, brandScope, ownerScope)
+          : undefined}
+        folderControls={activeFolder ? <>
           <DraftFolderHeading
             folder={activeFolder}
             onUpdate={async (id, name) => {
@@ -558,6 +566,7 @@ export function CompanyDraftsPage() {
             }}
           />
           <FilterTabs
+            size="compact"
             tabs={folderViewTabs}
             value={showingCompleted ? 'completed' : 'drafts'}
             onChange={(view) => setCompletedFolderId(view === 'completed' ? activeFolder.id : null)}
@@ -578,18 +587,7 @@ export function CompanyDraftsPage() {
               }
             }}
           />
-        </div>
-      ) : null}
-
-      <DraftBoardView
-        key={profileId}
-        accountId={profileId}
-        layout={sheetLayout}
-        label={showingCompleted ? '완료된 기획안 목록' : '기획안 목록'}
-        emptyMessage={showingCompleted ? '이 폴더에 완료된 기획안이 없습니다.'
-          : loading ? '불러오는 중...'
-          : visible.length === 0 ? emptyMessage(folderDrafts.length > 0, myOnly, folderFilter, boardFilter, brandScope, ownerScope)
-          : undefined}
+        </> : null}
         tableNotice={!showingCompleted && <>
           {teamWork.query.isError && <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
             <p role="status" className="text-muted-foreground">{teamWork.missingSchema

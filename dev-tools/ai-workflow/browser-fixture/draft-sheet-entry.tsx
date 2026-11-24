@@ -3,7 +3,8 @@ import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query'
 import { DraftSheetRow } from '@/features/drafts/DraftSheetRow'
 import { DraftBoardView } from '@/features/drafts/DraftBoardView'
-import { DraftFolderBar } from '@/features/drafts/DraftFolderBar'
+import { DraftFolderBar, DraftFolderHeading } from '@/features/drafts/DraftFolderBar'
+import { FilterTabs } from '@/components/ui/filter-tabs'
 import { DraftFolderOpeningDate } from '@/features/drafts/DraftFolderOpeningDate'
 import { useDraftSheetLayout } from '@/features/drafts/draft-sheet-layout'
 import { useDraftTeamWork } from '@/features/drafts/use-draft-team-work'
@@ -140,11 +141,6 @@ function Fixture() {
     {stickyHeader && <style>{'.draft-sheet-row { height: 1100px; }'}</style>}
     <button onClick={()=>setReadOnly(v=>!v)}>{readOnly?'작성자로 전환':'다른 직원으로 전환'}</button>
     <label><input type="checkbox" checked={orderTest} onChange={event => setOrderTest(event.currentTarget.checked)} />검증용 발주 준비</label>
-    {orderTest && <DraftFolderOpeningDate opening={folders.data?.find(folder => folder.id === 'group')?.opening}
-      editable={!readOnly} onSave={async (next, expected) => {
-        const opening = await saveSeasonOpening('group', brand.id, next, expected)
-        cache.setQueryData<Season[]>(folderKey, current => current?.map(folder => folder.id === 'group' ? { ...folder, opening } : folder))
-      }} />}
     <select aria-label="검증 단계" value={phase} onChange={event=>setPhase(event.target.value)}>
       <option value="review">샘플 검토</option>
       <option value="new">최초 지시서</option>
@@ -163,7 +159,19 @@ function Fixture() {
       ...current, answeredAt: current.round === 1 ? '2026-11-02T10:00:00Z' : '2026-11-02T15:00:30Z',
       amounts: { ivory: 0, black: 14 + current.round },
     })}>단가 회신 반영</button>
-    <DraftBoardView accountId={accountId} layout={sheetLayout} label="기획안 목록" renderRows={mode => <DraftSheetRow mode={mode} draft={shown} layout={sheetLayout} readOnly={readOnly} brand={brand}
+    <DraftBoardView accountId={accountId} layout={sheetLayout} label="기획안 목록"
+      folderControls={orderTest && <>
+        <DraftFolderHeading folder={{ id: 'group', label: '2027년 01월', name: '2027년 01월', brandId: brand.id, brandName: 'Masmarulez', total: 0, editable: false }}
+          onUpdate={async () => {}} onDelete={async () => {}} />
+        <FilterTabs size="compact" tabs={[{ value: 'drafts', label: '기획안' }, { value: 'completed', label: '완료 (0)' }]}
+          value="drafts" onChange={() => {}} ariaLabel="2027년 01월 목록 보기" />
+        <DraftFolderOpeningDate opening={folders.data?.find(folder => folder.id === 'group')?.opening}
+          editable={!readOnly} onSave={async (next, expected) => {
+            const opening = await saveSeasonOpening('group', brand.id, next, expected)
+            cache.setQueryData<Season[]>(folderKey, current => current?.map(folder => folder.id === 'group' ? { ...folder, opening } : folder))
+          }} />
+      </>}
+      renderRows={mode => <DraftSheetRow mode={mode} draft={shown} layout={sheetLayout} readOnly={readOnly} brand={brand}
       releaseFolders={orderTest ? folders.data ?? releaseFolders : releaseFolders} onChangeReleaseFolder={async seasonId => { setDraft(await saveDraftReleaseFolder(draft, seasonId)) }}
       informationEditorId="fixture-owner" informationTemporaryStore={temporaryStore} teamWork={teamWork.forDraft(draft.id)} visualBoard={visualBoard.forDraft(draft.id)}
       specDocumentTemporarySource={specDocumentTemporarySources.get(draft.id)}

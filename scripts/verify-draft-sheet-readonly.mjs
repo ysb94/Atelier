@@ -434,12 +434,21 @@ try{
  const dispatchPreview=samplePreview.getByText('중국팀 제작·발송 대기',{exact:true})
  const revisionPreview=samplePreview.getByRole('button',{name:'수정 작업지시서',exact:true})
  const receiptPreview=samplePreview.getByRole('button',{name:'수령 확인',exact:true})
+ const sampleHeading=samplePreview.locator('.draft-sample-heading')
+ assert.match(await sampleHeading.locator('.draft-sample-country').textContent(),/CHINA \(김웅사장님\)/)
+ await sampleHeading.locator('.draft-sample-registered-elapsed').waitFor()
+ assert.ok(await sampleHeading.evaluate(element=>{
+   const parts=Array.from(element.children)
+   const start=parts[0].getBoundingClientRect().top
+   return parts.length===3&&parts.every(part=>
+     Math.abs(part.getBoundingClientRect().top-start)<1&&part.scrollWidth<=part.clientWidth+1)
+ }),'The supplier, sample date and elapsed days fit in the same line')
  assert.equal(await revisionPreview.isDisabled(),true)
  assert.equal(await receiptPreview.isDisabled(),true)
  assert.equal(await dispatchPreview.evaluate(element=>{
    const heading=element.parentElement.querySelector('.draft-sample-heading')
    return parseFloat(getComputedStyle(element).fontSize)/parseFloat(getComputedStyle(heading).fontSize)
- }),0.5)
+ }),0.75)
  assert.equal(await dispatchPreview.evaluate(element=>{
    const probe=document.createElement('span')
    probe.style.color='var(--color-blue-700)'
@@ -502,7 +511,7 @@ try{
  assert.equal(await blackSabangnet.inputValue(),'00043')
  await page.setViewportSize({width:2600,height:950})
  await assertCompactColumns()
- assert.equal(Math.round((await page.locator('th[data-column="sample"]').boundingBox()).width),350,'The table does not transfer spare width to SAMPLE')
+ assert.equal(Math.round((await page.locator('th[data-column="sample"]').boundingBox()).width),450,'The table does not transfer spare width to SAMPLE')
  assert.ok(await amdBarcode.evaluate(input=>{
    const style=getComputedStyle(input)
    const canvas=document.createElement('canvas').getContext('2d')
@@ -598,6 +607,26 @@ try{
  await folderSchedule.getByRole('button',{name:'오픈 예정일 수정',exact:true}).waitFor()
  assert.equal(await openingDate.getAttribute('aria-description'),'확정됨')
  await page.waitForFunction(()=>getComputedStyle(document.querySelector('input[aria-description="확정됨"][type=date]')).backgroundColor==='rgb(198, 9, 32)')
+ const folderToolbar=page.getByRole('group',{name:'기획안 목록 도구',exact:true})
+ const folderControls=[
+   folderToolbar.getByRole('heading',{name:/Masmarulez.*2027년 01월/}),
+   folderToolbar.getByRole('button',{name:'기획안',exact:true}),
+   folderToolbar.getByRole('button',{name:'완료 (0)',exact:true}),
+   openingDate,
+   folderSchedule.getByRole('button',{name:'오픈 예정일 수정',exact:true}),
+   folderToolbar.getByRole('button',{name:'표 보기',exact:true}),
+   folderToolbar.getByRole('button',{name:'카드 보기',exact:true}),
+   folderToolbar.getByRole('button',{name:'열 표시 설정',exact:true}),
+ ]
+ const controlLayout=await Promise.all(folderControls.map(control=>control.evaluate(element=>{
+   const {top,height}=element.getBoundingClientRect()
+   return {top,height,fontSize:getComputedStyle(element).fontSize}
+ })))
+ assert.ok(controlLayout.every(({top,height,fontSize})=>
+   Math.abs(top-controlLayout[0].top)<1&&height===28&&fontSize==='12px'),JSON.stringify(controlLayout))
+ await page.setViewportSize({width:390,height:844})
+ assert.ok(await folderToolbar.evaluate(element=>element.scrollWidth<=element.clientWidth+1),'The toolbar wraps within a mobile screen')
+ await page.setViewportSize({width:1800,height:950})
  assert.equal(styleNumberReads,0)
  await openOrderConfirmation.click()
  await orderDialog.getByRole('cell',{name:'M0002',exact:true}).waitFor()

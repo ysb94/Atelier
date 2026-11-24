@@ -60,7 +60,7 @@ function ColumnSettingsDialog({ layout, accountId, onClose }: {
 export function DraftSheetColumnSettings({ layout, accountId }: { layout: DraftSheetLayout; accountId?: string }) {
   const [open, setOpen] = useState(false)
   return <>
-    <Button type="button" size="sm" variant="outline" aria-haspopup="dialog" disabled={!accountId}
+    <Button type="button" size="sm" variant="outline" className="h-7 gap-1.5 px-2" aria-haspopup="dialog" disabled={!accountId}
       onClick={() => setOpen(true)}>
       <Settings2 className="size-3.5" aria-hidden="true" />열 표시 설정
     </Button>
