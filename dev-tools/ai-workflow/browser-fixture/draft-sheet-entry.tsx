@@ -78,7 +78,14 @@ function Fixture() {
         ivory:{size:'310×130×200',sizeNote:'아이보리 별도 메모',fabric:'면',weight:'240g',specDoc:'아이보리 스펙'},
       }),colorSampleRounds:[{id:'round',round:1,url:'color.pdf',name:'컬러 지시서',shippedAt:'2026-10-14T00:00:00Z',returnedAt:'2026-10-15T00:00:00Z',passed:false}]}}
   })
-  const shown={...draft,sampleWorkOrders:phase==='new'?[]:draft.sampleWorkOrders,specs:{...draft.specs,colorSampleRounds:phase==='review'?draft.specs.colorSampleRounds:[]}}
+  const colorSampleRounds = phase === 'color-done'
+    ? draft.specs.colorSampleRounds?.map(round => ({ ...round, receivedAt: '2026-10-16T00:00:00Z' }))
+    : phase === 'review' ? draft.specs.colorSampleRounds : []
+  const shown = {
+    ...draft,
+    sampleWorkOrders: phase === 'new' ? [] : draft.sampleWorkOrders,
+    specs: { ...draft.specs, colorSampleRounds, colorSampleDone: phase === 'color-done' ? { round: ['black'] } : draft.specs.colorSampleDone },
+  }
   const teamWork=useDraftTeamWork(readOnly?'fixture-viewer':'fixture-owner',[draft])
   const visualBoard=useDraftVisualBoard('fixture-owner',[draft])
   const specDocumentTemporarySources = useDraftSpecDocumentTemporary(accountId, readOnly ? [] : [draft])
@@ -107,7 +114,14 @@ function Fixture() {
   }
   return <main data-brand-page-scroll={stickyHeader ? '' : undefined} className={stickyHeader ? 'mt-16 h-[60vh] overflow-auto p-6' : 'p-6'}>
     {stickyHeader && <style>{'.draft-sheet-row { height: 1100px; }'}</style>}
-    <button onClick={()=>setReadOnly(v=>!v)}>{readOnly?'작성자로 전환':'다른 직원으로 전환'}</button><select aria-label="검증 단계" value={phase} onChange={event=>setPhase(event.target.value)}><option value="review">샘플 검토</option><option value="new">최초 지시서</option><option value="color-upload">컬러 지시서</option></select><output data-testid="writes">{writes}</output><output data-testid="opened">{opened}</output>
+    <button onClick={()=>setReadOnly(v=>!v)}>{readOnly?'작성자로 전환':'다른 직원으로 전환'}</button>
+    <select aria-label="검증 단계" value={phase} onChange={event=>setPhase(event.target.value)}>
+      <option value="review">샘플 검토</option>
+      <option value="new">최초 지시서</option>
+      <option value="color-upload">컬러 지시서</option>
+      <option value="color-done">첫 컬러 완료</option>
+    </select>
+    <output data-testid="writes">{writes}</output><output data-testid="opened">{opened}</output>
     <output data-testid="saved-spec">{savedSpec}</output>
     <button type="button" onClick={() => setDraft(current => ({ ...current, specs: { ...current.specs,
       chinaWorkAssignment: { assigneeId: 'assigned-worker', assigneeName: '중국 샘플 담당자', assignedAt: '2026-10-03T00:00:00Z' },

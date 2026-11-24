@@ -347,6 +347,25 @@ try{
    }
  }
  await assertCompactColumns()
+ const informationLines=row.locator('.draft-sheet-information-cell .draft-color-line')
+ const phaseSelect=page.getByLabel('검증 단계')
+ const informationSlots=()=>informationLines.evaluateAll(lines=>lines.map(line=>{
+   const {x,y}=line.getBoundingClientRect()
+   return Array.from(line.querySelectorAll('button'),button=>{
+     const {left,top,width,height}=button.getBoundingClientRect()
+     return [left-x,top-y,width,height]
+   })
+ }))
+ assert.deepEqual(await informationLines.locator('.draft-sheet-status-badge').allTextContents(),['샘플중','샘플중'])
+ const samplingSlots=await informationSlots()
+ assert.deepEqual(samplingSlots[0].map(([x])=>x),samplingSlots[1].map(([x])=>x))
+ await phaseSelect.selectOption('color-done')
+ assert.deepEqual(await informationLines.locator('.draft-sheet-status-badge').allTextContents(),['완료','샘플중'])
+ assert.deepEqual(await informationSlots(),samplingSlots,'One completed color keeps the INFORMATION controls aligned')
+ await phaseSelect.selectOption('color-upload')
+ assert.deepEqual(await informationLines.locator('.draft-sheet-status-badge').allTextContents(),['대기','대기'])
+ assert.deepEqual(await informationSlots(),samplingSlots,'Waiting colors reserve the same button widths')
+ await phaseSelect.selectOption('review')
  const visualAssigneePicker=visualCell.getByRole('button',{name:'비주얼 팀 담당자',exact:true})
  await visualAssigneePicker.waitFor()
  assert.equal(await visualCell.getByRole('button',{name:'블랙 Image'}).isEnabled(),true)

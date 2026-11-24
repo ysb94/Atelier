@@ -233,6 +233,7 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-color-tools .draft-sheet-color-heart{color:#ec526a}
 .draft-sheet-color-tools .draft-sheet-color-heart.is-confirmed{color:#c60920}
 .draft-sheet-info,.draft-sheet-info .draft-sheet-specs{display:flex;align-items:center;flex-wrap:nowrap;gap:5px}
+.draft-sheet-info>.draft-sheet-status-badge{flex:none;inline-size:54px}
 
 .draft-sheet-row>td.draft-sheet-md-cell{position:relative;padding:0;color:#4a4a4a}
 .draft-sheet-md-cell::before{position:absolute;inset-block:0;left:93px;border-left:1px solid #efeeee;content:'';pointer-events:none}
