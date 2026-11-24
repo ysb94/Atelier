@@ -275,7 +275,7 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
                 </button>
               )}
             </div>
-            <div className={`draft-md-listing-fields${specialRelease ? ' has-release' : ''}`}>
+            <div>
               <div>
                 <MdField label="등록유형">
                   <MdSelect label="등록유형" value={registerType} options={registerOptions.options} disabled={listingLocked}

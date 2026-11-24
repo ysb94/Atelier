@@ -8,7 +8,7 @@ export const DRAFT_SHEET_COLUMNS = {
   information: { label: 'INFORMATION', width: 174 },
   visual: { label: 'VISUAL TEAM', width: 154 },
   amd: { label: 'AMD', width: 232 },
-  md: { label: 'MD TEAM', width: 585 },
+  md: { label: 'MD TEAM', width: 490 },
   ect: { label: 'e.c.t', width: 265 },
 } as const
 

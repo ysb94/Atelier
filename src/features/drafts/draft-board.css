@@ -224,63 +224,51 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 
 .draft-sheet-row>td.draft-sheet-md-cell{position:relative;padding:0;color:#4a4a4a}
 .draft-sheet-md-cell::before{position:absolute;inset-block:0;left:93px;border-left:1px solid #efeeee;content:'';pointer-events:none}
-.draft-md-layout{display:grid;grid-template-columns:94px minmax(0,1fr);min-height:360px}
+.draft-md-layout{display:grid;grid-template-columns:94px minmax(0,1fr)}
 .draft-md-order{--draft-color-line-background:var(--color-muted);padding-top:var(--draft-sheet-cell-block-padding)}
 .draft-md-order .draft-color-line{justify-content:center}
 .draft-board-table .draft-md-quantity-actions .draft-team-control{padding-inline:4px}
 .draft-md-order-quantity{position:relative;display:block;width:61px}
 .draft-md-order-quantity input{width:100%;height:22px;border:1px solid #e1e1e1;border-radius:4px;padding:0 4px;box-shadow:none;text-align:center;font-size:12px;font-weight:500;font-variant-numeric:tabular-nums}
-.draft-md-section{position:relative;padding:0 68px 0 20px}
+.draft-md-section{position:relative;padding:7px 100px 7px 8px}
 .draft-md-section+.draft-md-section::before{position:absolute;top:0;right:0;left:3px;border-top:1px solid #eae9e9;content:''}
-.draft-md-listing{min-height:146px;padding-top:20px;padding-bottom:16px}
-.draft-md-pricing{min-height:92px;padding-top:17px}
-.draft-md-product{min-height:122px;padding-top:9px}
-.draft-md-arrival{display:flex;height:20px;align-items:center;justify-content:center;margin:0 0 15px;color:#5579a7;font-size:13px;font-weight:600}
+.draft-md-arrival{display:flex;min-height:22px;align-items:center;gap:3px;margin:0 0 4px;color:#5579a7;font-size:13px;font-weight:600}
 .draft-md-arrival button,.draft-md-arrival label{display:inline-flex;align-items:center;gap:5px;font:inherit}
 .draft-md-arrival button:not(:disabled){cursor:pointer}
 .draft-md-arrival input{width:108px;height:22px;border-radius:4px;padding:0 4px;box-shadow:none;font-size:12px}
-.draft-md-arrival.has-release{justify-content:space-between;gap:12px;margin-right:-26px;padding-left:14px}
-.draft-md-arrival.has-release :is(button,label){flex:none}
-.draft-md-release-notice{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-primary)}
-.draft-md-listing-fields.has-release{display:grid;grid-template-columns:222px minmax(0,1fr)}
-.draft-md-listing-fields.has-release .draft-md-add{margin-left:0}
+.draft-md-arrival.has-release{display:grid;grid-template-columns:minmax(0,1fr);justify-items:start}
+.draft-md-release-notice{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-primary)}
 .draft-md-release-partner>span:first-child{color:var(--color-muted-foreground)}
-.draft-md-release-fields{display:grid;align-content:start;gap:3px;padding-top:26px}
-.draft-md-release-field{display:grid;grid-template-columns:36px 108px;gap:8px;align-items:center;min-height:22px;font-size:12px}
-.draft-md-release-field>span:first-child{text-align:right}
-.draft-md-release-field .draft-md-period-button{display:block;width:108px;height:20px;border-color:#dedede;border-radius:3px;padding:0 6px;box-shadow:none;text-align:center;font-size:12px;font-weight:400}
+.draft-md-release-fields{display:grid;gap:2px;margin-top:2px}
+.draft-md-release-field{display:grid;grid-template-columns:52px 104px;gap:6px;align-items:center;min-height:22px;padding-inline-start:12px;font-size:12px}
+.draft-md-release-field>span:first-child{text-align:center}
+.draft-md-release-field .draft-md-period-button{display:block;width:104px;height:20px;border-color:#dedede;border-radius:3px;padding:0 6px;box-shadow:none;text-align:center;font-size:12px;font-weight:400}
 .draft-md-release-field .draft-md-period-button{overflow:hidden;padding-right:24px;text-overflow:ellipsis}
 .draft-md-release-fields .draft-md-select::after{right:8px}
 .draft-md-period-panel{position:absolute;z-index:4;top:calc(100% + 4px);right:0;display:grid;width:190px;gap:6px;padding:8px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-card);box-shadow:0 6px 16px #0002}
 .draft-md-period-panel label{display:grid;grid-template-columns:38px minmax(0,1fr);align-items:center;gap:4px}
 .draft-md-period-panel input{height:24px;padding:0 4px;font-size:11px}
 .draft-md-period-panel button{justify-self:end}
-.draft-md-field{position:relative;display:grid;grid-template-columns:55px 108px max-content;min-height:22px;align-items:center;justify-content:start;column-gap:10px;padding-left:24px;font-size:13px;font-weight:500;white-space:nowrap}
+.draft-md-field{position:relative;display:grid;grid-template-columns:52px 104px max-content;min-height:22px;align-items:center;justify-content:start;column-gap:6px;padding-inline-start:12px;font-size:13px;font-weight:500;white-space:nowrap}
 .draft-md-field>span:first-child,.draft-md-origin>span:first-child{justify-self:center}
-.draft-md-product .draft-md-field{grid-template-columns:50px 108px max-content}
-.draft-md-field+.draft-md-field{margin-top:3px}
+.draft-md-field+.draft-md-field{margin-top:2px}
 .draft-md-field::before{position:absolute;top:8px;left:2px;width:6px;height:6px;border:1px solid #636363;border-radius:50%;content:''}
-.draft-md-field .draft-md-input,.draft-md-select select{width:108px;height:20px;border-color:#dedede;border-radius:3px;background:var(--color-card);padding:0 6px;box-shadow:none;color:#444;text-align:center;font-size:12px;font-weight:400;line-height:18px}
+.draft-md-field .draft-md-input,.draft-md-select select{width:104px;height:20px;border-color:#dedede;border-radius:3px;background:var(--color-card);padding:0 6px;box-shadow:none;color:#444;text-align:center;font-size:12px;font-weight:400;line-height:18px}
 .draft-md-field .draft-md-input::placeholder{color:#838383;opacity:1}
 .draft-md-select{position:relative;display:block}
 .draft-md-select select:not([multiple]):not([size]){appearance:none;background-image:none;padding-right:19px;cursor:pointer}
 .draft-md-select select:has(option:checked[value=""]){color:#838383}
 .draft-md-select::after{position:absolute;top:6px;right:18px;border:6px solid transparent;border-top:9px solid #bdbdbd;border-bottom:0;content:'';pointer-events:none}
 .draft-md-layout :is(.draft-md-input,select,button):disabled{cursor:default;opacity:.65}
-.draft-md-layout .draft-md-add{width:23px;height:23px;margin-left:20px;border:1px solid #dedede;border-radius:5px;background:#f1f1f1;color:var(--color-foreground)}
+.draft-md-layout .draft-md-add{width:23px;height:23px;border:1px solid #dedede;border-radius:5px;background:#f1f1f1;color:var(--color-foreground)}
 .draft-md-layout .draft-md-auto{width:41px;height:22px;border:1px solid #e1e1e1;border-radius:6px;padding:0;box-shadow:none;color:#767676;font-size:11px;font-weight:500}
 .draft-md-layout .draft-md-auto[aria-pressed=true]{border-color:var(--color-primary);color:var(--color-primary)}
 .draft-md-section.is-confirmed .draft-md-field::before{border-color:var(--color-primary);background:var(--color-primary)}
-.draft-md-section-actions{position:absolute;right:16px}
-.draft-md-listing .draft-md-section-actions{top:56px}
-.draft-md-pricing .draft-md-section-actions{top:18px}
-.draft-md-product .draft-md-section-actions{top:9px}
-.draft-md-origin{display:grid;grid-template-columns:55px auto;min-height:22px;align-items:center;gap:10px;margin:0 0 9px 24px;font-size:13px;font-weight:500}
+.draft-md-section-actions{position:absolute;top:7px;right:8px}
+.draft-md-origin{display:grid;grid-template-columns:52px minmax(0,1fr);min-height:22px;align-items:center;gap:6px;margin:0 0 2px 12px;font-size:13px;font-weight:500}
 .draft-md-origin span:last-child{color:var(--color-muted-foreground)}
-.draft-md-product .draft-md-option-field{grid-template-columns:50px 108px 23px minmax(0,1fr);align-items:start;margin-right:-52px}
-.draft-md-option-field>span:first-child{line-height:22px}
-.draft-md-option-field .draft-md-add{margin-left:0}
-.draft-md-option-items{display:grid;gap:4px;min-width:0}
+.draft-md-product .draft-md-option-field{grid-template-columns:52px 104px 23px minmax(0,1fr)}
+.draft-md-option-items{grid-column:2/-1;display:grid;gap:4px;min-width:0;margin-top:3px}
 .draft-md-option-entry{position:relative;display:flex;align-items:center;min-width:0;border:1px solid #dedede;border-radius:6px;background:var(--color-card)}
 .draft-md-option-entry input{height:19px;min-width:0;border:0;border-radius:5px;padding:0 7px;box-shadow:none;font-size:12px}
 .draft-md-option-price{display:flex;width:78px;flex:none;align-items:center;gap:2px;padding-right:5px;border-left:1px solid var(--color-border);font-size:11px;color:var(--color-muted-foreground)}
