@@ -1325,7 +1325,13 @@ try{
  const [pickerBox,photoBox,brandBox,ownerBox]=await Promise.all([
    releaseFolder,brandCell.locator('.draft-sheet-photo'),brandCell.getByRole('img',{name:'MAS 브랜드'}),brandCell.locator('.draft-sheet-owner'),
  ].map(node=>node.boundingBox()))
- assert.ok(pickerBox.y+pickerBox.height<photoBox.y&&photoBox.y+photoBox.height<ownerBox.y&&ownerBox.x<brandBox.x)
+ assert.ok(pickerBox.y+pickerBox.height<=photoBox.y&&Math.abs(pickerBox.x+pickerBox.width/2-photoBox.x-photoBox.width/2)<=1,
+   'The folder picker is centered above the photo')
+ assert.ok(photoBox.x+photoBox.width<ownerBox.x&&Math.abs(photoBox.y-ownerBox.y)<=4&&ownerBox.x<brandBox.x,
+   'Photo and metadata start at the same height, with the brand logo on the right')
+ const nameConfirmBox=await brandCell.getByText('네임확정',{exact:true}).boundingBox()
+ assert.ok(nameConfirmBox.x>=ownerBox.x&&nameConfirmBox.y+nameConfirmBox.height<=photoBox.y+photoBox.height,
+   `The name confirmation fits beside the photo: ${JSON.stringify({nameConfirmBox,photoBox,ownerBox})}`)
  const folderWrites=[]
  const folderRevision='2026-11-18T06:46:00+00:00'
  await page.route('**/rest/v1/product_drafts?*',async route=>{

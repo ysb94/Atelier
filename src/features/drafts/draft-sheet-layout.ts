@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
 
 export const DRAFT_SHEET_COLUMNS = {
-  brand: { label: 'BRAND', width: 210 },
+  brand: { label: 'BRAND', width: 330 },
   sample: { label: 'SAMPLE', width: 350 },
   price: { label: 'PRICE', width: 100 },
   color: { label: 'COLOR', width: 128 },

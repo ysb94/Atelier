@@ -898,7 +898,9 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   const brandContent = <div className="draft-sheet-image-cell">
       {mode === 'card'
         ? <p className="draft-card-brand-name">{brand?.name || '브랜드 미정'}</p>
-        : <DraftReleaseFolderSelect draft={draft} folders={releaseFolders} readOnly={readOnly} onChange={onChangeReleaseFolder} />}
+        : <div className="draft-sheet-brand-folder">
+          <DraftReleaseFolderSelect draft={draft} folders={releaseFolders} readOnly={readOnly} onChange={onChangeReleaseFolder} />
+        </div>}
       <DraftPhoto src={draft.imageUrl} name={name === '이름 미정' ? draft.draftNo : name} onOpen={onOpen} />
       <div className="draft-sheet-names">
         <div className="draft-sheet-brand-info">
@@ -911,8 +913,8 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
             <BrandAvatar brand={brand} className="size-10 rounded-full [&>img]:object-contain" />
           </div>}
         </div>
-        <button type="button" className="draft-sheet-product-name" aria-label={`${draft.draftNo} 한글명`} onClick={onOpen}>{draft.nameKo.trim()}</button>
-        <button type="button" className="draft-sheet-product-name is-en" aria-label={`${draft.draftNo} 영문명`} onClick={onOpen}>{draft.nameEn.trim()}</button>
+        <button type="button" className="draft-sheet-product-name" aria-label={`${draft.draftNo} 한글명`} title={draft.nameKo.trim()} onClick={onOpen}>{draft.nameKo.trim()}</button>
+        <button type="button" className="draft-sheet-product-name is-en" aria-label={`${draft.draftNo} 영문명`} title={draft.nameEn.trim()} onClick={onOpen}>{draft.nameEn.trim()}</button>
       </div>
       <SheetConfirmButton
         className="draft-sheet-name-confirm"
