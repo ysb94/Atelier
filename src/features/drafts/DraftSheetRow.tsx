@@ -1030,15 +1030,17 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
       <div className="draft-color-lines">
         {draft.colors.length ? draft.colors.map((color, index) => {
           const photoUrl = draft.specs.colorPhotoUrls?.[color.id]
+          const names = draftColorNames(color.name, draft.specs.colorNames?.[color.id])
+          const displayName = [names.nameKo, names.nameEn].filter(Boolean).join(' / ')
           return (
             <ColorLine key={color.id} index={index}>
-              <ColorSetupDot names={draftColorNames(color.name, draft.specs.colorNames?.[color.id])} choice={draft.specs.colorImageChoices?.[color.id]} photoUrl={photoUrl} />
+              <ColorSetupDot names={names} choice={draft.specs.colorImageChoices?.[color.id]} photoUrl={photoUrl} />
               <SheetInlineField
                 readOnly
                 label={`${draft.draftNo} 컬러 ${index + 1} 이름`}
                 className="draft-sheet-color-name"
-                value={color.name}
-                title={color.name}
+                value={displayName}
+                title={displayName}
                 onCommit={(next) => onRenameColor(color.id, next)}
               />
               {color.orderQty != null && color.orderQty > 0 ? <small>{formatNumber(color.orderQty)}</small> : null}
