@@ -1,4 +1,5 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEventHandler } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ImageIcon, X } from 'lucide-react'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
@@ -21,7 +22,8 @@ const requestDate = new Intl.DateTimeFormat('ko-KR', {
 const quoteAmount = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 })
 
 type RequestFilter = 'all' | 'first' | 'repeat' | 'confirmed'
-type SelectedPhoto = { requestId: string; colorId: string }
+type PhotoAnchor = { trigger: HTMLButtonElement; priceCell: HTMLTableCellElement }
+type SelectedPhoto = { requestId: string; colorId: string; anchor: PhotoAnchor }
 export type DraftPriceInputs = Record<string, Record<string, string>>
 
 function linkedColorPhoto(draft: ProductDraft | undefined, colorId: string): string | null | undefined {
@@ -58,7 +60,7 @@ function useRequestColorPhoto(requestId: string, colorId: string, enabled: boole
 }
 
 function ChinaPriceThumbnail({ requestId, color, linkedPhoto, expanded, previewId, onClick }: {
-  requestId: string; color: DraftPriceColor; linkedPhoto?: string | null; expanded: boolean; previewId: string; onClick: () => void
+  requestId: string; color: DraftPriceColor; linkedPhoto?: string | null; expanded: boolean; previewId: string; onClick: MouseEventHandler<HTMLButtonElement>
 }) {
   const thumbnail = useRef<HTMLSpanElement>(null)
   const [visible, setVisible] = useState(false)
@@ -76,8 +78,7 @@ function ChinaPriceThumbnail({ requestId, color, linkedPhoto, expanded, previewI
   }, [useRequestPhoto, visible])
 
   return <Button type="button" variant="outline" size="icon" className="shrink-0 overflow-hidden"
-    id={expanded ? `${previewId}-trigger` : undefined}
-    aria-label={`${color.name} 컬러 사진 크게 보기`} aria-expanded={expanded} aria-controls={expanded ? previewId : undefined} onClick={onClick}>
+    aria-label={`${color.name} 컬러 사진 크게 보기`} aria-haspopup="dialog" aria-expanded={expanded} aria-controls={expanded ? previewId : undefined} onClick={onClick}>
     <span ref={thumbnail} className="grid size-full place-items-center bg-muted/30">
       {image ? <img src={image} alt="" loading="lazy" decoding="async" className="size-full object-contain" />
         : <ImageIcon className="size-4 text-muted-foreground" aria-hidden="true" />}
@@ -85,35 +86,93 @@ function ChinaPriceThumbnail({ requestId, color, linkedPhoto, expanded, previewI
   </Button>
 }
 
-function ChinaPricePhoto({ requestId, color, linkedPhoto, previewId, onClose }: {
-  requestId: string; color: DraftPriceColor; linkedPhoto?: string | null; previewId: string; onClose: () => void
+function ChinaPricePhoto({ requestId, color, linkedPhoto, previewId, anchor, onClose }: {
+  requestId: string; color: DraftPriceColor; linkedPhoto?: string | null; previewId: string; anchor: PhotoAnchor; onClose: () => void
 }) {
   const preview = useRef<HTMLDialogElement>(null)
   const useRequestPhoto = linkedPhoto === undefined && color.hasPhoto
   const query = useRequestColorPhoto(requestId, color.id, useRequestPhoto)
   const image = useRequestPhoto ? query.data : linkedPhoto
+
+  useLayoutEffect(() => {
+    const popup = preview.current
+    const { trigger, priceCell } = anchor
+    const scroller = priceCell.closest<HTMLElement>('[data-china-price-scroll]')
+    if (!popup || !scroller) return
+    const gap = 8
+
+    const rightEdge = () => Math.min(document.documentElement.clientWidth, scroller.getBoundingClientRect().right) - gap
+    const position = () => {
+      const price = priceCell.getBoundingClientRect()
+      const left = Math.max(price.right, scroller.getBoundingClientRect().left) + gap
+      const width = Math.min(320, rightEdge() - left)
+      if (width < 96) {
+        popup.style.visibility = 'hidden'
+        return
+      }
+      popup.style.left = `${left}px`
+      popup.style.width = `${width}px`
+      const rowTop = trigger.isConnected ? trigger.getBoundingClientRect().top : price.top
+      const top = Math.max(gap, Math.min(rowTop, window.innerHeight - popup.offsetHeight - gap))
+      popup.style.top = `${top}px`
+      popup.style.visibility = 'visible'
+    }
+
+    // On narrow screens, reveal part of the last column in the existing horizontal scroller.
+    const room = rightEdge() - priceCell.getBoundingClientRect().right - gap
+    const preferredWidth = Math.min(200, Math.floor(scroller.clientWidth / 2))
+    if (room < preferredWidth) scroller.scrollLeft += preferredWidth - room
+    position()
+    const observer = new ResizeObserver(position)
+    observer.observe(scroller)
+    observer.observe(priceCell)
+    observer.observe(popup)
+    window.addEventListener('resize', position)
+    document.addEventListener('scroll', position, true)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', position)
+      document.removeEventListener('scroll', position, true)
+    }
+  }, [anchor])
+
   useEffect(() => {
-    preview.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  }, [color.id])
-  function close() {
-    onClose()
-    document.getElementById(`${previewId}-trigger`)?.focus({ preventScroll: true })
-  }
-  return <dialog ref={preview} open id={previewId}
-    className="static m-0 w-full min-w-0 rounded-lg border border-border bg-card p-3 text-sm text-foreground shadow-sm"
-    aria-label={`${color.name} 컬러 사진 크게 보기`}
-    onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); close() } }}>
+    function dismissOutside(event: MouseEvent) {
+      if (event.target instanceof Node && !preview.current?.contains(event.target) && !anchor.trigger.contains(event.target)) onClose()
+    }
+    function dismissWithEscape(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      onClose()
+      anchor.trigger.focus({ preventScroll: true })
+    }
+    document.addEventListener('click', dismissOutside, true)
+    document.addEventListener('keydown', dismissWithEscape, true)
+    return () => {
+      document.removeEventListener('click', dismissOutside, true)
+      document.removeEventListener('keydown', dismissWithEscape, true)
+    }
+  }, [anchor, onClose])
+
+  return createPortal(<dialog ref={preview} open id={previewId}
+    style={{ position: 'fixed', boxSizing: 'border-box', inset: 'auto', margin: 0 }}
+    className="invisible z-50 max-h-[calc(100dvh-1rem)] overflow-auto rounded-lg border border-border bg-card p-3 text-sm text-foreground shadow-xl"
+    aria-label={`${color.name} 컬러 사진 크게 보기`}>
     <header className="mb-2 flex items-center justify-between gap-2">
       <strong className="min-w-0 break-words">{color.name} 컬러</strong>
-      <Button type="button" variant="ghost" size="icon" className="shrink-0" aria-label="사진 크게 보기 닫기" onClick={close}><X size={18} /></Button>
+      <Button type="button" variant="ghost" size="icon" className="shrink-0" aria-label="사진 크게 보기 닫기" onClick={() => {
+        onClose()
+        anchor.trigger.focus({ preventScroll: true })
+      }}><X size={18} /></Button>
     </header>
     {useRequestPhoto && query.isPending ? <p role="status">사진을 불러오는 중입니다.</p>
       : useRequestPhoto && query.isError ? <p role="alert">{draftPriceError(query.error, '컬러 사진을 불러오지 못했습니다.')}</p>
       : image ? <img src={image} alt={`${color.name} 컬러`} className="mx-auto max-h-[min(36vh,18rem)] w-full rounded-md bg-muted/30 object-contain" /> : <p>첨부 사진이 없습니다.</p>}
-  </dialog>
+  </dialog>, document.body)
 }
 
-function ChinaPriceRequestRow({ request, earlier, draft, confirmed, brandName, amounts, disabled, expandedColorId, onEdit, onReply, onPhoto }: {
+function ChinaPriceRequestRow({ request, earlier, draft, confirmed, brandName, amounts, disabled, selectedPhoto, onEdit, onReply, onPhoto }: {
   request: DraftPriceRequest
   earlier: readonly DraftPriceRequest[]
   draft: ProductDraft | undefined
@@ -121,19 +180,20 @@ function ChinaPriceRequestRow({ request, earlier, draft, confirmed, brandName, a
   brandName: string | undefined
   amounts: Record<string, string> | undefined
   disabled: boolean
-  expandedColorId?: string
+  selectedPhoto?: SelectedPhoto
   onEdit: (colorId: string, value: string) => void
   onReply: (amounts: Record<string, number>) => Promise<unknown>
-  onPhoto: (colorId: string | null) => void
+  onPhoto: (selection: SelectedPhoto | null) => void
 }) {
   const formId = useId()
   const previewId = `${formId}-preview`
+  const priceCell = useRef<HTMLTableCellElement>(null)
   const active = useWorkspaceTabActivity()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const { answeredAt, draftNo, colors } = request
   const sentEarlier = earlier.filter(round => round.answeredAt)
-  const expandedColor = active ? colors.find(color => color.id === expandedColorId) : undefined
+  const expandedColor = active ? colors.find(color => color.id === selectedPhoto?.colorId) : undefined
 
   async function reply() {
     if (busy || disabled || answeredAt) return
@@ -198,12 +258,17 @@ function ChinaPriceRequestRow({ request, earlier, draft, confirmed, brandName, a
             <span title={color.name} className="min-w-0 flex-1 truncate text-sm">{color.name}</span>
             {hasPhoto && <ChinaPriceThumbnail requestId={request.id} color={color} linkedPhoto={linkedPhoto}
               expanded={expandedColor?.id === color.id} previewId={previewId}
-              onClick={() => onPhoto(expandedColor?.id === color.id ? null : color.id)} />}
+              onClick={event => {
+                if (expandedColor?.id === color.id) onPhoto(null)
+                else if (priceCell.current) onPhoto({
+                  requestId: request.id, colorId: color.id, anchor: { trigger: event.currentTarget, priceCell: priceCell.current },
+                })
+              }} />}
           </div>
         })}
       </div>
     </td>
-    <td className="border-r border-border/60 py-4 pr-4 align-top">
+    <td ref={priceCell} className="border-r border-border/60 py-4 pr-4 align-top">
       <div className="divide-y divide-primary/20">
         {colors.map(color => <div key={color.id} className="flex h-9 items-center justify-center gap-2">
           <Input form={formId} aria-label={`${color.name} 단가 (위안)`} type="number" inputMode="decimal" min="0" max="99999999.99" step="0.01" required readOnly={Boolean(answeredAt) || busy}
@@ -245,14 +310,8 @@ function ChinaPriceRequestRow({ request, earlier, draft, confirmed, brandName, a
       </div>
     </td>
   </tr>
-    {expandedColor && <tr className="border-b border-primary/25 bg-muted/20 last:border-b-0">
-      <td colSpan={5} className="p-0">
-        <div className="sticky left-0 w-[min(100cqw,20rem)] p-3 @min-[55rem]:ml-[37rem] @min-[55rem]:w-[min(calc(100cqw_-_37rem),20rem)]">
-          <ChinaPricePhoto requestId={request.id} color={expandedColor} linkedPhoto={linkedColorPhoto(draft, expandedColor.id)}
-            previewId={previewId} onClose={() => onPhoto(null)} />
-        </div>
-      </td>
-    </tr>}
+    {expandedColor && selectedPhoto && <ChinaPricePhoto requestId={request.id} color={expandedColor}
+      linkedPhoto={linkedColorPhoto(draft, expandedColor.id)} previewId={previewId} anchor={selectedPhoto.anchor} onClose={() => onPhoto(null)} />}
   </>
 }
 
@@ -296,7 +355,7 @@ export function ChinaPriceRequests({ requests, drafts, brandById, inputs, loadin
     {error && <div className="mb-3 flex items-center gap-2 text-sm text-danger">
       <p role="alert">{error}</p><Button type="button" variant="outline" size="sm" onClick={onRetry}>다시 조회</Button>
     </div>}
-    <Card className="@container overflow-x-auto">
+    <Card data-china-price-scroll="" className="overflow-x-auto">
       <table aria-label="단가요청 목록" className="w-full min-w-[880px] table-fixed text-left">
         <colgroup><col className="w-40" /><col className="w-36" /><col className="w-36" /><col className="w-36" /><col /></colgroup>
         <thead className="bg-primary text-primary-foreground">
@@ -313,8 +372,7 @@ export function ChinaPriceRequests({ requests, drafts, brandById, inputs, loadin
             <ChinaPriceRequestRow key={request.id} request={request} earlier={earlier} draft={draft} confirmed={status === 'confirmed'}
               brandName={draft?.brandId ? brandById?.get(draft.brandId)?.name : undefined} amounts={inputs[request.id]} disabled={Boolean(error)}
               onEdit={(id, value) => onEdit(request.id, id, value)} onReply={values => onReply(request.id, values)}
-              expandedColorId={photo?.requestId === request.id ? photo.colorId : undefined}
-              onPhoto={colorId => setPhoto(colorId === null ? null : { requestId: request.id, colorId })} />)}
+              selectedPhoto={photo?.requestId === request.id ? photo : undefined} onPhoto={setPhoto} />)}
           {shown.length === 0 && <tr><td colSpan={5} className="px-4 py-12 text-center text-sm text-muted-foreground">
             {loading ? '단가요청을 불러오는 중입니다.' : error ? '단가요청 목록을 다시 조회해 주세요.' : '해당 단가요청이 없습니다.'}
           </td></tr>}
