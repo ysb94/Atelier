@@ -11,9 +11,6 @@ const BRANDS_TABLE = 'brands'
 /** 브랜드 4개 seed와 같은 값. 상위 소유자가 하나뿐이라 조회 없이 쓴다. */
 export const DEFAULT_COMPANY_ID = 'e0000000-0000-4000-8000-000000000001'
 
-const BRAND_COLUMNS =
-  'id, slug, name, name_ko, description, color, founded_year, logo_url, created_at, updated_at'
-
 type BrandRow = {
   id: string
   slug: string
@@ -23,6 +20,7 @@ type BrandRow = {
   color: string
   founded_year: number
   logo_url: string | null
+  style_number_prefix?: string | null
   created_at: string
   updated_at: string
 }
@@ -51,6 +49,7 @@ function toBrand(row: BrandRow): Omit<Brand, 'styleCount'> {
     color: row.color,
     foundedYear: row.founded_year,
     logoUrl: row.logo_url,
+    styleNumberPrefix: row.style_number_prefix,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -80,11 +79,20 @@ function toRowInput(input: BrandInput) {
     color: input.color.trim().toUpperCase() || '#1A1A1A',
     founded_year: clampFoundedYear(input.foundedYear),
     logo_url: normalizeLogoUrl(input.logoUrl),
+    ...(input.styleNumberPrefix === undefined ? {} : {
+      style_number_prefix: input.styleNumberPrefix?.trim().toUpperCase() || null,
+    }),
   }
 }
 
 /** Postgres 오류를 화면에서 쓸 수 있는 메시지로 바꾼다. */
 function toStoreError(error: { code?: string; message: string }) {
+  if (error.code === '23505' && error.message.includes('brands_company_style_number_prefix')) {
+    return new BrandStoreError('같은 회사의 다른 브랜드에서 사용 중인 품번 접두어입니다.', 'invalid')
+  }
+  if (['PGRST204', '42703'].includes(error.code ?? '') && error.message.includes('style_number_prefix')) {
+    return new BrandStoreError('공유 DB 적용 후 품번 접두어를 저장할 수 있습니다.', 'invalid')
+  }
   if (error.code === '23505' || error.code === '23000') {
     return new BrandStoreError('이미 사용 중인 slug입니다.', 'slug_taken')
   }
@@ -106,7 +114,7 @@ function toStoreError(error: { code?: string; message: string }) {
 export async function listBrands(): Promise<Omit<Brand, 'styleCount'>[]> {
   const { data, error } = await getSupabase()
     .from(BRANDS_TABLE)
-    .select(BRAND_COLUMNS)
+    .select()
     .order('name', { ascending: true })
 
   if (error) throw toStoreError(error)
@@ -118,7 +126,7 @@ export async function getBrandBySlug(
 ): Promise<Omit<Brand, 'styleCount'> | undefined> {
   const { data, error } = await getSupabase()
     .from(BRANDS_TABLE)
-    .select(BRAND_COLUMNS)
+    .select()
     .eq('slug', normalizeSlug(slug))
     .maybeSingle()
 
@@ -137,7 +145,7 @@ export async function createBrand(
   const { data, error } = await getSupabase()
     .from(BRANDS_TABLE)
     .insert({ ...row, company_id: DEFAULT_COMPANY_ID })
-    .select(BRAND_COLUMNS)
+    .select()
     .single()
 
   if (error) throw toStoreError(error)
@@ -157,7 +165,7 @@ export async function updateBrand(
     .from(BRANDS_TABLE)
     .update(row)
     .eq('id', id)
-    .select(BRAND_COLUMNS)
+    .select()
     .maybeSingle()
 
   if (error) throw toStoreError(error)

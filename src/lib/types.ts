@@ -10,6 +10,7 @@ export type Brand = {
   foundedYear: number
   /** data URL 또는 원격 URL. 없으면 이름 앞 2글자 아바타 */
   logoUrl?: string | null
+  styleNumberPrefix?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -23,6 +24,7 @@ export type BrandInput = {
   color: string
   foundedYear: number
   logoUrl?: string | null
+  styleNumberPrefix?: string | null
 }
 
 /** 브랜드별 내부 상품 카테고리. 카페24 번호와 분리한 계층형 마스터다. */
@@ -88,6 +90,8 @@ export const LEGACY_SEASON_STATUS_MAP: Record<string, SeasonStatus> = {
  * 실제로는 "26.03 말 SS", "1학기 신학기"처럼 출시 묶음이다.
  * code는 URL·가져오기 호환용으로 앱이 만든다.
  */
+export type SeasonOpening = { date: string | null; confirmed: boolean }
+
 export type Season = {
   id: string
   brandId: string
@@ -97,6 +101,7 @@ export type Season = {
   name: string
   /** 출시 예정 자유 문구. 예: 26.03 말, 일정 미정 */
   releaseTiming: string
+  opening?: SeasonOpening
   year: number
   status: SeasonStatus
 }
@@ -254,6 +259,7 @@ export type DraftColorRow = {
 }
 
 export type DraftColorImageChoice = 'Image' | 'None'
+export type DraftColorNames = { nameEn: string; nameKo: string }
 
 /** 기획안에서 중국팀으로 보내는 샘플 작업 지시서 한 차수 */
 export type DraftSampleWorkOrder = {
@@ -338,6 +344,7 @@ export type DraftSpecs = Record<DraftSpecKey, DraftSpec> & {
   openChannelTargetId?: string | null
   confirmedPriceRequestId?: string
   manualPrice?: DraftManualPrice
+  colorNames?: Record<string, DraftColorNames>
   colorImageChoices?: Record<string, DraftColorImageChoice>
   colorPhotoUrls?: Record<string, string>
   releaseSchedule?: { seasonId: string; targetDate: string | null; certainty: 'tentative' | 'confirmed' }

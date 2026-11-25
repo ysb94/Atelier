@@ -7,14 +7,16 @@ import { Input, Select } from '@/components/ui/input'
 import { RELEASE_MD_ID } from '@/lib/company/release-access'
 import { sampleCountry } from '@/lib/drafts/sample-receipt'
 import { listOrgChartMembers } from '@/lib/supabase/profiles'
-import type { DraftTeamValues } from '@/lib/supabase/draft-team-work'
+import type { DraftOrderNumbers, DraftTeamValues } from '@/lib/supabase/draft-team-work'
 import type { ProductDraft } from '@/lib/types'
+import { cn } from '@/lib/utils'
 import {
   DEFAULT_DRAFT_MD_OPTIONS, DRAFT_MD_OPTION_LABELS, DraftMdOptionsContext, initialDraftMdOptionId,
   type DraftMdOption, type DraftMdOptionField,
 } from './draft-md-options'
 import { DraftMdOptionDialog } from './DraftMdOptionDialog'
 import { DraftMdOptionEntries } from './DraftMdOptionEntries'
+import { DraftOrderConfirmationDialog } from './DraftOrderConfirmationDialog'
 import { DraftTeamActions, DraftTeamNotice } from './DraftTeamActions'
 import { matchesTeamColors, useDraftTeamSection, type DraftTeamWork } from './use-draft-team-work'
 import { useDraftSabangnetPartners, withSavedDraftPartner } from './use-draft-sabangnet-partners'
@@ -131,13 +133,15 @@ function MdPriceInput({ label, value, disabled, onChange }: {
     }} />
 }
 
-export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork }: {
+export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, orderRequirements, priceDestinationName, chinaTeamOrder }: {
   draft: ProductDraft; readOnly: boolean; hidden: boolean; actorId?: string; teamWork: DraftTeamWork
+  orderRequirements: string; priceDestinationName?: string; chinaTeamOrder: boolean
 }) {
   const catalog = useContext(DraftMdOptionsContext)
   const [editingArrival, setEditingArrival] = useState(false)
   const [managingOptions, setManagingOptions] = useState<DraftMdOptionField | null>(null)
   const [editingPeriod, setEditingPeriod] = useState(false)
+  const [confirmingQuantity, setConfirmingQuantity] = useState(false)
   const listing = useDraftTeamSection(teamWork, 'md-listing', {
     registerType: initialDraftMdOptionId('register', draft.registerType), registerLabel: '',
     openType: initialDraftMdOptionId('open', draft.openType), openLabel: '',
@@ -167,6 +171,8 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork }: 
   const listingConfirmed = listing.confirmed
   const listingLocked = listing.locked || listingConfirmed || listing.conflict
   const quantityConfirmed = quantity.confirmed && matchesTeamColors(quantity.value.quantities, draft.colors)
+  const issuedStyleNumbers = teamWork.records?.get('md-quantity')?.issued_style_numbers
+  const needsStyleRegistration = quantityConfirmed && Boolean(issuedStyleNumbers && draft.colors.some(color => !issuedStyleNumbers[color.id]))
   const quantityLocked = quantity.locked || quantityConfirmed || quantity.conflict
   const priceLocked = price.locked || price.confirmed || price.conflict
   const optionsLocked = options.locked || options.confirmed || options.conflict
@@ -183,7 +189,11 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork }: 
   const surcharge = selectedOption?.id === 'option-surcharge'
   const { arrival } = quantity.value
 
-  function saveQuantities(confirmed: boolean) {
+  function orderQuantities() {
+    return Object.fromEntries(draft.colors.map(color => [color.id, quantity.value.quantities[color.id] ?? color.orderQty?.toString() ?? '']))
+  }
+
+  function saveQuantities(confirmed: boolean, numbers?: DraftOrderNumbers) {
     let expectedArrival = arrival
     if (confirmed && !expectedArrival) {
       const expectedDay = new Date(`${ORDER_DATE.format(new Date())}T00:00:00Z`)
@@ -191,9 +201,7 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork }: 
       expectedArrival = expectedDay.toISOString().slice(0, 10)
     }
     setEditingArrival(false)
-    void quantity.save(confirmed, { arrival: expectedArrival, quantities: Object.fromEntries(draft.colors.map(color => [
-      color.id, quantity.value.quantities[color.id] ?? color.orderQty?.toString() ?? '',
-    ])) })
+    void quantity.save(confirmed, { arrival: expectedArrival, quantities: orderQuantities() }, numbers)
   }
 
   function setPrice(field: keyof Omit<DraftTeamValues['md-price'], 'auto'>, value: string) {
@@ -234,15 +242,21 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork }: 
         <div className="draft-md-order">
           <div className="draft-color-pad justify-center">
             <DraftTeamActions label="MD 수량" confirmText="수량 확정" className="draft-md-quantity-actions"
+              confirmBlockedReason={orderRequirements ? `수량 확정 전에 완료해 주세요. ${orderRequirements}` : undefined}
               locked={quantity.locked} confirmed={quantityConfirmed} busy={quantity.busy} editing={quantity.editing}
-              conflict={quantity.conflict} onEdit={() => quantity.change(value => value)} onSave={saveQuantities} onReset={quantity.reset} />
+              conflict={quantity.conflict} onEdit={() => quantity.change(value => value)}
+              onSave={final => final ? setConfirmingQuantity(true) : saveQuantities(false)} onReset={quantity.reset} />
+            {needsStyleRegistration && !readOnly && <Button type="button" variant="outline" size="sm" className="draft-team-control"
+              disabled={quantity.locked || Boolean(orderRequirements)} onClick={() => setConfirmingQuantity(true)}>품번 등록</Button>}
           </div>
           <div className="draft-color-lines">
             {draft.colors.map((color, index) => {
               const name = color.name.trim() || `컬러 ${index + 1}`
               const amount = quantity.value.quantities[color.id] ?? color.orderQty?.toString() ?? ''
+              const number = issuedStyleNumbers?.[color.id]?.number
               return (
-                <div key={color.id} className={`draft-color-line${index % 2 === 1 ? ' is-alt' : ''}`}>
+                <div key={color.id} className={cn('draft-color-line', index % 2 === 1 && 'is-alt', number && 'flex-col !gap-0')}>
+                  {number && <span className="max-w-full truncate text-[9px] leading-[9px] font-medium tabular-nums" title={`${name} 품번 ${number}`}>{number}</span>}
                   <label className="draft-md-order-quantity">
                     <Input inputMode="numeric" aria-label={`${name} 발주 수량`} disabled={quantityLocked}
                       value={amount.replace(/\B(?=(\d{3})+(?!\d))/g, ',')} onChange={event => {
@@ -377,6 +391,13 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork }: 
           </section>
         </div>
       </div>
+      {confirmingQuantity && !readOnly && !hidden && <DraftOrderConfirmationDialog
+        draft={draft} actorId={actorId} quantities={orderQuantities()} destinationName={priceDestinationName} chinaTeamOrder={chinaTeamOrder}
+        locked={quantity.locked || quantity.conflict || (quantityConfirmed && !needsStyleRegistration) || Boolean(orderRequirements)}
+        onBack={() => setConfirmingQuantity(false)} onConfirm={numbers => {
+          setConfirmingQuantity(false)
+          saveQuantities(true, numbers)
+        }} />}
       {managingOptions && (
         <DraftMdOptionDialog label={DRAFT_MD_OPTION_LABELS[managingOptions]} options={catalog.lists[managingOptions]}
           onChange={items => updateOptionCatalog(managingOptions, items)} onClose={() => setManagingOptions(null)} />

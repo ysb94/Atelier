@@ -7,6 +7,7 @@ import type {
   ProductDraftInput,
 } from '@/lib/types'
 import { inputDiagnosticContext, tracedQuery, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
+import { normalizeDraftColorNames } from '@/lib/drafts/color-names'
 import { normalizeColorPhotoUrls } from '@/lib/drafts/color-photo'
 import { normalizeColorSpecs } from '@/lib/drafts/color-spec'
 import { emptyDraftInput, MAX_DRAFT_COLORS, newColorRow } from '@/lib/drafts/empty-draft'
@@ -216,11 +217,15 @@ function normalizeSpecs(raw: ProductDraft['specs'] | null | undefined, colors: D
   const manualPrice = normalizeDraftManualPrice(raw?.manualPrice)
   if (manualPrice) base.manualPrice = manualPrice
   if (typeof raw?.openChannelTargetId === 'string') base.openChannelTargetId = raw.openChannelTargetId
+  const colorNames: NonNullable<ProductDraft['specs']['colorNames']> = {}
   const colorImageChoices: Record<string, DraftColorImageChoice> = {}
   for (const { id } of colors) {
+    const names = normalizeDraftColorNames(raw?.colorNames?.[id])
+    if (names.nameEn || names.nameKo) colorNames[id] = names
     const choice = raw?.colorImageChoices?.[id]
     if (choice === 'Image' || choice === 'None') colorImageChoices[id] = choice
   }
+  if (Object.keys(colorNames).length) base.colorNames = colorNames
   if (Object.keys(colorImageChoices).length) base.colorImageChoices = colorImageChoices
   const colorPhotoUrls = normalizeColorPhotoUrls(raw, colors)
   if (colorPhotoUrls) base.colorPhotoUrls = colorPhotoUrls
@@ -539,7 +544,8 @@ export async function createProductDraft(
 
 export type DraftColorEdit = {
   id: string | null
-  name: string
+  nameEn: string
+  nameKo: string
   photoChange?: { choice: 'Image'; url: string } | { choice: 'None'; url: null }
 }
 
@@ -558,24 +564,29 @@ export async function saveDraftColors(
   const existing = new Map(draft.colors.map(color => [color.id, color]))
   const choices: Record<string, DraftColorImageChoice> = {}
   const photos: Record<string, string> = {}
+  const names: NonNullable<ProductDraft['specs']['colorNames']> = {}
   const colors: DraftColorRow[] = []
-  const changes = edits.map(({ id, name, photoChange }) => {
+  const changes = edits.map(({ id, nameEn, nameKo, photoChange }) => {
     const previous = id ? existing.get(id) : undefined
     if (id && !previous) throw new Error('컬러를 찾지 못했습니다. 컬러 문서를 다시 열어 주세요.')
-    const color = { ...(previous ?? newColorRow(crypto.randomUUID())), name: name.trim() }
+    const colorNames = normalizeDraftColorNames({ nameEn, nameKo })
+    const name = colorNames.nameKo || colorNames.nameEn
+    if (!name) throw new Error('영문 또는 한글명을 입력해 주세요.')
+    const color = { ...(previous ?? newColorRow(crypto.randomUUID())), name }
     colors.push(color)
+    names[color.id] = colorNames
     const previousChoice = draft.specs.colorImageChoices?.[color.id]
     const previousPhoto = draft.specs.colorPhotoUrls?.[color.id]
     const choice = photoChange?.choice ?? previousChoice
     const photo = photoChange ? photoChange.url : previousPhoto
     if (choice) choices[color.id] = choice
     if (choice === 'Image' && photo) photos[color.id] = photo
-    const change = { id: color.id, name: color.name }
+    const change = { id: color.id, name: color.name, ...colorNames }
     if (!photoChange) return change
     return { ...change, imageChoice: photoChange.choice, photoUrl: photoChange.url }
   })
 
-  const request = getSupabase().rpc('save_draft_colors', {
+  const request = getSupabase().rpc('save_draft_colors_with_names', {
     p_draft_id: draft.id,
     p_expected_updated_at: expectedUpdatedAt,
     p_colors: changes,
@@ -583,7 +594,7 @@ export async function saveDraftColors(
   const { data, error } = await tracedQuery(request, context)
   if (error || typeof data !== 'string') {
     const message = error?.code === 'PGRST202'
-      ? '컬러 전용 저장 기능을 사용하려면 DB 마이그레이션 적용이 필요합니다.'
+      ? '컬러 영문·한글명을 저장하려면 DB 마이그레이션 적용이 필요합니다.'
       : error?.code === '57014' ? '컬러 저장 시간이 초과되었습니다. 다시 시도해 주세요.'
       : errorMessage(error, '컬러를 저장하지 못했습니다.')
     throw new ProductDraftStoreError(message, 'invalid')
@@ -594,6 +605,7 @@ export async function saveDraftColors(
     colors,
     specs: {
       ...draft.specs,
+      colorNames: names,
       colorImageChoices: choices,
       colorPhotoUrls: Object.keys(photos).length ? photos : undefined,
     },

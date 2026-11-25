@@ -97,10 +97,11 @@ function BrandSelectPageContent() {
     mutationFn: async (values: BrandFormValues) => {
       if (dialogMode === 'edit' && editingBrand) {
         if (!isBrandLead(actualProfile, editingBrand.id)) throw new Error('로그인 계정에 이 브랜드를 수정할 권한이 없습니다.')
-        return updateBrand(editingBrand.id, values)
+        const previous = editingBrand.styleNumberPrefix ?? (editingBrand.slug === 'masmarulez' && editingBrand.styleNumberPrefix === undefined ? 'M' : '')
+        return updateBrand(editingBrand.id, { ...values, styleNumberPrefix: values.styleNumberPrefix === previous ? undefined : values.styleNumberPrefix })
       }
       if (!hasPermission(actualProfile, 'brand.manage')) throw new Error('로그인 계정에 브랜드를 생성할 권한이 없습니다.')
-      return createBrand(values)
+      return createBrand({ ...values, styleNumberPrefix: values.styleNumberPrefix || undefined })
     },
     onSuccess: async () => {
       setFormError(null)

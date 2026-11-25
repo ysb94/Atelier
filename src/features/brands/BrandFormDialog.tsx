@@ -32,6 +32,7 @@ const brandFormSchema = z.object({
     .min(1800, '설립 연도가 너무 이릅니다.')
     .max(new Date().getFullYear() + 1, '설립 연도가 미래입니다.'),
   logoUrl: z.string().nullable().optional(),
+  styleNumberPrefix: z.string().trim().toUpperCase().regex(/^[A-Z]{0,12}$/, '품번 접두어는 영문 12자까지 입력할 수 있습니다.'),
 })
 
 export type BrandFormValues = z.infer<typeof brandFormSchema>
@@ -44,6 +45,7 @@ const DEFAULT_VALUES: BrandFormValues = {
   color: '#2C3E50',
   foundedYear: new Date().getFullYear(),
   logoUrl: null,
+  styleNumberPrefix: '',
 }
 
 type BrandFormDialogProps = {
@@ -66,6 +68,7 @@ function toFormValues(brand?: Brand | null): BrandFormValues {
     color: brand.color,
     foundedYear: brand.foundedYear,
     logoUrl: brand.logoUrl ?? null,
+    styleNumberPrefix: brand.styleNumberPrefix ?? (brand.slug === 'masmarulez' && brand.styleNumberPrefix === undefined ? 'M' : ''),
   }
 }
 
@@ -116,6 +119,7 @@ export function BrandFormDialog({
   const color = watch('color')
   const name = watch('name')
   const logoUrl = watch('logoUrl')
+  const styleNumberPrefix = watch('styleNumberPrefix').trim().toUpperCase()
 
   useEffect(() => {
     if (!open) return
@@ -283,6 +287,14 @@ export function BrandFormDialog({
               placeholder="시티 모던 여성복"
               disabled={isSubmitting}
             />
+          </Field>
+
+          <Field label="품번 접두어" error={errors.styleNumberPrefix?.message}
+            hint={/^[A-Z]{1,12}$/.test(styleNumberPrefix)
+              ? `발급 형식 ${styleNumberPrefix}0001 · 변경한 접두어는 새로 발급하는 품번에만 적용됩니다.`
+              : '영문 접두어 뒤에 네 자리 숫자가 붙습니다. 발주 확정 전에 설정해 주세요.'}>
+            <Input {...register('styleNumberPrefix')} maxLength={12} autoCapitalize="characters" spellCheck={false}
+              className="uppercase" placeholder="접두어 미설정" disabled={isSubmitting} />
           </Field>
 
           <div className="grid gap-4 sm:grid-cols-2">

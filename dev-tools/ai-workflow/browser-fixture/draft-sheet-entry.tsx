@@ -29,8 +29,8 @@ const brand: Brand = {
   color: '#b21c29', styleCount: 0, foundedYear: 2026, createdAt: '', updatedAt: '',
 }
 const releaseFolders = [
-  { id: 'group', name: '11월 출시', releaseTiming: '' },
-  { id: 'group-dec', name: '12월 출시', releaseTiming: '' },
+  { id: 'group', brandId: brand.id, name: '11월 출시', releaseTiming: '', opening: { date: '2026-11-27', confirmed: true } },
+  { id: 'group-dec', brandId: brand.id, name: '12월 출시', releaseTiming: '' },
 ]
 const releaseSeasonMap = new Map(releaseFolders.map(folder => [folder.id, {
   ...folder, code: folder.id, brandId: brand.id, year: 2026, status: 'active' as const,
@@ -56,6 +56,7 @@ function Fixture() {
   const [priceRequest, setPriceRequest] = useState<DraftPriceRequest>()
   const [previousPriceReply, setPreviousPriceReply] = useState<DraftPriceRequest>()
   const [readOnly,setReadOnly]=useState(false)
+  const [orderReady, setOrderReady] = useState(false)
   const accountId = readOnly ? 'fixture-viewer' : 'fixture-owner'
   const priceDestinations = useDraftPriceDestinations('fixture-company', accountId, true)
   const sheetLayout = useDraftSheetLayout(accountId)
@@ -80,7 +81,11 @@ function Fixture() {
         ivory:{size:'310×130×200',sizeNote:'아이보리 별도 메모',fabric:'면',weight:'240g',specDoc:'아이보리 스펙'},
       }),colorSampleRounds:[{id:'round',round:1,url:'color.pdf',name:'컬러 지시서',shippedAt:'2026-10-14T00:00:00Z',returnedAt:'2026-10-15T00:00:00Z',passed:false}]}}
   })
-  const shown={...draft,sampleWorkOrders:phase==='new'?[]:draft.sampleWorkOrders,specs:{...draft.specs,colorSampleRounds:phase==='review'?draft.specs.colorSampleRounds:[]}}
+  const shown={...draft, seasonId:orderReady?'group':draft.seasonId, sampleWorkOrders:phase==='new'?[]:draft.sampleWorkOrders,
+    specs:{...draft.specs,colorSampleRounds:phase==='review'?draft.specs.colorSampleRounds:[], ...(orderReady ? {
+      colorNames:{black:{nameEn:'Black',nameKo:'블랙'},ivory:{nameEn:'Ivory',nameKo:'아이보리'}},
+      manualPrice:normalizeDraftManualPrice({destination:'한국',currency:'KRW',vendor:'',savedAt:'2026-11-25T00:00:00Z',amounts:{black:1000,ivory:1000}}),
+    } : {})}}
   const teamWork=useDraftTeamWork(readOnly?'fixture-viewer':'fixture-owner',[draft])
   const visualBoard=useDraftVisualBoard('fixture-owner',[draft])
   const specDocumentTemporarySources = useDraftSpecDocumentTemporary(accountId, readOnly ? [] : [draft])
@@ -111,6 +116,7 @@ function Fixture() {
     {stickyHeader && <style>{'.draft-sheet-row { height: 1100px; }'}</style>}
     <button onClick={()=>setReadOnly(v=>!v)}>{readOnly?'작성자로 전환':'다른 직원으로 전환'}</button><select aria-label="검증 단계" value={phase} onChange={event=>setPhase(event.target.value)}><option value="review">샘플 검토</option><option value="new">최초 지시서</option><option value="color-upload">컬러 지시서</option></select><output data-testid="writes">{writes}</output><output data-testid="opened">{opened}</output>
     <output data-testid="saved-spec">{savedSpec}</output>
+    <label><input type="checkbox" checked={orderReady} onChange={event=>setOrderReady(event.target.checked)} />발주 조건 준비</label>
     <button type="button" onClick={() => setPriceRequest(current => current && {
       ...current, answeredAt: current.round === 1 ? '2026-11-02T10:00:00Z' : '2026-11-02T15:00:30Z',
       amounts: { ivory: 0, black: 14 + current.round },

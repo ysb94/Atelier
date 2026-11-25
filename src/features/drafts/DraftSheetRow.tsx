@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { DRAFT_COLOR_PHOTO_ACCEPT, prepareDraftColorPhoto } from '@/lib/drafts/color-photo'
+import { draftColorNames, normalizeDraftColorNames } from '@/lib/drafts/color-names'
 import { MAX_DRAFT_COLORS } from '@/lib/drafts/empty-draft'
 import {
   DRAFT_INFORMATION_LABELS, colorInformationEditKey, documentEditKey, hasInformationEdits, informationEditText,
@@ -14,7 +15,8 @@ import {
 } from '@/lib/drafts/color-spec'
 import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
 import { colorSampleLineStatus, resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
-import { sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
+import { DRAFT_PRICE_DESTINATIONS } from '@/lib/drafts/manual-price'
+import { CHINA_TEAM_DESTINATION, sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
 import { sheetRegisteredDay } from '@/lib/drafts/sample-work-order'
 import { readFileAsDataUrl } from '@/lib/images'
 import type { DraftInformationTemporaryStore } from '@/lib/supabase/draft-information-temporary'
@@ -152,14 +154,16 @@ const COLOR_IMAGE_CHOICES: readonly DraftColorImageChoice[] = ['Image', 'None']
 
 type ColorPhotoChange = NonNullable<DraftColorEdit['photoChange']>
 type ColorFormRow = DraftColorEdit & { key: number }
+const EMPTY_COLOR_NAMES = { nameEn: '', nameKo: '' }
 
 function colorImageConfigured(choice?: DraftColorImageChoice, photoUrl?: string | null) {
   return choice === 'None' || (choice === 'Image' && Boolean(photoUrl))
 }
 
-function ColorImageChoiceDot({ choice, photoUrl }: { choice?: DraftColorImageChoice; photoUrl?: string | null }) {
-  const configured = colorImageConfigured(choice, photoUrl)
-  const label = configured ? `이미지 설정 ${choice}` : choice === 'Image' ? '이미지 미첨부' : '이미지 미선택'
+function ColorSetupDot({ names, choice, photoUrl }: { names: typeof EMPTY_COLOR_NAMES; choice?: DraftColorImageChoice; photoUrl?: string | null }) {
+  const namesComplete = Boolean(names.nameEn.trim() && names.nameKo.trim())
+  const configured = namesComplete && colorImageConfigured(choice, photoUrl)
+  const label = !namesComplete ? '영문·한글명 입력 필요' : configured ? `이미지 설정 ${choice}` : choice === 'Image' ? '이미지 미첨부' : '이미지 미선택'
   return (
     <span
       role="img"
@@ -190,6 +194,7 @@ function slideColorRow(node: HTMLElement, fromY: number) {
 function ColorDocumentButton({
   readOnly = false,
   colors,
+  colorNames,
   imageChoices,
   photoUrls,
   savedImages,
@@ -198,6 +203,7 @@ function ColorDocumentButton({
 }: {
   readOnly?: boolean
   colors: DraftColorRow[]
+  colorNames: DraftSpecs['colorNames']
   imageChoices: DraftSpecs['colorImageChoices']
   photoUrls: DraftSpecs['colorPhotoUrls']
   savedImages?: readonly string[]
@@ -205,7 +211,7 @@ function ColorDocumentButton({
   onSaveColors: (colors: DraftColorEdit[], revision: string) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
-  const [rows, setRows] = useState<ColorFormRow[]>([{ key: 1, id: null, name: '' }])
+  const [rows, setRows] = useState<ColorFormRow[]>([{ key: 1, id: null, ...EMPTY_COLOR_NAMES }])
   const [busy, setBusy] = useState(false)
   const [preparingPhotoKey, setPreparingPhotoKey] = useState<number | null>(null)
   const [error, setError] = useState('')
@@ -235,11 +241,11 @@ function ColorDocumentButton({
   function freshRows(source: DraftColorRow[]) {
     if (!source.length) {
       nextKey.current += 1
-      return [{ key: nextKey.current, id: null, name: '' }]
+      return [{ key: nextKey.current, id: null, ...EMPTY_COLOR_NAMES }]
     }
     return source.map((color) => {
       nextKey.current += 1
-      return { key: nextKey.current, id: color.id, name: color.name }
+      return { key: nextKey.current, id: color.id, ...draftColorNames(color.name, colorNames?.[color.id]) }
     })
   }
 
@@ -247,7 +253,7 @@ function ColorDocumentButton({
     if (locked || rows.length >= MAX_DRAFT_COLORS) return
     setError('')
     nextKey.current += 1
-    setRows((current) => [...current, { key: nextKey.current, id: null, name: '' }])
+    setRows((current) => [...current, { key: nextKey.current, id: null, ...EMPTY_COLOR_NAMES }])
   }
 
   function removeRow(key: number) {
@@ -256,8 +262,13 @@ function ColorDocumentButton({
       const next = current.filter((row) => row.key !== key)
       if (next.length) return next
       nextKey.current += 1
-      return [{ key: nextKey.current, id: null, name: '' }]
+      return [{ key: nextKey.current, id: null, ...EMPTY_COLOR_NAMES }]
     })
+  }
+
+  function changeName(key: number, field: 'nameEn' | 'nameKo', value: string) {
+    setError('')
+    setRows(current => current.map(row => row.key === key ? { ...row, [field]: value } : row))
   }
 
   function changePhoto(key: number, photoChange: ColorPhotoChange) {
@@ -393,13 +404,12 @@ function ColorDocumentButton({
           onSubmit={(event) => {
             event.preventDefault()
             if (locked) return
-            if (rows.some((row) => (row.id || row.photoChange) && !row.name.trim())) {
-              setError('컬러 이름을 입력하세요.')
+            const edited = rows.map(({ id, nameEn, nameKo, photoChange }) => ({ id, ...normalizeDraftColorNames({ nameEn, nameKo }), photoChange }))
+            if (edited.some(row => (row.id || row.photoChange) && !row.nameEn && !row.nameKo)) {
+              setError('컬러 영문 또는 한글명을 입력하세요.')
               return
             }
-            const next = rows
-              .filter((row) => row.name.trim())
-              .map(({ id, name, photoChange }) => ({ id, name: name.trim(), photoChange }))
+            const next = edited.filter(row => row.nameEn || row.nameKo)
             if (!next.length && colors.length === 0) {
               setError('컬러 이름을 입력하세요.')
               return
@@ -431,6 +441,7 @@ function ColorDocumentButton({
               if (file && key !== null && !locked) void attachPhoto(key, file)
             }}
           />
+          <div className="draft-color-add-row draft-color-add-header" aria-hidden="true"><span>영문</span><span>한글명</span></div>
           <div className="draft-color-add-rows" ref={listRef}>
             {rows.map((row, index) => {
               const lifted = draggingKey === row.key
@@ -444,7 +455,7 @@ function ColorDocumentButton({
                 className={`draft-color-add-row${lifted ? ' is-lifted' : ''}`}
                 style={lifted ? { transform: `translateY(${shiftY}px)` } : undefined}
               >
-                <ColorImageChoiceDot choice={imageChoice} photoUrl={photoUrl} />
+                <ColorSetupDot names={row} choice={imageChoice} photoUrl={photoUrl} />
                 <button
                   type="button"
                   className="draft-color-add-grip"
@@ -456,14 +467,18 @@ function ColorDocumentButton({
                   <GripVertical className="size-3.5" />
                 </button>
                 <Input
-                  className="h-8 min-w-0 flex-1 text-sm"
-                  aria-label={rows.length > 1 ? `컬러 이름 ${index + 1}` : '컬러 이름'}
-                  value={row.name}
+                  className="h-8 min-w-0 px-2 text-sm"
+                  aria-label={`컬러 ${index + 1} 영문`}
+                  value={row.nameEn}
                   disabled={locked}
-                  onChange={(event) => {
-                    const name = event.target.value
-                    setRows((current) => current.map((item) => item.key === row.key ? { ...item, name } : item))
-                  }}
+                  onChange={event => changeName(row.key, 'nameEn', event.currentTarget.value)}
+                />
+                <Input
+                  className="h-8 min-w-0 px-2 text-sm"
+                  aria-label={`컬러 ${index + 1} 한글명`}
+                  value={row.nameKo}
+                  disabled={locked}
+                  onChange={event => changeName(row.key, 'nameKo', event.currentTarget.value)}
                 />
                 <Button
                   type="button"
@@ -775,7 +790,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   mode?: DraftBoardMode
   layout?: DraftSheetLayout
   draft: ProductDraft; schedule: ResolvedReleaseSchedule | undefined; brand: Brand | undefined
-  releaseFolders: Pick<Season, 'id' | 'name' | 'releaseTiming'>[]
+  releaseFolders: Pick<Season, 'id' | 'name' | 'releaseTiming' | 'opening' | 'brandId'>[]
   onChangeReleaseFolder: (seasonId: string | null) => Promise<void>
   price?: DraftPriceControls
   teamWork: DraftTeamWork
@@ -852,6 +867,26 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   const documentOpen = !fromVisual && information?.field === 'specDoc'
   const colorRows: Array<DraftColorRow | null> = draft.colors.length ? draft.colors : [null]
   const priceAmounts = price?.reply?.amounts ?? draft.specs.manualPrice?.amounts
+  const latestPrice = price?.latest
+  const manualPrice = draft.specs.manualPrice
+  const currentManualPrice = manualPrice && (!latestPrice || Date.parse(manualPrice.savedAt) >= Date.parse(latestPrice.requestedAt))
+    ? manualPrice : undefined
+  const confirmedAmounts = currentManualPrice?.amounts ?? (latestPrice?.answeredAt && latestPrice.id === draft.specs.confirmedPriceRequestId
+    ? latestPrice.amounts : undefined)
+  const destination = currentManualPrice?.destination ?? (latestPrice ? CHINA_TEAM_DESTINATION.value : undefined)
+  const destinationName = currentManualPrice?.destinationLabel ?? DRAFT_PRICE_DESTINATIONS.find(item => item.value === destination)?.label
+  const orderFolder = draft.brandId ? releaseFolders.find(folder => folder.id === draft.seasonId && folder.brandId === draft.brandId) : undefined
+  const orderRequirements = [
+    nameConfirmed && named ? null : '네임 확정',
+    hasColor && !missingPriceColors.length && draft.colors.every(color => {
+      const names = draftColorNames(color.name, draft.specs.colorNames?.[color.id])
+      return names.nameEn && names.nameKo
+    }) ? null : '컬러 영문·한글명과 이미지 설정',
+    confirmedAmounts && Object.keys(confirmedAmounts).length === draft.colors.length &&
+      draft.colors.every(color => typeof confirmedAmounts[color.id] === 'number') ? null : '단가 확정',
+    draft.brandId ? null : '브랜드 지정',
+    !orderFolder ? '브랜드 출시 폴더 지정' : orderFolder.opening?.confirmed && orderFolder.opening.date ? null : '폴더 오픈 예정일 확정',
+  ].filter(Boolean).join(', ')
   function colorSampleDone(colorId: string) {
     return colorId in pendingDone ? pendingDone[colorId] : doneColorIds.has(colorId)
   }
@@ -958,6 +993,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
         <ColorDocumentButton
           readOnly={readOnly}
           colors={draft.colors}
+          colorNames={draft.specs.colorNames}
           imageChoices={draft.specs.colorImageChoices}
           photoUrls={draft.specs.colorPhotoUrls}
           savedImages={visualBoard.status?.saved_images}
@@ -981,7 +1017,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
           const photoUrl = draft.specs.colorPhotoUrls?.[color.id]
           return (
             <ColorLine key={color.id} index={index}>
-              <ColorImageChoiceDot choice={draft.specs.colorImageChoices?.[color.id]} photoUrl={photoUrl} />
+              <ColorSetupDot names={draftColorNames(color.name, draft.specs.colorNames?.[color.id])} choice={draft.specs.colorImageChoices?.[color.id]} photoUrl={photoUrl} />
               <SheetInlineField
                 readOnly
                 label={`${draft.draftNo} 컬러 ${index + 1} 이름`}
@@ -1053,7 +1089,9 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
       onOpenVisualTab={(anchor, colorId, field) => setInformation(current =>
         current?.anchor === anchor && current.field === field ? null : { anchor, colorId, field, visualTrigger: field })} />,
     amd: <DraftAmdCell key={editorKey} colors={draft.colors} hidden={hidden.has('amd')} readOnly={readOnly} teamWork={teamWork} />,
-    md: <DraftMdTeamCell key={editorKey} draft={draft} hidden={hidden.has('md')} readOnly={readOnly} actorId={informationEditorId} teamWork={teamWork} />,
+    md: <DraftMdTeamCell key={editorKey} draft={draft} hidden={hidden.has('md')} readOnly={readOnly} actorId={informationEditorId}
+      teamWork={teamWork} orderRequirements={orderRequirements} priceDestinationName={destinationName}
+      chinaTeamOrder={destination === CHINA_TEAM_DESTINATION.value} />,
     ect: <td hidden={hidden.has('ect')} />,
   }
 

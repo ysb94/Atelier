@@ -2,7 +2,9 @@ import {
   formatSeasonLabel,
   type Season,
   type SeasonInput,
+  type SeasonOpening,
 } from '@/lib/types'
+import { diagnosticOperation, tracedQuery } from '@/lib/diagnostics/workflow-trace'
 import {
   buildSeasonCode,
   ensureUniqueSeasonCode,
@@ -21,6 +23,8 @@ type SeasonRow = {
   code: string
   name: string
   release_timing: string
+  opening_date?: string | null
+  opening_date_confirmed?: boolean
   year: number
   status: string
   created_at: string
@@ -47,6 +51,7 @@ function toSeason(row: SeasonRow): Season {
     code: row.code,
     name: row.name,
     releaseTiming: row.release_timing,
+    opening: row.opening_date_confirmed === undefined ? undefined : { date: row.opening_date ?? null, confirmed: row.opening_date_confirmed },
     year: row.year,
     status: normalizeSeasonStatus(row.status),
   }
@@ -55,7 +60,7 @@ function toSeason(row: SeasonRow): Season {
 export async function listSeasons(brandId: string): Promise<Season[]> {
   const { data, error } = await getSupabase()
     .from('seasons')
-    .select(COLUMNS)
+    .select('*')
     .eq('brand_id', brandId)
 
   if (error) {
@@ -71,6 +76,20 @@ export async function listSeasons(brandId: string): Promise<Season[]> {
       if (a.year !== b.year) return b.year - a.year
       return formatSeasonLabel(a).localeCompare(formatSeasonLabel(b), 'ko')
     })
+}
+
+export async function saveSeasonOpening(id: string, brandId: string, next: SeasonOpening, expected: SeasonOpening): Promise<SeasonOpening> {
+  return diagnosticOperation('app', 'save_draft_folder_opening', trace => trace.run('update_opening_date', async context => {
+    const update = getSupabase().from('seasons')
+      .update({ opening_date: next.date, opening_date_confirmed: next.confirmed })
+      .eq('id', id).eq('brand_id', brandId).neq('code', UNASSIGNED_SEASON_CODE)
+      .eq('opening_date_confirmed', expected.confirmed)
+    const match = expected.date === null ? update.is('opening_date', null) : update.eq('opening_date', expected.date)
+    const { data, error } = await tracedQuery(match.select('opening_date,opening_date_confirmed').maybeSingle(), context)
+    if (error) throw new SeasonStoreError(errorMessage(error, '오픈 예정일을 저장하지 못했습니다.'), 'invalid')
+    if (!data) throw new SeasonStoreError('오픈 예정일이 변경됐거나 수정 권한이 없습니다. 최신 상태를 확인해 주세요.', 'invalid')
+    return { date: data.opening_date, confirmed: data.opening_date_confirmed }
+  }))
 }
 
 export async function getSeasonById(id: string): Promise<Season | undefined> {

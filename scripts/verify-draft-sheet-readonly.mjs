@@ -158,12 +158,30 @@ try{
    return route.fulfill({json:temporary.flatMap(row=>row.field==='specDoc'&&row.edits.specDoc
      ? [{draft_id:'fixture',source:row.edits.specDoc.source}] : [])})
  })
- await page.route('**/rpc/save_draft_team_work',route=>{
-   const {p_draft_id,p_section,p_payload,p_confirmed,p_revision}=route.request().postDataJSON()
+ const orderNumberMap={black:'V0001',ivory:'V0002'}
+ let orderPrefix=null
+ const saveSection=(route,p_section,p_confirmed)=>{
+   const {p_draft_id,p_payload,p_revision}=route.request().postDataJSON()
    if(p_revision!==(teamRows.get(p_section)?.revision??null)) return route.fulfill({json:{data:null,error:{code:'40001'}}})
    const saved={draft_id:p_draft_id,section:p_section,payload:p_payload,confirmed:p_confirmed,revision:crypto.randomUUID()}
+   if(p_section==='md-quantity'&&p_confirmed) saved.issued_style_numbers=Object.fromEntries(
+     Object.entries(orderNumberMap).map(([color,number])=>[color,{number,style_id:crypto.randomUUID()}]),
+   )
    teamRows.set(p_section,saved)
    return route.fulfill({json:{data:[saved],error:null}})
+ }
+ await page.route('**/rpc/save_draft_team_work',route=>{
+   const {p_section,p_confirmed}=route.request().postDataJSON()
+   assert.ok(p_section!=='md-quantity'||!p_confirmed)
+   return saveSection(route,p_section,p_confirmed)
+ })
+ await page.route('**/rpc/draft_order_style_number_preview',route=>{
+   assert.deepEqual(route.request().postDataJSON(),{p_draft_id:'fixture'})
+   return route.fulfill({json:{data:{prefix:orderPrefix,numbers:orderPrefix ? orderNumberMap : {}},error:null}})
+ })
+ await page.route('**/rpc/confirm_draft_order_quantity',route=>{
+   assert.deepEqual(route.request().postDataJSON().p_style_numbers,orderNumberMap)
+   return saveSection(route,'md-quantity',true)
  })
  let visualContent=[], resumeVisualStatus
  let visualStatusPause
@@ -298,8 +316,23 @@ try{
  await blackOrder.fill('1000')
  assert.equal(await blackOrder.inputValue(),'1,000')
  assert.equal(await ivoryOrder.inputValue(),'8','Order quantity is separate per color')
- await mdCell.getByRole('button',{name:'MD 수량 확정',exact:true}).click()
+ const orderButton=mdCell.getByRole('button',{name:'MD 수량 확정',exact:true})
+ assert.equal(await orderButton.isDisabled(),true)
+ const orderReady=page.getByRole('checkbox',{name:'발주 조건 준비'})
+ await orderReady.check()
+ await orderButton.click()
+ const orderDialog=page.getByRole('dialog',{name:'PL-TEST 발주 수량 확인'})
+ await orderDialog.getByText('브랜드 관리에서 품번 접두어를 설정해 주세요.').waitFor()
+ assert.equal(await orderDialog.getByRole('button',{name:'발주 저장'}).isDisabled(),true)
+ await orderDialog.getByRole('button',{name:'돌아가기'}).click()
+ orderPrefix='V'
+ await orderButton.click()
+ await orderDialog.getByRole('cell',{name:'V0001',exact:true}).waitFor()
+ await orderDialog.getByRole('cell',{name:'V0002',exact:true}).waitFor()
+ await orderDialog.getByRole('button',{name:'발주 저장'}).click()
  await mdCell.getByRole('button',{name:'MD 수량 수정',exact:true}).waitFor()
+ await mdCell.getByTitle('블랙 품번 V0001',{exact:true}).waitFor()
+ await orderReady.uncheck()
  assert.deepEqual(teamRows.get('md-quantity').payload,{quantities:{black:'1000',ivory:'8'},arrival:'2026-11-23'})
 
  const registration=mdCell.getByRole('combobox',{name:'등록유형',exact:true})
@@ -555,7 +588,7 @@ try{
  const ownerGeometry=await geometry()
  const names=await row.locator('input,textarea').evaluateAll(fields=>fields.map(field=>field.value))
  const colorColumn=row.locator(':scope > td').nth(3)
- assert.equal(await colorColumn.getByRole('img',{name:'이미지 설정 Image',exact:true}).count(),1)
+ assert.equal(await colorColumn.getByRole('img',{name:'영문·한글명 입력 필요',exact:true}).count(),2)
  assert.equal(await colorColumn.locator('img').count(),0,'사진이 등록돼도 COLOR 열에는 썸네일을 표시하지 않는다')
  await page.getByRole('button',{name:'다른 직원으로 전환'}).click()
  assert.equal(await confirmPrice.count(),0)
@@ -1179,7 +1212,7 @@ try{
  await panel.press('Escape')
 
  let colorPayload
- await page.route('**/rpc/save_draft_colors', async route => {
+ await page.route('**/rpc/save_draft_colors_with_names', async route => {
    colorPayload=route.request().postDataJSON()
    const edited=new Set(colorPayload.p_colors.filter(color=>color.imageChoice).map(color=>color.id))
    visualContent=visualContent.filter(row=>row.kind!=='color-photo'||!edited.has(row.entry_key))
@@ -1188,7 +1221,8 @@ try{
  await row.getByRole('button',{name:'컬러 문서',exact:true}).click()
  const colorForm=row.locator('.draft-color-add-form')
  await colorForm.getByRole('button',{name:'컬러 추가',exact:true}).click()
- await colorForm.getByRole('textbox',{name:'컬러 이름 3',exact:true}).fill('흰색')
+ await colorForm.getByRole('textbox',{name:'컬러 3 한글명',exact:true}).fill('흰색')
+ await colorForm.getByRole('textbox',{name:'컬러 3 영문',exact:true}).fill('White')
  await colorForm.getByRole('button',{name:'None',exact:true}).last().click()
  await colorForm.getByRole('button',{name:'저장',exact:true}).click()
  const addedColor=row.getByRole('textbox',{name:'PL-TEST 컬러 3 이름',exact:true})
@@ -1199,16 +1233,16 @@ try{
  assert.equal(await mdCell.getByRole('textbox',{name:'흰색 발주 수량',exact:true}).inputValue(),'')
  assert.equal(await amdCell.getByRole('textbox',{name:'흰색 사방넷 번호',exact:true}).isEnabled(),true)
  assert.equal(await amdCell.getByRole('button',{name:'흰색 AMD 번호 저장',exact:true}).isDisabled(),true)
- assert.equal(await mdCell.getByRole('button',{name:'MD 수량 확정',exact:true}).isEnabled(),true)
+ assert.equal(await mdCell.getByRole('button',{name:'MD 수량 확정',exact:true}).isDisabled(),true)
  assert.equal(await blackOrder.inputValue(),'1,000','A new color only invalidates confirmation for the previous color set')
  await assertOrderAlignment()
  assert.equal(await colorForm.count(),0)
  assert.deepEqual(Object.keys(colorPayload).sort(),['p_colors','p_draft_id','p_expected_updated_at'])
  assert.equal(colorPayload.p_draft_id,'fixture')
  assert.equal(colorPayload.p_expected_updated_at,'2026-10-01')
- assert.deepEqual(colorPayload.p_colors.slice(0,2),[{id:'black',name:'블랙'},{id:'ivory',name:'아이보리'}])
+ assert.deepEqual(colorPayload.p_colors.slice(0,2),[{id:'black',name:'블랙',nameEn:'',nameKo:'블랙'},{id:'ivory',name:'아이보리',nameEn:'',nameKo:'아이보리'}])
  assert.match(colorPayload.p_colors[2].id,/^[0-9a-f-]{36}$/)
- assert.deepEqual({...colorPayload.p_colors[2],id:'new'}, {id:'new',name:'흰색',imageChoice:'None',photoUrl:null})
+ assert.deepEqual({...colorPayload.p_colors[2],id:'new'}, {id:'new',name:'흰색',nameEn:'White',nameKo:'흰색',imageChoice:'None',photoUrl:null})
  const brandCell=row.locator(':scope > td').first()
  const releaseFolder=brandCell.getByRole('combobox',{name:'PL-TEST 출시 폴더'})
  assert.equal(await releaseFolder.inputValue(),'')
