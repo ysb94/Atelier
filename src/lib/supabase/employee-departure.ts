@@ -11,6 +11,7 @@ export type EmployeeDeparturePreview = {
   requestGroups: { owner: WorkRequestOwner; departmentId: string | null; count: number; settingsCount: number }[]
   approvalCount: number
   canHandoverApprovals: boolean
+  handoverCoordinator?: string | null
 }
 
 export async function listEmployeeDepartures() {

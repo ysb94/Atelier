@@ -57,14 +57,17 @@ export function releasePersonalPart(profile: ReleaseProfile | null | undefined, 
 const under = (path: string, root: string) => path === root || path.startsWith(root + '/')
 
 /** 미공개는 null. 기존 상세 링크는 비공개 부모 화면을 열지 않고 공개 경로로 연결한다. */
-export function releaseHref(profile: ReleaseProfile | null | undefined, href: string, approver = false, materialNudgeViewer = false): string | null {
+export function releaseHref(profile: ReleaseProfile | null | undefined, href: string, approver = false, materialNudgeViewer = false, handoverViewer = false): string | null {
   let url: URL
   try { url = new URL(href, 'https://atelier.invalid') } catch { return null /* 잘못된 링크는 화면 진입 경로로 취급하지 않는다. */ }
   if (url.origin !== 'https://atelier.invalid' || !href.startsWith('/') || href.startsWith('//')) return null
   const path = url.pathname.replace(/\/$/, '') || '/'
   const scope = releaseAccess(profile)
   if (url.pathname === LOGISTICS_OPERATIONS_HREF || url.pathname.startsWith(LOGISTICS_OPERATIONS_HREF + '/')) return canManageLogisticsOperations(profile) ? href : null
-  if (path === RELEASE_HOME) return releasePersonalPart(profile, url.searchParams.get('part'), approver) ? href : null
+  if (path === RELEASE_HOME) {
+    const part = url.searchParams.get('part')
+    return releasePersonalPart(profile, part, approver) || (part === 'approvals' && handoverViewer && profile?.status === 'active') ? href : null
+  }
   if (path === '/work') return releasePersonalPart(profile, 'work') ? href : null
   if (scope.unrestricted) return href
   if (path === '/work-requests') return null

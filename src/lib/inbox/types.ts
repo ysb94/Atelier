@@ -3,6 +3,7 @@ export type InboxNotificationKind =
   | 'visual_workflow'
   | 'draft_information'
   | 'personal_work_feedback'
+  | 'departure_handover'
   | 'attendance_start_needed'
   | 'barcode_request'
   | 'barcode_issued'

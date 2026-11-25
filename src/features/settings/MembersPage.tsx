@@ -323,7 +323,7 @@ export function MembersPage({ embedded = false }: { embedded?: boolean } = {}) {
     await Promise.all([
       ['manageable-profiles'], ['employee-departures'], ['orgChartMembers'], ['employee-roster'],
       ['department-approvers'], ['permission-directory'], ['department-workforce-management'], ['personal-work-cards'], ['personal-work-feedback-notices'],
-      ['department-work'], ['work-requests'], ['work-request-settings'], ['my-home-work-notices'],
+      ['department-work'], ['work-requests'], ['work-request-settings'], ['my-home-work-notices'], ['departure-handover'],
     ].map(queryKey => queryClient.invalidateQueries({ queryKey })))
   }
 

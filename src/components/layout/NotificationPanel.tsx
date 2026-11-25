@@ -23,6 +23,7 @@ const KIND_ICON: Record<
   visual_workflow: { icon: ClipboardList, label: 'Visual 업무' },
   draft_information: { icon: ClipboardList, label: '기획안 변경' },
   personal_work_feedback: { icon: ClipboardList, label: '내 업무 피드백' },
+  departure_handover: { icon: ClipboardList, label: '퇴사 인계' },
   attendance_start_needed: { icon: CalendarClock, label: '출근시간 지정' },
   personal_request: { icon: Check, label: '신청' },
   checkout_needed: { icon: Clock, label: '퇴근 확인' },
