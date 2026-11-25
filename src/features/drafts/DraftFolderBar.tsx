@@ -3,6 +3,7 @@ import { Folder, FolderOpen, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { cn, formatNumber } from '@/lib/utils'
+import { UNASSIGNED_DRAFT_FOLDER_LABEL } from './draft-folder-filter'
 import './draft-board.css'
 
 export type DraftFolderItem = {
@@ -88,7 +89,7 @@ export function DraftFolderBar({
           전체 폴더
         </Button>
         <Button type="button" variant="outline" size="sm" className={cn(folderChipClass, folderScopeClass)} aria-pressed={selectedIds.includes('unassigned')} onClick={() => onSelect('unassigned')}>
-          폴더 미지정 <span className="tabular-nums text-danger">{formatNumber(unassignedCount)}</span>
+          {UNASSIGNED_DRAFT_FOLDER_LABEL} <span className="tabular-nums text-danger">{formatNumber(unassignedCount)}</span>
         </Button>
         <Button type="button" variant="outline" size="icon" className="size-7 shrink-0 text-muted-foreground shadow-none" aria-expanded={creating} aria-label="기획안 폴더 추가" onClick={() => (creating ? closeEditor() : openCreate())}>
           <Plus className="size-3.5" aria-hidden="true" />

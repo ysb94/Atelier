@@ -45,7 +45,7 @@ import { cn, formatNumber, emptyList } from '@/lib/utils'
 import { DraftBrandScopeBar, countScheduleRows } from './DraftBrandScopeBar'
 import { DraftFolderBar, DraftFolderHeading } from './DraftFolderBar'
 import { DraftFolderOpeningDate } from './DraftFolderOpeningDate'
-import { matchesDraftFolder } from './draft-folder-filter'
+import { matchesDraftFolder, UNASSIGNED_DRAFT_FOLDER_LABEL } from './draft-folder-filter'
 import { DraftSheetRow, type DraftConfirmFlag } from './DraftSheetRow'
 import { DraftBoardView } from './DraftBoardView'
 import { useDraftSheetLayout } from './draft-sheet-layout'
@@ -91,13 +91,12 @@ function emptyMessage(
   if (brandScope === UNASSIGNED_DRAFT_BRAND) {
     return '브랜드 미정 기획안이 없습니다. 오른쪽 위에서 추가하세요.'
   }
-  if (boardFilter === 'unassigned') {
-    return '출시 폴더가 미정인 기획안이 없습니다.'
+  if (boardFilter === 'unassigned' || folderFilter === 'unassigned') {
+    return '출시 미정인 기획안이 없습니다.'
   }
   if (boardFilter === 'scheduled') {
     return '출시 폴더가 지정된 기획안이 없습니다.'
   }
-  if (folderFilter === 'unassigned') return '폴더가 지정되지 않은 기획안이 없습니다.'
   if (folderFilter !== 'all') return '이 폴더에 담긴 기획안이 없습니다.'
   return '아직 기획안이 없습니다. 오른쪽 위에서 추가하세요.'
 }
@@ -357,7 +356,9 @@ export function CompanyDraftsPage() {
     ? null
     : folderItems.find((folder) => selectedFolderIds.includes(folder.id)) ?? null
   const showingCompleted = activeFolder !== null && activeFolder.id === completedFolderId
-  const unassignedFolderCount = ownerDrafts.filter(draft => !scheduleByDraft.get(draft.id)?.group).length
+  const unassignedFolderCount = ownerDrafts.filter(draft =>
+    matchesDraftFolder(scheduleByDraft.get(draft.id)?.group?.id, 'unassigned'),
+  ).length
 
   const sheetCounts = useMemo(() => {
     let pending = 0
@@ -471,12 +472,12 @@ export function CompanyDraftsPage() {
               label="전체"
               count={sheetCounts.total}
             />
-            <BoardFilterChip
+            {brandScope === 'all' && <BoardFilterChip
               selected={boardFilter === 'unassigned'}
               onSelect={() => setBoardFilter('unassigned')}
-              label="출시 미정"
+              label={UNASSIGNED_DRAFT_FOLDER_LABEL}
               count={sheetCounts.pending}
-            />
+            />}
             <BoardFilterChip
               selected={boardFilter === 'scheduled'}
               onSelect={() => setBoardFilter('scheduled')}

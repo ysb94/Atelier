@@ -25,6 +25,7 @@ import type { DraftInformationTemporaryStore } from '@/lib/supabase/draft-inform
 import type { DraftColorEdit } from '@/lib/supabase/product-drafts'
 import { DRAFT_STATUS_LABEL, type Brand, type DraftColorImageChoice, type DraftColorRow, type DraftSpecs, type ProductDraft, type Season } from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
+import { UNASSIGNED_DRAFT_FOLDER_LABEL } from './draft-folder-filter'
 import { formatReleaseGroupLabel } from './release-schedule-preview'
 import './draft-board.css'
 import { DraftSampleProgress } from './DraftSampleProgress'
@@ -788,7 +789,7 @@ function DraftReleaseFolderSelect({ draft, folders, readOnly, onChange }: {
       title={folders.length ? (selected ? formatReleaseGroupLabel(selected) : '출시 폴더 선택') : '이 브랜드에 선택할 수 있는 출시 폴더가 없습니다.'}
       onChange={(event) => { void selectFolder(event.currentTarget.value) }}
     >
-      <option value="">출시미정</option>
+      <option value="">{UNASSIGNED_DRAFT_FOLDER_LABEL}</option>
       {folders.map((folder) => <option key={folder.id} value={folder.id}>{formatReleaseGroupLabel(folder)}</option>)}
     </Select>
     {error && <p className="draft-sheet-release-error" role="alert">{error}</p>}

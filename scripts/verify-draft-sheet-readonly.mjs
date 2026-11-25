@@ -91,7 +91,7 @@ async function verifyFolderCreatePlacement(page,origin){
  await page.setViewportSize({width:1200,height:800})
  await page.goto(origin+'/?folder-create=1')
  const folders=page.getByRole('navigation',{name:'브랜드별 기획안 폴더'})
- const unassigned=folders.getByRole('button',{name:/^폴더 미지정/})
+ const unassigned=folders.getByRole('button',{name:/^출시 미정/})
  const add=folders.getByRole('button',{name:'기획안 폴더 추가'})
  const firstFolder=folders.getByRole('button',{name:/^테스트 출시 폴더 1 0$/})
  const lastFolder=folders.getByRole('button',{name:/^테스트 출시 폴더 12 0$/})
@@ -1661,7 +1661,7 @@ try{
  const brandCell=row.locator(':scope > td').first()
  const releaseFolder=brandCell.getByRole('combobox',{name:'PL-TEST 출시 폴더'})
  assert.equal(await releaseFolder.inputValue(),'')
- assert.deepEqual(await releaseFolder.locator('option').allTextContents(),['출시미정','11월 출시','12월 출시'])
+ assert.deepEqual(await releaseFolder.locator('option').allTextContents(),['출시 미정','11월 출시','12월 출시'])
  await brandCell.getByText('No. PL-TEST',{exact:true}).waitFor()
  await brandCell.getByText('제안자 : 제안 직원',{exact:true}).waitFor()
  const [pickerBox,photoBox,brandBox,ownerBox]=await Promise.all([
@@ -1692,7 +1692,7 @@ try{
  await releaseFolder.selectOption('group-dec')
  await brandCell.getByRole('alert').getByText(/기획안이 변경되었습니다/).waitFor()
  assert.equal(await releaseFolder.inputValue(),'group')
- await releaseFolder.selectOption('')
+ await releaseFolder.selectOption({label:'출시 미정'})
  await page.waitForFunction(()=>document.querySelector('.draft-sheet-release-folder')?.value===''&&!document.querySelector('.draft-sheet-release-folder')?.disabled)
  assert.deepEqual(folderWrites,[
    {method:'PATCH',id:'eq.fixture',company:'eq.fixture',revision:'eq.2026-11-18T06:45:00+00:00',payload:{season_id:'group'}},
