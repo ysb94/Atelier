@@ -3,12 +3,20 @@ import { fixtureProfile, releaseFixture } from './release-auth'
 import { RELEASE_VISUAL_ID } from '@/lib/company/release-access'
 import { hasPermission } from '@/lib/company/permissions'
 import type { PersonalWorkCard, PersonalWorkEvent } from '@/lib/supabase/personal-work'
+import type { DepartureHandoverDetail } from '@/lib/supabase/departure-handover'
 
 const coworker = {id:'fixture-coworker',name:'부서원',position:'사원'}
 const personalWork = new Map<string, PersonalWorkCard>()
 let departure: { resignedOn: string; processedAt: string; handedOver: boolean } | undefined
 const departureEmployee = 'fixture-departure-employee'
 const departureSuccessor = 'fixture-departure-successor'
+const handoverEmployee = '93c2ed91-f093-4d36-945b-857c2ef3d683'
+const handoverDemo = new URLSearchParams(location.search).has('handover-demo')
+let handoverRead: string | null = null
+let handoverItems: DepartureHandoverDetail['items'] = [
+ {key:'personal/banner',kind:'personal',owner:null,label:'배너 인계',departmentId:null,canApply:true,suggestedId:null},
+ {key:'approvals/visual',kind:'approvals',owner:null,label:'비주얼팀 승인 담당',departmentId:RELEASE_VISUAL_ID,canApply:false,suggestedId:null},
+]
 let workMinute = 0
 
 function workFixture(name:string,args:Record<string,unknown>) {
@@ -82,6 +90,24 @@ export function getSupabase(){
   }}
   return chain
  },rpc(name:string,args?:Record<string,unknown>){
+  const isHandoverDemo = releaseFixture.role==='staff' && handoverDemo
+  const handoverNotice = {id:handoverEmployee,employeeName:'가상 직원',departmentName:'비주얼팀',resignedOn:'2026-11-25',
+    createdAt:'2026-11-25T12:10:00+09:00',version:'demo-alert',readAt:handoverRead,pending:handoverItems.length,review:false}
+  if(name==='list_departure_handover_notices')return Promise.resolve({data:isHandoverDemo?[handoverNotice]:[],error:null})
+  if(isHandoverDemo && args?.p_employee===handoverEmployee){
+    if(name==='get_departure_handover')return Promise.resolve({data:{...handoverNotice,revision:String(handoverItems.length),
+      items:[...handoverItems],candidates:[{id:coworker.id,name:coworker.name,departmentId:RELEASE_VISUAL_ID,departmentName:'비주얼팀'}]},error:null})
+    if(name==='read_departure_handover'){
+      handoverRead ??= new Date().toISOString()
+      return Promise.resolve({data:handoverRead,error:null})
+    }
+    if(name==='save_departure_handover'){
+      const choices=args.p_choices as Record<string,string>
+      const applied=handoverItems.filter(item=>item.canApply && choices[item.key]===coworker.id).length
+      handoverItems=handoverItems.filter(item=>!item.canApply || choices[item.key]!==coworker.id)
+      return Promise.resolve({data:{applied},error:null})
+    }
+  }
   if(['list_personal_work_cards','list_personal_work_members','personal_work_action'].includes(name))return Promise.resolve(workFixture(name,args??{}))
   if(name==='list_work_requests')return Promise.resolve({data:{requests:[],files:[],timers:[],managerAvailable:true},error:null})
   if(name==='list_employee_departures')return Promise.resolve({data:departure?[{employeeId:departureEmployee,resignedOn:departure.resignedOn}]:[],error:null})

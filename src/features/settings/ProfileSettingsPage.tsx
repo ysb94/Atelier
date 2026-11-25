@@ -33,6 +33,8 @@ import { HomeNoticeBoard } from './HomeNoticeBoard'
 import { MyAttendanceStartPanel } from './MyAttendanceStartPanel'
 import { MyAttendancePanel } from './MyAttendancePanel'
 import { MyWorkBoard } from './MyWorkBoard'
+import { DepartureHandoverDrawer } from './DepartureHandoverDrawer'
+import { DEPARTURE_HANDOVER_PARAM } from '@/lib/supabase/departure-handover'
 import { OvertimePanel } from './OvertimePanel'
 import { RequiredInformationButton } from './RequiredInformationButton'
 import './personal-requests.css'
@@ -82,10 +84,14 @@ function ProfileSettingsContent() {
   const active = useWorkspaceTabActivity()
   const [searchParams, setSearchParams] = useSearchParams()
   const part = personalPart(searchParams.get('part'))
+  const handoverId = searchParams.get(DEPARTURE_HANDOVER_PARAM)
+  const handoverLink = handoverId && /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(handoverId) ? handoverId : null
+  const canViewPersonalPart = (name: PersonalPart) => releasePersonalPart(release.profile, name, release.approver)
+    || (name === 'approvals' && release.handoverViewer)
   function selectPart(next: PersonalPart) {
-    if (!releasePersonalPart(release.profile, next, release.approver)) return
+    if (!canViewPersonalPart(next)) return
     const params = new URLSearchParams(searchParams)
-    if(next!==part) for(const key of ['workNotice','request','leaveNotice','lateStatement','lateRole','meeting','round', ...WORK_REQUEST_VIEW_PARAMS])params.delete(key)
+    if(next!==part) for(const key of ['workNotice','request','leaveNotice','lateStatement','lateRole','meeting','round', DEPARTURE_HANDOVER_PARAM, ...WORK_REQUEST_VIEW_PARAMS])params.delete(key)
     if (next === 'my-attendance') params.delete('part')
     else params.set('part', next)
     setSearchParams(params, { replace: true })
@@ -93,7 +99,7 @@ function ProfileSettingsContent() {
   const hasDepartments = departments.length > 0
   const noDepartments = !hasDepartments && !approvals.loading && !approvals.error
   const showDepartmentTab = preview?.facts?.departmentApprover ?? release.approver
-  const permitted = releasePersonalPart(release.profile, part, release.approver) && (part !== 'attendance' || showDepartmentTab)
+  const permitted = canViewPersonalPart(part) && (part !== 'attendance' || showDepartmentTab)
   const visiblePart = !permitted || (part === 'attendance' && !showDepartmentTab) ? 'my-attendance' : part
   const tabs: { id: PersonalPart; label: string }[] = release.scope.unrestricted ? [
     ...overviewTabs, { id: 'profile', label: '내 정보' },
@@ -102,11 +108,13 @@ function ProfileSettingsContent() {
     { id: 'department-notice', label: '부서 공지' }, { id: 'meetings', label: '회의' },
     ...(showDepartmentTab ? [{ id: 'attendance' as const, label: '담당 부서 출근시간' }] : []),
   ] : [...overviewTabs, { id: 'overtime', label: '야근' }, { id: 'meetings', label: '회의' }, { id: 'work', label: '작업 요청' },
-    ...(release.approver ? [{ id: 'approvals' as const, label: '승인할 신청' }, { id: 'attendance' as const, label: '담당 부서 출근시간' }] : [])]
+    ...(canViewPersonalPart('approvals') ? [{ id: 'approvals' as const, label: '승인할 신청' }] : []),
+    ...(release.approver ? [{ id: 'attendance' as const, label: '담당 부서 출근시간' }] : [])]
   useEffect(() => {
-    if (!active || permitted || ((part === 'approvals' || part === 'attendance') && approvals.loading)) return
+    if (!active || permitted || ((part === 'approvals' || part === 'attendance') && approvals.loading)
+      || (part === 'approvals' && release.handoverChecking)) return
     setSearchParams(previous => { const next = new URLSearchParams(previous); next.delete('part'); return next }, { replace: true })
-  }, [active, permitted, part, approvals.loading, setSearchParams])
+  }, [active, permitted, part, approvals.loading, release.handoverChecking, setSearchParams])
 
   return (
     <div>
@@ -120,7 +128,7 @@ function ProfileSettingsContent() {
       </div>
 
       <div className="personal-page-tabs" role="tablist" aria-label="My home 메뉴">
-        {tabs.filter(tab => releasePersonalPart(release.profile, tab.id, release.approver)).map(tab => <Fragment key={tab.id}>
+        {tabs.filter(tab => canViewPersonalPart(tab.id)).map(tab => <Fragment key={tab.id}>
           {release.scope.unrestricted && tab.id === 'approvals' && <span className="personal-page-tab-split" aria-hidden="true" />}
           <button type="button" role="tab" id={`personal-${tab.id}-tab`} className={tab.id === 'attendance' ? 'personal-page-tab-end' : undefined} aria-selected={visiblePart === tab.id} aria-controls={`personal-${tab.id}-panel`} onClick={() => selectPart(tab.id)}>{tab.label}{tab.id !== 'my-work' && <MyHomeNotificationBadge tab={tab.id} />}</button>
         </Fragment>)}
@@ -151,10 +159,14 @@ function ProfileSettingsContent() {
           : noDepartments && <p className="personal-page-notice">지정된 담당 부서가 없어 설정할 직원이 없습니다. 담당 지정은 운영지원팀에 요청해 주세요.</p>}
       </div>}
       {visiblePart === 'approvals' && <div id="personal-approvals-panel" role="tabpanel" aria-labelledby="personal-approvals-tab">
-        {noDepartments && <p className="personal-page-notice">지정된 승인 담당이 아니면 목록이 비어 있을 수 있습니다.</p>}
-        <LateStatementApprovalList />
-        <LeaveApprovalPanel />
-        <HolidayWorkPanel key={profile?.id} scope="review" />
+        {releasePersonalPart(release.profile, 'approvals', release.approver) && <>
+          {noDepartments && !release.handoverViewer && <p className="personal-page-notice">지정된 승인 담당이 아니면 목록이 비어 있을 수 있습니다.</p>}
+          <LateStatementApprovalList />
+          <LeaveApprovalPanel />
+          <HolidayWorkPanel key={profile?.id} scope="review" />
+        </>}
+        {active && feedbackActorId && handoverLink && <DepartureHandoverDrawer key={`${feedbackActorId}:${handoverLink}`} actor={feedbackActorId} employee={handoverLink}
+          onClose={() => setSearchParams(previous => { const next = new URLSearchParams(previous); next.delete(DEPARTURE_HANDOVER_PARAM); return next }, { replace: true })} />}
       </div>}
       <LateStatementNoticeDialog />
       <LateArrivalAppealNoticeDialog />

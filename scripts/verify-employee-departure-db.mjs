@@ -52,6 +52,7 @@ try {
     create function app.assignment_manager() returns boolean language sql stable security definer as $$
       select app.permission_allowed('permissions.manage') or exists(select 1 from public.profiles where id=auth.uid() and status='active' and is_admin) $$;
     create function app.can_edit_org_assignment() returns boolean language sql stable as $$ select app.permission_allowed('approvers.manage') $$;
+    create function app.work_manage_allowed(text) returns boolean language sql stable as $$ select app.permission_allowed('work.manage') $$;
     create function app.is_approved() returns boolean language sql stable as $$ select app.permission_company_id() is not null $$;
     create function app.is_company_manager() returns boolean language sql stable as $$ select false $$;
     create function public.set_updated_at() returns trigger language plpgsql as $$ begin new.updated_at:=now();return new;end $$;
@@ -89,7 +90,8 @@ try {
     for (const code of codes) await db.query("insert into public.permission_grants values($1,$2,$3,'company',$1)", [ids.company, ids[person], code])
   }
   for (const migration of ['20260930160000_company_chat.sql','20261123090000_personal_work_cards.sql',
-    '20261124144812_personal_work_feedback_notifications.sql','20261125023152_employee_departure.sql']) {
+    '20261125023152_employee_departure.sql',
+    '20261125032510_employee_departure_handover_inbox.sql']) {
     await db.exec(await readFile(new URL(`../supabase/migrations/${migration}`, import.meta.url), 'utf8'))
   }
   function row(...names) { return names.map(name => ids[name]) }
@@ -200,7 +202,63 @@ try {
     [ids.ownWork,ids.employee,ids.successor,ids.successor,'todo','paused'])
   await db.query("select public.personal_work_action($1,$2,'start',$3)",[ids.ownWork,randomUUID(),card.revision])
   await db.query("select public.personal_work_action($1,$2,'complete',$3)",[ids.ownWork,randomUUID(),card.revision+1])
-  console.log('직원 퇴사 DB 검증 통과 · 권한과 세션 회수, 인계, 이력 보존, 롤백, 중복 방지')
+
+  // This departure belongs to the configured primary approver. Its substitute
+  // gets the case, handles one card immediately and recommends the new approver.
+  const workFirst = randomUUID(), workSecond = randomUUID()
+  await asUser(ids.other,randomUUID())
+  for (const id of [workFirst,workSecond]) await db.query("select public.personal_work_action($1,$2,'create',p_title=>'인계 대상 카드')",[id,randomUUID()])
+  await db.exec('reset role')
+  await db.query('update public.department_request_approvers set approver_id=$1,substitute_id=$2,updated_at=now()',row('other','staff'))
+  await asUser(ids.admin)
+  await confirm((await preview(ids.other)).version,randomUUID(),ids.other,null,null)
+  const listInbox = () => scalar('select public.list_departure_handover_notices()')
+  const readPerson = version => scalar('select public.read_departure_handover($1,$2)',[ids.other,version])
+  const personDetail = () => scalar('select public.get_departure_handover($1)',[ids.other])
+  const savePerson = (revision,choices,command=randomUUID()) => scalar('select public.save_departure_handover($1,$2,$3::jsonb,$4)',
+    [ids.other,revision,JSON.stringify(choices),command])
+
+  await asUser(ids.admin,ids.operatorLogin)
+  assert.deepEqual(await listInbox(),[])
+  await assert.rejects(personDetail(),{code:'42501'})
+  await asUser(ids.admin)
+  await assert.rejects(personDetail(),{code:'42501'})
+  assert.equal(await scalar('select count(*)::int from public.departure_handover_signals'),0)
+  await assert.rejects(scalar('select count(*)::int from app.departure_handover_cases'),{code:'42501'})
+  await asUser(ids.staff,ids.staffLogin)
+  assert.equal(await scalar('select recipient_id from public.departure_handover_signals'),ids.staff)
+  const [inbox] = await listInbox()
+  assert.deepEqual([inbox.id,inbox.pending,inbox.readAt,inbox.review],[ids.other,3,null,false])
+  assert.equal(await readPerson('old-version'),null)
+  const firstDetail = await personDetail()
+  const readAt = await readPerson(firstDetail.version)
+  assert.equal(Math.floor(Date.parse((await listInbox())[0].readAt)/1000),Math.floor(Date.parse(readAt)/1000))
+  const approvalKey = `approvals/${ids.department}`
+  const selectedKey = `personal/${workFirst}`
+  const partial = {[selectedKey]:ids.successor,[approvalKey]:ids.successor}
+  await assert.rejects(savePerson('stale',partial),{code:'40001'})
+  await assert.rejects(savePerson(firstDetail.revision,{[selectedKey]:ids.foreign}),{code:'22023'})
+  const partialCommand = randomUUID()
+  assert.deepEqual(await savePerson(firstDetail.revision,partial,partialCommand),{applied:1,recommended:1})
+  assert.deepEqual(await savePerson(firstDetail.revision,partial,partialCommand),{duplicate:true})
+  assert.equal((await listInbox())[0].pending,2)
+  assert.deepEqual((await personDetail()).items.map(i=>i.key).sort(),[approvalKey,`personal/${workSecond}`].sort())
+
+  await asUser(ids.admin)
+  assert.deepEqual((await listInbox()).map(i=>[i.id,i.review,i.pending]),[[ids.other,true,1]])
+  const recommendation = await personDetail()
+  assert.equal(recommendation.items[0].suggestedId,ids.successor)
+  assert.deepEqual(await savePerson(recommendation.revision,{[approvalKey]:ids.successor}),{applied:1,recommended:0})
+  await asUser(ids.staff,ids.staffLogin)
+  const finalItem = await personDetail()
+  assert.equal((await listInbox())[0].pending,1)
+  await savePerson(finalItem.revision,{[finalItem.items[0].key]:ids.successor})
+  assert.deepEqual((await listInbox()).map(i=>[i.id,i.pending]),[[ids.other,0]])
+  await db.exec('reset role')
+  assert.equal(await scalar('select approver_id from public.department_request_approvers'),ids.successor)
+  assert.equal(await scalar('select app.departure_handover_coordinator($1,$2,$3)',[ids.company,ids.department,ids.other]),ids.successor)
+  assert.equal(await scalar('select app.departure_handover_coordinator($1,null,$2)',[ids.company,ids.other]),null)
+  console.log('직원 퇴사 DB 검증 통과 · 세션·권한 회수, 승인자·대체 승인자, 알림 권한, 부분 인계와 후임 확인, 롤백·재시도')
 } catch (error) {
   console.error(error.message,error.code ?? '',error.where ?? '')
   process.exitCode=1

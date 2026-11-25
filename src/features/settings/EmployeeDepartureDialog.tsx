@@ -84,6 +84,10 @@ export function EmployeeDepartureDialog({ employee, staff, onClose, onCompleted 
           <div><dt className="text-muted-foreground">작업 요청 배정·담당 설정</dt><dd className="font-medium">{requestCount}건</dd></div>
           <div><dt className="text-muted-foreground">부서 승인 담당</dt><dd className="font-medium">{approvalCount}건</dd></div>
         </dl>
+        {plan.handoverCoordinator !== undefined && workCount + requestCount + approvalCount > 0 &&
+          <p className="text-sm text-muted-foreground">{plan.handoverCoordinator
+            ? <>인계 알림 수신자 <span className="font-medium text-foreground">{plan.handoverCoordinator}</span></>
+            : '인계 담당 미지정'}</p>}
         {workCount > 0 && <label className="grid gap-1 text-sm font-medium">업무 후임자
           <Select value={work} onChange={event => setWork(event.currentTarget.value)} disabled={confirm.isPending}>
             <option value="">후임 미정 · 나중에 인계</option>{options(activeStaff)}

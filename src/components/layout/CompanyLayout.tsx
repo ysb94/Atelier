@@ -347,9 +347,10 @@ function CompanySidebar() {
 function CompanyWorkspaceMain() {
   const location = useLocation()
   const { tabs, activeId, openTab, closeTab } = useWorkspaceTabs()
-  const { href, approvals, scope } = useReleaseAccess()
+  const { href, approvals, scope, handoverChecking } = useReleaseAccess()
   const visibleTabs = useMemo(() => tabs.filter(tab => href(tab.pathname + tab.search) === tab.pathname + tab.search
-    || (!scope.unrestricted && tab.pathname === RELEASE_HOME && ['approvals', 'attendance'].includes(new URLSearchParams(tab.search).get('part') ?? '') && (approvals.loading || Boolean(approvals.error)))), [tabs, href, scope.unrestricted, approvals.loading, approvals.error])
+    || (!scope.unrestricted && tab.pathname === RELEASE_HOME && ['approvals', 'attendance'].includes(new URLSearchParams(tab.search).get('part') ?? '') && (approvals.loading || Boolean(approvals.error)))
+    || (handoverChecking && tab.pathname === RELEASE_HOME && new URLSearchParams(tab.search).get('part') === 'approvals')), [tabs, href, scope.unrestricted, approvals.loading, approvals.error, handoverChecking])
   const pageLayout = pageLayoutFor(location.pathname)
 
   return (

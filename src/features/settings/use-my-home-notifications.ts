@@ -24,6 +24,8 @@ import { useDiagnosticGate } from '@/lib/diagnostics/use-diagnostic-gate'
 import { useAttendanceStartReminders } from './use-attendance-start-reminders'
 import { attendanceStartReminderItems } from './attendance-start-reminders'
 import { useVisualWorkflowNotices, visualWorkflowNoticeItem } from '@/features/work-requests/use-visual-workflow-notices'
+import { useDepartureHandoverNotices } from './use-departure-handover-notices'
+import { departureHandoverNotification } from '@/lib/supabase/departure-handover'
 
 type WorkNotice = { event_key: string; entity_id: string; created_at: string; event_type: string; tab: 'approvals'|'overtime'|'my-attendance'|'holiday-work'|'operations-leave'; title?: string; action_key?: string; action_label?: string | null; kind: RequestKind; employee_name: string; from_date: string; to_date: string; start_time: string; end_time: string; note: string; decision_note: string|null; action_needed: boolean; status: string; current?: boolean; read_at: string|null }
 export type HolidayConfirmationRequest = Pick<WorkNotice, 'event_key' | 'entity_id' | 'created_at' | 'from_date'>
@@ -76,6 +78,7 @@ export function useMyHomeNotifications({ coordinator = false, background = false
   const cache=useQueryClient()
   const attendanceReminders=useAttendanceStartReminders(coordinator,background)
   const visual = useVisualWorkflowNotices(coordinator, background)
+  const departureHandover = useDepartureHandoverNotices(coordinator, background)
   // Old servers have no holiday signal table. Keep their existing subscriptions
   // intact; the first holiday event is discovered by the shared 30-second poll.
   const holidaySignals = Boolean(work.data?.some(item=>item.event_type.startsWith('holiday-')))
@@ -145,9 +148,9 @@ export function useMyHomeNotifications({ coordinator = false, background = false
         action: item.action_needed ? { key: item.action_key ?? `request:${item.entity_id}`, label: item.action_label ?? (holiday ? item.tab==='approvals'?'실제 시간 확인 필요':item.tab==='holiday-work'?'보상 처리 필요':'실제 시간 보완 필요' : item.event_type==='checkout'?'실제 퇴근시간 등록 필요':'승인 처리 필요') } : null,
       }
     })
-    return [...meetingItems,...leaveItems,...lateItems,...lateAppealNoticeItems(lateAppeals.data?.rows ?? []),...workItems,...attendanceStartReminderItems(attendanceReminders.rows),...(visual.rows?.map(visualWorkflowNoticeItem) ?? [])].sort((a,b) => b.createdAt.localeCompare(a.createdAt))
-  }, [enabled, meetings.items, meetings.series, leave.data, late.data, lateAppeals.data,workRows, selfService,attendanceReminders.rows,visual.rows])
-  return { items, ready: enabled && meetings.ready && (!selfService || (leave.isSuccess && late.isSuccess)) && (!workEnabled || work.isSuccess) && (!appealsEnabled || lateAppeals.isSuccess), work: workRows, error: enabled ? meetings.error ?? attendanceReminders.error ?? (selfService ? leave.error ?? late.error : null) ?? (workEnabled ? work.error : null) ?? (appealsEnabled ? lateAppeals.error : null) : null }
+    return [...meetingItems,...leaveItems,...lateItems,...lateAppealNoticeItems(lateAppeals.data?.rows ?? []),...workItems,...attendanceStartReminderItems(attendanceReminders.rows),...(visual.rows?.map(visualWorkflowNoticeItem) ?? []),...(departureHandover.rows?.map(departureHandoverNotification) ?? [])].sort((a,b) => b.createdAt.localeCompare(a.createdAt))
+  }, [enabled, meetings.items, meetings.series, leave.data, late.data, lateAppeals.data,workRows, selfService,attendanceReminders.rows,visual.rows,departureHandover.rows])
+  return { items, ready: enabled && meetings.ready && !departureHandover.checking && (!selfService || (leave.isSuccess && late.isSuccess)) && (!workEnabled || work.isSuccess) && (!appealsEnabled || lateAppeals.isSuccess), work: workRows, error: enabled ? meetings.error ?? attendanceReminders.error ?? (selfService ? leave.error ?? late.error : null) ?? (workEnabled ? work.error : null) ?? (appealsEnabled ? lateAppeals.error : null) ?? departureHandover.error : null }
 }
 
 export function useReadMyHomeNotification(source: 'meeting'|'request'|'checkout', entityId: string|undefined, version: string|undefined, displayed: boolean) {

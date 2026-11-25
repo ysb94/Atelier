@@ -10,6 +10,7 @@ import type { InboxNotification } from '@/lib/inbox/types'
 import { readPollInterval, sharedReadPolicy } from '@/lib/query/shared-read-policy'
 import { getMaterialNudgeInbox, materialNudgeKey, materialNudgeUnavailable } from '@/lib/supabase/material-nudges'
 import { emptyList } from '@/lib/utils'
+import { useDepartureHandoverNotices } from '@/features/settings/use-departure-handover-notices'
 
 function useReleaseState() {
   const { profile: real, session } = useAuth()
@@ -20,6 +21,8 @@ function useReleaseState() {
   const approvals = useDepartmentApprovers()
   const departments = useMemo(() => assignedDepartmentIds(approvals.settings, profile?.id), [approvals.settings, profile?.id])
   const approver = !approvals.loading && !approvals.error && departments.length > 0
+  const handover = useDepartureHandoverNotices()
+  const handoverViewer = Boolean(!preview?.selected && handover.rows?.length)
   const scope = useMemo(() => releaseAccess(profile), [profile])
   const materialNudgeAccountId = !preview?.selected && real?.status === 'active' && real.companyId && session?.user.id === real.id ? real.id : undefined
   const { data, isPending, error, refetch: refreshMaterialNudges } = useQuery({
@@ -35,9 +38,10 @@ function useReleaseState() {
   const materialNudgeSupported = !materialNudgeUnavailable(error)
   const materialNudgeError = materialNudgeAccountId && materialNudgeSupported ? error : null
   return useMemo(() => ({ profile, scope, approvals: { settings: approvals.settings, loading: approvals.loading, error: approvals.error, refresh: approvals.refresh }, departments, approver,
-    href: (href: string) => releaseHref(profile, href, approver, materialNudgeViewer),
+    href: (href: string) => releaseHref(profile, href, approver, materialNudgeViewer, handoverViewer),
+    handoverViewer, handoverChecking: handover.checking,
     materialNudgeViewer, materialNudgeAccountId, materialNudgeNotifications, materialNudgeChecking, materialNudgeError, materialNudgeSupported, refreshMaterialNudges,
-  }), [profile, scope, approvals.settings, approvals.loading, approvals.error, approvals.refresh, departments, approver,
+  }), [profile, scope, approvals.settings, approvals.loading, approvals.error, approvals.refresh, departments, approver, handoverViewer, handover.checking,
     materialNudgeViewer, materialNudgeAccountId, materialNudgeNotifications, materialNudgeChecking, materialNudgeError, materialNudgeSupported, refreshMaterialNudges])
 }
 const ReleaseContext = createContext<ReturnType<typeof useReleaseState> | null>(null)
