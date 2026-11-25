@@ -16,6 +16,8 @@ export type AssignedChinaOrder = {
   round: number
   sampleStage?: 'numbered' | 'final'
   fileName: string | null
+  packId?: string | null
+  managerChecked?: boolean
   closed: boolean
   shippedAt?: string | null
   returnedAt: string | null

@@ -6,11 +6,13 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Select } from '@/components/ui/input'
 import { DraftPhoto } from '@/features/drafts/DraftSheetRow'
+import { SampleWorkOrderPackDetails } from '@/features/drafts/SampleWorkOrderPackDetails'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { sampleElapsedDays, sampleTripSpanDays } from '@/lib/drafts/sample-work-order'
 import { listChinaWorkAssignees } from '@/lib/supabase/china-work-assignees'
 import { applyChinaWorkOrder } from '@/lib/supabase/china-work-orders'
+import { downloadSamplePack, receiveSamplePack, samplePackId } from '@/lib/supabase/sample-work-order-packs'
 import { listOrgChartMembers, type OrgChartMember } from '@/lib/supabase/profiles'
 import { cn, emptyList, formatNumber } from '@/lib/utils'
 import type { WorkOrderGroup, WorkOrderRow } from './work-order-types'
@@ -134,21 +136,26 @@ export function ChinaWorkOrderBoard({ groups, brandById, emptyMessage }: { group
 
   async function receive(row: WorkOrderRow) {
     if (!row.url || roundClosed(row)) return
-    downloadWorkOrder(row.url, row.fileName)
-    if (row.fileCheckedAt) return
+    const pack = samplePackId(row.url)
     setReceivingId(row.rowId)
     setReceiveError('')
     const trace = startWorkflow('app', 'china_work_check')
     try {
       trace.step('validate_input')
-      await trace.run('save', () => applyChinaWorkOrder(row.draft, row.rowId, row.kind, 'check'))
+      if (pack) await trace.run('get_file', () => downloadSamplePack(pack, `${row.draft.draftNo} ${row.stageLabel}`))
+      else downloadWorkOrder(row.url, row.fileName)
+      if (row.fileCheckedAt) { trace.done({ writeOutcome: 'none' }); return }
+      await trace.run('save', async () => {
+        if (pack) await receiveSamplePack(pack, row.draft.updatedAt)
+        else await applyChinaWorkOrder(row.draft, row.rowId, row.kind, 'check')
+      })
       trace.step('refresh')
       await queryClient.invalidateQueries({ queryKey: ['product-drafts'] })
       trace.done({ writeOutcome: 'committed' })
     } catch (cause) {
       trace.fail(cause)
       console.warn('[china-work] 작업 지시서 받기 실패', { code: 'check' })
-      setReceiveError('파일을 받았지만 받기 기록을 저장하지 못했습니다.')
+      setReceiveError(cause instanceof Error ? cause.message : '전체 받기를 완료하지 못했습니다. 다시 시도해 주세요.')
     } finally {
       setReceivingId(null)
     }
@@ -195,6 +202,7 @@ export function ChinaWorkOrderBoard({ groups, brandById, emptyMessage }: { group
               const done = roundClosed(row)
               const canReceive = !done && Boolean(row.url)
               const receivedFile = Boolean(row.fileCheckedAt)
+              const pack = samplePackId(row.url)
               const days = done ? sampleTripSpanDays(row.shippedAt, row.returnedAt || row.receivedAt) : sampleElapsedDays(row.shippedAt)
               const sent = fileTime(row.returnedAt)
               const received = fileTime(row.receivedAt)
@@ -231,10 +239,11 @@ export function ChinaWorkOrderBoard({ groups, brandById, emptyMessage }: { group
                     <FileText className="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
                     <div className="min-w-0 flex-1 basis-40"><p className="break-words" title={row.fileName}>{row.url ? row.fileName : '작업 지시서 미등록'}</p><p className="mt-1 text-xs text-muted-foreground">{received ? `${received} 본사 수령 완료` : sent || row.shipped ? [sent, row.passed ? '샘플 발송' : '발송 · 본사로 이동 중'].filter(Boolean).join(' ') : registered ? `${registered} 지시서 발송` : '발송일 미등록'}</p></div>
                     <div className="flex shrink-0 gap-2">
-                      <Button type="button" variant={receivedFile ? 'secondary' : 'outline'} size="sm" disabled={!canReceive || receivingId === row.rowId} onClick={() => void receive(row)} className={cn('disabled:opacity-100', receivedFile || done ? 'text-muted-foreground' : 'text-primary')}><Download className="size-3.5" aria-hidden="true" />받기</Button>
-                      <ChinaWorkOrderPreviewButton url={row.url} name={row.fileName} />
+                      <Button type="button" variant={receivedFile ? 'secondary' : 'outline'} size="sm" disabled={!canReceive || Boolean(receivingId)} onClick={() => void receive(row)} className={cn('disabled:opacity-100', receivedFile || done ? 'text-muted-foreground' : 'text-primary')}><Download className="size-3.5" aria-hidden="true" />{receivingId === row.rowId ? '받는 중…' : pack ? '전체 받기' : '받기'}</Button>
+                      {!pack && <ChinaWorkOrderPreviewButton url={row.url} name={row.fileName} />}
                     </div>
                   </div>
+                  {pack && <SampleWorkOrderPackDetails id={pack} label={row.fileName} showBulk={done} />}
                   {receiveError && row.rowId === current?.rowId ? <p className="mt-3 text-xs text-danger">{receiveError}</p> : null}
                   {note && <p className="mt-3 whitespace-pre-wrap rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">진행 메모: {note}</p>}
                 </td>
@@ -243,7 +252,7 @@ export function ChinaWorkOrderBoard({ groups, brandById, emptyMessage }: { group
                     onClick={() => {
                       const missing = []
                       if (!assigneeId) missing.push('담당자를 지정해 주세요.')
-                      if (!current?.fileCheckedAt) missing.push('작업 지시서 파일에서 받기를 눌러 주세요.')
+                      if (!current?.fileCheckedAt || rows.some(item => !roundClosed(item) && samplePackId(item.url) && !item.fileCheckedAt)) missing.push('진행 중인 작업지시서에서 전체 받기를 완료해 주세요.')
                       if (missing.length) {
                         setAssignmentWarning(missing)
                         return

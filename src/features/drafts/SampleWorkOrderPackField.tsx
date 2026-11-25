@@ -1,0 +1,164 @@
+import { useState, useRef, type ReactNode } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/input'
+import { useAuth } from '@/lib/supabase/auth'
+import {
+  buildSamplePackZip, getSamplePack, openSamplePack, SAMPLE_PACK_ACCEPT, samplePackId, samplePackPrefix, samplePackReference,
+  samplePackServerMissing, saveSamplePack, uploadSamplePackFile, validateSelectedSampleFiles,
+  type SamplePack, type SamplePackFile,
+} from '@/lib/supabase/sample-work-order-packs'
+import { SampleWorkOrderPackDetails } from './SampleWorkOrderPackDetails'
+
+type Props = {
+  label: string; draftId: string | null; slot: string; side?: ReactNode; readOnly?: boolean; saving?: boolean
+  savedFile?: { url: string; name: string } | null
+  onRegister?: (file: { url: string; name: string }) => Promise<void>
+  onCreateDraft?: () => Promise<string>
+  onTemporarySaved?: (draft: string) => void
+  validateRegistration?: () => void
+}
+
+export function SampleWorkOrderPackField({ label, draftId, slot, side, readOnly, saving, savedFile,
+  onRegister, onCreateDraft, onTemporarySaved, validateRegistration }: Props) {
+  const cache = useQueryClient()
+  const { profile, session } = useAuth()
+  const actor = profile?.id === session?.user.id ? profile?.id : undefined
+  const busyRef = useRef(false)
+  const persistedDraft = useRef(draftId)
+  const uploadedFiles = useRef(new Map<File, SamplePackFile>())
+  const [createdDraftId, setCreatedDraftId] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [status, setStatus] = useState('')
+  const [added, setAdded] = useState<File[]>([])
+  const [removed, setRemoved] = useState<string[]>([])
+  const [editedNotes, setEditedNotes] = useState<string>()
+  const [editing, setEditing] = useState(false)
+  const previousId = samplePackId(savedFile?.url)
+  const editingDraftId = draftId ?? createdDraftId
+  const temporaryKey = [...samplePackPrefix, actor, 'draft', editingDraftId, slot]
+  const draftPack = useQuery({
+    queryKey: temporaryKey, queryFn: () => getSamplePack(null, editingDraftId, slot),
+    enabled: Boolean(actor) && !readOnly && (!savedFile || editing), retry: false,
+  })
+  const previous = useQuery({
+    queryKey: [...samplePackPrefix, actor, previousId], queryFn: () => getSamplePack(previousId),
+    enabled: Boolean(actor && previousId) && editing, retry: false,
+  })
+  const baseline = draftPack.data ?? previous.data
+  const files = (baseline?.files ?? []).filter(file => !removed.includes(file.path))
+  const notes = editedNotes ?? baseline?.notes ?? ''
+  const count = files.length + added.length
+  const editable = Boolean(actor) && !readOnly && Boolean(onRegister)
+  const showEditor = editable && (!savedFile || editing)
+  const waiting = samplePackServerMissing(draftPack.error)
+  const loading = draftPack.isFetching || (Boolean(previousId) && previous.isFetching)
+  const hasEdits = Boolean(added.length || removed.length || editedNotes !== undefined)
+
+  function select(list: FileList | null) {
+    if (!list?.length || busy || saving || loading || waiting) return
+    const next = [...added, ...Array.from(list)]
+    try {
+      validateSelectedSampleFiles(files, next)
+      setAdded(next)
+      setStatus('')
+      setError('')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '파일을 선택하지 못했습니다.')
+    }
+  }
+
+  async function save(register: boolean) {
+    if (!editable || busyRef.current || saving || loading || waiting) return
+    busyRef.current = true
+    setBusy(true)
+    setError('')
+    setStatus('')
+    try {
+      if (register) validateRegistration?.()
+      const id = draftId ?? persistedDraft.current ?? await onCreateDraft?.()
+      if (!id) throw new Error('기획안을 먼저 저장해 주세요.')
+      persistedDraft.current = id
+      setCreatedDraftId(id)
+      let pack: SamplePack = draftPack.data ?? await openSamplePack(id, slot)
+      if (hasEdits || (!draftPack.data && previous.data)) {
+        const uploaded: SamplePackFile[] = []
+        for (const file of added) {
+          let item = uploadedFiles.current.get(file)
+          if (!item?.path.startsWith(`${pack.id}/`)) {
+            item = await uploadSamplePackFile(pack.id, file)
+            uploadedFiles.current.set(file, item)
+          }
+          uploaded.push(item)
+        }
+        pack = await saveSamplePack(pack, [...files, ...uploaded], notes)
+      }
+      cache.setQueryData([...samplePackPrefix, actor, 'draft', id, slot], pack)
+      uploadedFiles.current.clear()
+      setAdded([]); setRemoved([]); setEditedNotes(undefined)
+      if (register) {
+        await buildSamplePackZip(pack)
+        await onRegister?.(samplePackReference(pack, slot.startsWith('edit:') ? `${label} 수정본` : label))
+        cache.removeQueries({ queryKey: [...samplePackPrefix, actor, pack.id], exact: true })
+        cache.setQueryData([...samplePackPrefix, actor, 'draft', id, slot], null)
+        setEditing(false)
+      } else {
+        setStatus(`임시저장 · 첨부 ${pack.files.length}개`)
+        onTemporarySaved?.(id)
+      }
+    } catch (cause) {
+      setError(samplePackServerMissing(cause) ? '작업지시서 묶음 서버 연결 대기' : cause instanceof Error ? cause.message : '작업지시서를 저장하지 못했습니다.')
+    } finally {
+      busyRef.current = false
+      setBusy(false)
+    }
+  }
+
+  return <div className="mt-5 grid gap-3" aria-label={`${label} 작업지시서 첨부`}
+    onDragOver={event => { if (showEditor && event.dataTransfer.types.includes('Files')) event.preventDefault() }}
+    onDrop={event => { if (showEditor) { event.preventDefault(); select(event.dataTransfer.files) } }}>
+    {side}
+    {savedFile && <>
+      {previousId ? <SampleWorkOrderPackDetails id={previousId} showBulk label={savedFile.name} />
+        : <a href={savedFile.url} download={savedFile.name} className="text-sm underline">{savedFile.name}</a>}
+      {editable && !editing && <Button type="button" variant="outline" size="sm" className="justify-self-start"
+        onClick={() => setEditing(true)}>수정본 작성</Button>}
+    </>}
+    {showEditor && <>
+      <label className="grid gap-1 text-sm font-medium">{label} 작업지시서 파일
+        <input type="file" multiple accept={SAMPLE_PACK_ACCEPT} disabled={busy || saving || loading || waiting}
+          onChange={event => { select(event.currentTarget.files); event.currentTarget.value = '' }} />
+      </label>
+      <p className="text-xs text-muted-foreground">최대 10개 · 파일당 30MB · 전체 100MB</p>
+      <ul className="space-y-1 text-sm">
+        {files.map(file => <li key={file.path} className="flex items-center justify-between gap-2">
+          <span className="break-all">{file.name}</span>
+          <Button type="button" variant="ghost" size="sm" disabled={busy || saving} aria-label={`${file.name} 빼기`}
+            onClick={() => setRemoved(current => [...current, file.path])}>빼기</Button>
+        </li>)}
+        {added.map((file, index) => <li key={index} className="flex items-center justify-between gap-2">
+          <span className="break-all">{file.name}</span>
+          <Button type="button" variant="ghost" size="sm" disabled={busy || saving} aria-label={`${file.name} 선택 취소`}
+            onClick={() => setAdded(current => current.filter((_, i) => i !== index))}>빼기</Button>
+        </li>)}
+      </ul>
+      <label className="grid gap-1 text-sm font-medium">꼭 확인할 사항
+        <Textarea value={notes} maxLength={1000} disabled={busy || saving || waiting} onChange={event => setEditedNotes(event.currentTarget.value)} />
+      </label>
+      {waiting && <p role="status" className="text-sm text-warning">작업지시서 묶음 서버 연결 대기</p>}
+      {draftPack.isError && !waiting && <p role="alert" className="text-sm text-danger">임시저장을 불러오지 못했습니다. <Button type="button" size="sm" variant="ghost" onClick={() => void draftPack.refetch()}>다시 조회</Button></p>}
+      {previous.isError && <p role="alert" className="text-sm text-danger">기존 파일을 확인하지 못했습니다. <Button type="button" size="sm" variant="ghost" onClick={() => void previous.refetch()}>다시 조회</Button></p>}
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      {(status || draftPack.data) && <p role="status" className="text-sm text-muted-foreground">{status || `임시저장 · 첨부 ${draftPack.data?.files.length ?? 0}개`}</p>}
+      <div className="flex flex-wrap justify-end gap-2">
+        {editing && <Button type="button" variant="ghost" disabled={busy || saving} onClick={() => {
+          setEditing(false); setAdded([]); setRemoved([]); setEditedNotes(undefined); setStatus(''); setError('')
+        }}>닫기</Button>}
+        <Button type="button" variant="outline" disabled={busy || saving || loading || waiting || !hasEdits || draftPack.isError || previous.isError} onClick={() => void save(false)}>임시저장</Button>
+        <Button type="button" disabled={busy || saving || loading || waiting || !count || (editing && !hasEdits && !draftPack.data) || draftPack.isError || previous.isError}
+          onClick={() => void save(true)}>{busy ? '처리 중…' : `첨부 ${count}개 · 등록`}</Button>
+      </div>
+    </>}
+  </div>
+}

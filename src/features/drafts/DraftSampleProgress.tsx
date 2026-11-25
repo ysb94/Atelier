@@ -4,6 +4,7 @@ import type { DraftSampleWorkOrder } from '@/lib/types'
 import { sampleElapsedDays, sampleHistoryDay, sampleTripSpanDays } from '@/lib/drafts/sample-work-order'
 import { CHINA_EXTERNAL_DESTINATION, canReceiveSample, sampleCountry, sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
 import { colorSampleLabel, sampleOrderLabel } from '@/lib/drafts/sample-registration'
+import { downloadSamplePack, samplePackId } from '@/lib/supabase/sample-work-order-packs'
 import './draft-sample-progress.css'
 
 type WorkOrderFile = { url: string; name: string }
@@ -39,6 +40,16 @@ export function DraftSampleProgress({ orders, kind = 'sample', joined = false, o
     } finally { pending.current = false; setBusy(false) }
   }
 
+  async function downloadPack(id: string, label: string) {
+    if (pending.current) return
+    pending.current = true
+    setBusy(true)
+    setError('')
+    try { await downloadSamplePack(id, label) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : '작업지시서를 받지 못했습니다.') }
+    finally { pending.current = false; setBusy(false) }
+  }
+
   return <div className={`draft-sample-progress${joined ? ' is-joined' : ''}`} aria-label={kind === 'color' ? '컬러샘플 등록·수령 이력' : '샘플 등록·수령 이력'}>
     {list.map(order => {
       const country = sampleCountry(order.originCountry || originCountry)
@@ -50,6 +61,8 @@ export function DraftSampleProgress({ orders, kind = 'sample', joined = false, o
       const showReceipt = current && !order.passed && !order.receivedAt
       const showRevision = showReceipt && awaitingChinaDispatch
       const label = kind === 'color' ? colorSampleLabel(order.round) : sampleOrderLabel(order, list)
+      const pack = samplePackId(order.url)
+      const title = `${label} ${sampleHistoryDay(order.shippedAt).slice(2) || '등록일 기록 없음'}`
       return <section key={order.id} aria-label={label} className="draft-sample-round">
         <div className={`draft-sample-route${showRevision ? ' has-revision-preview' : ''}`}>
           <div className="draft-sample-heading">
@@ -57,7 +70,10 @@ export function DraftSampleProgress({ orders, kind = 'sample', joined = false, o
               {country.code === 'CN' || isExternalSample ? country.label : country.code}
               <span aria-hidden="true"> | </span>
             </span>
-            <a href={order.url!} download={order.name} title="작업지시서 내려받기">{label} {sampleHistoryDay(order.shippedAt).slice(2) || '등록일 기록 없음'}</a>
+            {pack
+              ? <button type="button" className="text-left underline-offset-2 hover:underline" title="작업지시서 전체 받기" disabled={busy}
+                onClick={() => void downloadPack(pack, label)}>{title}</button>
+              : <a href={order.url!} download={order.name} title="작업지시서 내려받기">{title}</a>}
             {registered !== null && <span className={`draft-sample-registered-elapsed${order.receivedAt ? '' : ' is-pending'}`}
               title={order.receivedAt ? '작업지시서 등록부터 실물 수령까지 걸린 일수' : '작업지시서 등록 후 경과일'}>
               {`${order.receivedAt ? '' : '+'}${registered} day`}

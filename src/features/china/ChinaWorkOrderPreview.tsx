@@ -18,21 +18,24 @@ function workOrderPreviewType(url: string | null, fileName: string) {
   return (Object.keys(previewTypes) as (keyof typeof previewTypes)[]).find(type => previewTypes[type].extension.test(fileName.trim())) ?? null
 }
 
-export function ChinaWorkOrderPreviewButton({ url, name }: { url: string | null; name: string }) {
+export function ChinaWorkOrderPreviewButton({ url, name, readFile }: { url: string | null; name: string; readFile?: () => Promise<Blob> }) {
   const [open, setOpen] = useState(false)
-  const type = workOrderPreviewType(url, name)
+  const type = readFile
+    ? (Object.keys(previewTypes) as (keyof typeof previewTypes)[]).find(value => previewTypes[value].extension.test(name.trim()))
+    : workOrderPreviewType(url, name)
   if (!url || !type) return null
 
   return <>
     <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}><Eye className="size-3.5" aria-hidden="true" />미리보기</Button>
-    {open && <ChinaWorkOrderPreview url={url} name={name} type={type} onClose={() => setOpen(false)} />}
+    {open && <ChinaWorkOrderPreview url={url} name={name} type={type} readFile={readFile} onClose={() => setOpen(false)} />}
   </>
 }
 
-function ChinaWorkOrderPreview({ url, name, type, onClose }: {
+function ChinaWorkOrderPreview({ url, name, type, readFile, onClose }: {
   url: string
   name: string
   type: keyof typeof previewTypes
+  readFile?: () => Promise<Blob>
   onClose: () => void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
@@ -53,9 +56,13 @@ function ChinaWorkOrderPreview({ url, name, type, onClose }: {
     let previewUrl: string | undefined
     void (async () => {
       try {
-        const result = await fetch(url, { signal: abort.signal })
-        if (!result.ok) throw new Error()
-        const file = await result.blob()
+        let file: Blob
+        if (readFile) file = await readFile()
+        else {
+          const result = await fetch(url, { signal: abort.signal })
+          if (!result.ok) throw new Error()
+          file = await result.blob()
+        }
         const header = new Uint8Array(await file.slice(0, 12).arrayBuffer())
         if (!previewTypes[type].matches(header)) throw new Error()
         if (abort.signal.aborted) return
@@ -69,7 +76,7 @@ function ChinaWorkOrderPreview({ url, name, type, onClose }: {
       abort.abort()
       if (previewUrl) URL.revokeObjectURL(previewUrl)
     }
-  }, [url, type])
+  }, [url, type, readFile])
 
   return <dialog ref={dialog} aria-labelledby={title} onCancel={onClose}
     className="fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-1.5rem)] max-w-5xl overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-xl backdrop:bg-black/50">

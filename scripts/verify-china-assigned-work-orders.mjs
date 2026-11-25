@@ -6,7 +6,7 @@ const db = new PGlite()
 const company = 'e0000000-0000-4000-8000-000000000001'
 const china = 'bf926822-910c-422f-9c17-5fd3d8ddb3ba'
 const id = n => `60000000-0000-4000-8000-${String(n).padStart(12, '0')}`
-const sql = (name) => readFile(new URL(`../supabase/migrations/${name}.sql`, import.meta.url), 'utf8')
+const sql = async (name) => (await readFile(new URL(`../supabase/migrations/${name}.sql`, import.meta.url), 'utf8')).replace(/\r\n/g, '\n')
 const revision = '2026-11-05T00:00:00Z'
 const assignedAt = '2026-11-04T00:00:00Z'
 const order = (key, assignee, shippedAt = '2026-11-03T00:00:00Z', originCountry = '중국') => ({
@@ -23,8 +23,13 @@ const act = (draftId, key, action, kind = 'sample', rev = revision, assignee = n
   db.query('select app.china_work_order($1,$2,$3,$4,$5,$6)', [draftId, key, kind, action, assignee, rev])
 try {
   await db.exec(`
-    create schema app; create schema auth; create role authenticated; create role anon;
+    create schema app; create schema auth; create schema storage; create role authenticated; create role anon;
     grant usage on schema app to authenticated;
+    grant usage on schema storage to authenticated;
+    create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint);
+    create table storage.objects(bucket_id text,name text,metadata jsonb,primary key(bucket_id,name));
+    alter table storage.objects enable row level security;
+    grant select,insert on storage.objects to authenticated;
     create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
     create table public.profiles(id uuid primary key, company_id uuid, department_id uuid, status text, display_name text);
     create table public.department_workforce_policies(company_id uuid,department_id uuid,mode text,contact_ids uuid[]);
@@ -32,10 +37,15 @@ try {
       origin_country text,draft_no text,brand_id uuid,name_ko text,name_en text,image_url text,owner text,
       sample_work_orders jsonb,specs jsonb);
     create table public.draft_colors(id uuid,draft_id uuid,sample_work_order_url text,sample_work_order_shipped boolean,sample_work_order_shipped_at timestamptz);
+    grant select,update on public.product_drafts to authenticated;
     create function app.work_department(text) returns uuid language sql as $$select '${china}'::uuid$$;
     create function app.permission_company_id() returns uuid language sql stable as $$select company_id from public.profiles where id=auth.uid() and status='active'$$;
     create function app.basic_work_allowed(text) returns boolean language sql stable as $$select app.permission_company_id()='${company}'::uuid$$;
     create function app.work_operator() returns boolean language sql stable as $$select false$$;
+    create function app.basic_work_allowed(text,uuid) returns boolean language sql stable as
+      $$select $1='planning' and auth.uid()='60000000-0000-4000-8000-000000000004'::uuid$$;
+    create function app.draft_write_allowed(uuid) returns boolean language sql stable as
+      $$select $1='60000000-0000-4000-8000-000000000013'::uuid and auth.uid()='60000000-0000-4000-8000-000000000004'::uuid$$;
     insert into public.profiles values ('${id(1)}','${company}','${china}','active','worker A'),
       ('${id(2)}','${company}','${china}','active','worker B'),
       ('${id(3)}','${company}','${china}','active','manager'),
@@ -50,6 +60,7 @@ try {
   await db.exec(await sql('20261106131500_china_assignee_receipt_closed'))
   await db.exec(await sql('20261106134500_china_assigned_order_elapsed_days'))
   await db.exec(await sql('20261124121357_require_china_work_order_receipt_before_shipping'))
+  await db.exec(await sql('20261125100000_sample_work_order_packs'))
   const received = { receivedAt: '2026-11-04T00:00:00Z' }
   for (const [draftId, actor, rounds, colors] of [
     [id(11), id(1), [
@@ -140,8 +151,85 @@ try {
   assert.notEqual((await read()).revision, manager.revision)
   await asActor(id(4))
   assert.deepEqual(await read(), { role: 'denied', orders: [] })
+
+  await db.exec('reset role')
+  await db.query("insert into public.product_drafts values ($1,$2,clock_timestamp(),'open','중국','PL-pack',null,'fixture','',null,'','[]','{}')",[id(13),company])
+  const packCall=async (name,args)=>{
+    const query='select public.'+name+'('+args.map((_,i)=>'$'+(i+1)).join(',')+') as result'
+    return (await db.query(query,args)).rows[0].result
+  }
+  const getPack=packId=>packCall('get_sample_work_order_pack',[packId,null,null])
+  const openPack=slot=>packCall('open_sample_work_order_pack',[id(13),slot])
+  const savePack=(pack,files,notes='지퍼 길이 확인')=>packCall('save_sample_work_order_pack',[pack.id,pack.revision,JSON.stringify(files),notes])
+  const receivePack=(pack,stamp)=>packCall('receive_sample_work_order_pack',[pack.id,stamp])
+  const readStamp=async ()=>(await db.query('select updated_at::text as stamp from public.product_drafts where id=$1',[id(13)])).rows[0].stamp
+  const upload=async (pack,key,name)=>{
+    const path=pack.id+'/'+id(key)
+    await db.query("insert into storage.objects values('sample-work-orders',$1,'{\"size\":42}')",[path])
+    return {path,name,size:42,sha256:'0'.repeat(64)}
+  }
+  const publish=async (pack)=>{
+    const rounds=[{...order('packed',null),url:'atelier-sample-pack:'+pack.id+':'+pack.revision}]
+    await db.query('update public.product_drafts set sample_work_orders=$2,updated_at=clock_timestamp() where id=$1',[id(13),JSON.stringify(rounds)])
+  }
+
+  const firstPack=await openPack('first')
+  assert.equal((await openPack('first')).id,firstPack.id)
+  const sheet=await upload(firstPack,31,'치수.xlsx')
+  const saved=await savePack(firstPack,[sheet])
+  await assert.rejects(savePack(firstPack,[sheet]),{code:'40001'})
+  await assert.rejects(publish(firstPack),{code:'22023'})
+  assert.equal((await getPack(saved.id)).files.length,1)
+  const image=await upload(saved,32,'참고.jpg')
+  const finalPack=await savePack(saved,[sheet,image])
+  await asActor(id(3))
+  await assert.rejects(getPack(finalPack.id),{code:'42501'})
+  assert.equal((await db.query('select * from storage.objects where name=$1',[sheet.path])).rows.length,0)
+  await asActor(id(4))
+  await publish(finalPack)
+  assert.equal((await getPack(finalPack.id)).published,true)
+  await asActor(id(3))
+  assert.equal((await getPack(finalPack.id)).files.length,2)
+  let packRevision=await readStamp()
+  await assert.rejects(act(id(13),'packed','handoff','sample',packRevision,id(1)),{code:'55000'})
+  await assert.rejects(act(id(13),'packed','check','sample',packRevision),{code:'55000'})
+  await receivePack(finalPack,packRevision)
+  packRevision=await readStamp()
+  await act(id(13),'packed','handoff','sample',packRevision,id(1))
+  await asActor(id(2))
+  await assert.rejects(getPack(finalPack.id),{code:'42501'})
+  await asActor(id(1))
+  const pending=(await read()).orders.find(item=>item.draftId===id(13))
+  assert.equal(pending.packId,finalPack.id)
+  assert.equal(pending.managerChecked,true)
+  assert.equal(pending.assigneeCheckedAt,null)
+  await assert.rejects(act(id(13),'packed','ship','sample',pending.revision),{code:'55000'})
+  await receivePack(finalPack,pending.revision)
+  assert.ok((await read()).orders.find(item=>item.draftId===id(13)).assigneeCheckedAt)
+
+  await asActor(id(4))
+  const edit=await openPack('edit:packed')
+  const revisionPack=await savePack(edit,[sheet],'치수표 수정')
+  await db.query("update public.product_drafts set sample_work_orders=jsonb_set(sample_work_orders,'{0,url}',to_jsonb($2::text)),updated_at=clock_timestamp() where id=$1",
+    [id(13),'atelier-sample-pack:'+revisionPack.id+':'+revisionPack.revision])
+  await asActor(id(1))
+  await assert.rejects(getPack(finalPack.id),{code:'42501'})
+  assert.equal((await db.query('select * from storage.objects where name=$1',[sheet.path])).rows.length,1)
+  const changed=(await read()).orders.find(item=>item.draftId===id(13))
+  assert.equal(changed.packId,revisionPack.id)
+  assert.equal(changed.assigneeCheckedAt,null)
+  assert.equal(changed.managerChecked,false)
+  await receivePack(revisionPack,changed.revision)
+  await assert.rejects(act(id(13),'packed','ship','sample',await readStamp()),{code:'55000'})
+  await asActor(id(3))
+  await receivePack(revisionPack,await readStamp())
+  await asActor(id(1))
+  await act(id(13),'packed','ship','sample',await readStamp())
+  assert.ok((await read()).orders.find(item=>item.draftId===id(13)).returnedAt)
+
   await asActor('', 'anon')
   await assert.rejects(read(), { code: '42501' })
+  await assert.rejects(getPack(finalPack.id),{code:'42501'})
   console.log('China work: scoped reads and files, role restrictions, sample and color dispatch, duplicate guard, manager compatibility passed.')
 } finally {
   await db.close()

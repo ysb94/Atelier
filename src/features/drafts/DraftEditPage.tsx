@@ -30,7 +30,10 @@ import {
 } from '@/lib/api'
 import { readFileAsDataUrl, readImageFile } from '@/lib/images'
 import { SampleWorkOrderRegistration } from './SampleWorkOrderRegistration'
-import { SampleWorkOrderFileField, SAMPLE_WORK_ORDER_ACCEPT, SAMPLE_WORK_ORDER_MAX_BYTES, type SampleWorkOrderFile } from './SampleWorkOrderFileField'
+import { SAMPLE_WORK_ORDER_ACCEPT, SAMPLE_WORK_ORDER_MAX_BYTES, type SampleWorkOrderFile } from './SampleWorkOrderFileField'
+import { SampleWorkOrderPackField } from './SampleWorkOrderPackField'
+import { SampleWorkOrderPackDetails } from './SampleWorkOrderPackDetails'
+import { samplePackId } from '@/lib/supabase/sample-work-order-packs'
 import { RegisteredSampleCard } from './RegisteredSampleCard'
 import { RegisteredColorSampleCards } from './RegisteredColorSampleCards'
 import { DraftProposerPicker } from './DraftProposerPicker'
@@ -45,6 +48,7 @@ import {
   DRAFT_SPEC_LABEL,
   type CostCurrency,
   type DraftSpecKey,
+  type ProductDraft,
   type ProductDraftInput,
   type Season,
   type Style,
@@ -298,6 +302,8 @@ export function DraftEditPage() {
   const workOrderInputRef = useRef<HTMLInputElement>(null)
   const uploadOrderIdRef = useRef<string | null>(null)
   const uploadColorIdRef = useRef<string | null>(null)
+  const newAttachmentDraft = useRef<ProductDraft | null>(null)
+  const creatingAttachmentDraft = useRef<Promise<ProductDraft> | null>(null)
   const companyId = profile?.companyId ?? DEFAULT_COMPANY_ID
 
   const isNew = !draftId || draftId === 'new'
@@ -442,6 +448,23 @@ export function DraftEditPage() {
     await saveSampleAttachment({ ...form, sampleWorkOrders, ...legacyWorkOrderFields(sampleWorkOrders) })
   }
 
+  async function createAttachmentDraft() {
+    if (!editable) throw new Error('기획안 작성 권한을 확인해 주세요.')
+    if (newAttachmentDraft.current) return newAttachmentDraft.current.id
+    const creator = profile?.displayName?.trim() ?? ''
+    return (await createDraftRecord({ ...form, owner: form.owner.trim() ? form.owner : creator })).id
+  }
+
+  function createDraftRecord(payload: ProductDraftInput) {
+    if (!creatingAttachmentDraft.current) {
+      creatingAttachmentDraft.current = createProductDraft(companyId, payload).then(saved => {
+        newAttachmentDraft.current = saved
+        return saved
+      }).finally(() => { creatingAttachmentDraft.current = null })
+    }
+    return creatingAttachmentDraft.current
+  }
+
   async function replaceSavedSampleFile(orderId: string, file: SampleWorkOrderFile) {
     const order = form.sampleWorkOrders.find((item) => item.id === orderId)
     if (!order || order.shipped || order.receivedAt || order.passed) {
@@ -510,7 +533,12 @@ export function DraftEditPage() {
       if (requiresDraftBrand(payload.status) && !payload.brandId) {
         throw new Error('출시 확정 전에 브랜드를 지정하세요.')
       }
-      if (isNew) return createProductDraft(companyId, payload)
+      if (isNew) {
+        const existing = newAttachmentDraft.current
+        return existing
+          ? updateProductDraft(existing.id, { ...payload, expectedUpdatedAt: existing.updatedAt })
+          : createDraftRecord(payload)
+      }
       if (!draftId) throw new Error('기획안을 찾을 수 없습니다.')
       return updateProductDraft(draftId, { ...payload, expectedUpdatedAt: payload.expectedUpdatedAt ?? loaded?.updatedAt })
     },
@@ -813,20 +841,28 @@ export function DraftEditPage() {
             </div>
             <div className="min-w-0">
               {savedSamples.length === 0 ? (
-                <SampleWorkOrderFileField label="1차 샘플" readOnly={!editable}
-                  saving={saveMutation.isPending} onRegister={registerFirstSample} />
+                <SampleWorkOrderPackField label="1차 샘플" draftId={isNew ? null : draftId ?? null} slot="first" readOnly={!editable}
+                  saving={saveMutation.isPending} onRegister={registerFirstSample} onCreateDraft={createAttachmentDraft}
+                  onTemporarySaved={id => {
+                    if (!isNew) return
+                    void queryClient.invalidateQueries({ queryKey: ['product-drafts'] })
+                    navigate(draftDetailPath(id), { replace: true })
+                  }}
+                  validateRegistration={() => {
+                    if (!isSampleDestination(form.originCountry)) throw new Error('샘플 진행처를 먼저 선택해 주세요.')
+                  }} />
               ) : savedSamples.map((order) => (
-                <RegisteredSampleCard key={order.id} id={order.id} label={sampleOrderLabel(order, savedSamples)}
+                <RegisteredSampleCard key={order.id} draftId={draftId ?? null} id={order.id} label={sampleOrderLabel(order, savedSamples)}
                   status={order.receivedAt ? '수령' : order.shipped ? '발송' : '진행'}
                   country={order.originCountry || form.originCountry} url={order.url} name={sampleWorkOrderFileName(order)}
                   locked={Boolean(order.shipped || order.receivedAt || order.passed)} readOnly={!editable} saving={saveMutation.isPending}
                   onRegister={file => replaceSavedSampleFile(order.id, file)} onCountry={country => updateSavedSampleCountry(order.id, country)} />
               ))}
-              <RegisteredColorSampleCards rounds={savedColorSamples} originCountry={form.originCountry} readOnly={!editable} saving={saveMutation.isPending}
+              <RegisteredColorSampleCards draftId={draftId ?? null} rounds={savedColorSamples} originCountry={form.originCountry} readOnly={!editable} saving={saveMutation.isPending}
                 onRegister={replaceSavedColorSampleFile} onCountry={updateSavedColorSampleCountry} />
               {canRegisterNextSample && (
                 <div id="next-sample">
-                  <SampleWorkOrderRegistration originCountry={form.originCountry}
+                  <SampleWorkOrderRegistration draftId={draftId ?? null} originCountry={form.originCountry}
                     nextRound={(latestSavedSample?.round ?? 1) + 1}
                     nextColorRound={Math.max(0, ...savedColorSamples.map(round => round.round)) + 1}
                     latestIsFinal={latestSavedSample?.sampleStage === 'final'}
@@ -919,6 +955,7 @@ export function DraftEditPage() {
               {form.colors.map((color, index) => {
                 const showColorWorkOrder = canRegisterNextSample || Boolean(color.sampleWorkOrderUrl)
                 const colorFileName = colorWorkOrderFileName(color)
+                const colorPack = samplePackId(color.sampleWorkOrderUrl)
                 return (
                   <div key={color.id} className="space-y-1">
                     <div className="grid grid-cols-[1rem_minmax(0,1fr)_4.5rem_2.5rem_1.75rem] items-center gap-1.5">
@@ -976,7 +1013,7 @@ export function DraftEditPage() {
                         <Trash2 className="size-3.5" />
                       </Button>
                     </div>
-                    {showColorWorkOrder ? (
+                    {colorPack ? <SampleWorkOrderPackDetails id={colorPack} label={colorFileName} showBulk /> : showColorWorkOrder ? (
                       color.sampleWorkOrderUrl ? (
                         <div className="flex items-center gap-0.5 rounded-md border border-border px-2 py-1">
                           <FileText className="size-4 shrink-0 text-muted-foreground" />

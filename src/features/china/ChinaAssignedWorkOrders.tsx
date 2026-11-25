@@ -7,11 +7,13 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { FilterTabs } from '@/components/ui/filter-tabs'
 import { DraftPhoto } from '@/features/drafts/DraftSheetRow'
+import { SampleWorkOrderPackDetails } from '@/features/drafts/SampleWorkOrderPackDetails'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { colorSampleLabel, sampleOrderLabel } from '@/lib/drafts/sample-registration'
 import { sampleElapsedDays, sampleTripSpanDays } from '@/lib/drafts/sample-work-order'
 import { cn, formatNumber } from '@/lib/utils'
 import { checkMyChinaWorkOrder, getMyChinaWorkOrderFile, shipMyChinaWorkOrder, type AssignedChinaOrder } from '@/lib/supabase/china-assigned-work-orders'
+import { downloadSamplePack, receiveSamplePack } from '@/lib/supabase/sample-work-order-packs'
 import { ChinaMaterialRequests } from './ChinaMaterialRequests'
 import { useMaterialRequests } from '@/features/planning/useMaterialRequests'
 import { workerMaterialGroups } from './china-material-workload'
@@ -26,7 +28,8 @@ const dateFormat = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', mo
 
 function orderStatus(order: AssignedChinaOrder) {
   const timestamp = order.receivedAt ?? order.returnedAt
-  if (!timestamp) return order.closed ? '처리 완료' : order.assigneeCheckedAt ? '발송 대기' : '지시서 받기 대기'
+  if (!timestamp) return order.closed ? '처리 완료' : !order.assigneeCheckedAt ? '지시서 받기 대기'
+    : order.packId && !order.managerChecked ? '총괄 받기 대기' : '발송 대기'
   const date = new Date(timestamp)
   const label = order.receivedAt ? '본사 수령 완료' : '발송 · 본사로 이동 중'
   return Number.isNaN(date.getTime()) ? label : `${dateFormat.format(date)} ${label}`
@@ -55,30 +58,35 @@ export function ChinaAssignedWorkOrders({ orders, brandById, accountId }: {
   const uncheckedPlans = new Set(orders.filter(order => !order.closed && !order.assigneeCheckedAt).map(order => order.draftId)).size
 
   async function handleOrder(order: AssignedChinaOrder, action: 'download' | 'ship') {
-    if (busy || (action === 'ship' && (order.closed || !order.assigneeCheckedAt))) return
+    if (busy || (action === 'ship' && (order.closed || !order.assigneeCheckedAt || (order.packId && !order.managerChecked)))) return
     const trace = startWorkflow('app', action === 'ship' ? 'china_work_ship' : 'china_assigned_work_file')
     trace.step('validate_input')
     setBusy(true)
     setError('')
     try {
       if (action === 'download') {
-        const url = await trace.run('get_file', () => getMyChinaWorkOrderFile(order))
-        const link = document.createElement('a')
-        link.href = url
-        if (!['https:', 'http:', 'data:'].includes(link.protocol)) throw new Error('지원하지 않는 파일 주소입니다.')
-        link.download = order.fileName?.trim() || '작업 지시서'
-        link.rel = 'noopener'
-        document.body.appendChild(link)
-        link.click()
-        link.remove()
-        if (!order.assigneeCheckedAt) {
-          await trace.run('save', context => checkMyChinaWorkOrder(order, context), { writeOutcome: 'committed' })
+        if (order.packId) {
+          await trace.run('get_file', () => downloadSamplePack(order.packId!, `${order.draftNo} ${order.fileName || '작업지시서'}`))
+        } else {
+          const url = await trace.run('get_file', () => getMyChinaWorkOrderFile(order))
+          const link = document.createElement('a')
+          link.href = url
+          if (!['https:', 'http:', 'data:'].includes(link.protocol)) throw new Error('지원하지 않는 파일 주소입니다.')
+          link.download = order.fileName?.trim() || '작업 지시서'
+          link.rel = 'noopener'
+          document.body.appendChild(link)
+          link.click()
+          link.remove()
+        }
+        const shouldCheck = !order.assigneeCheckedAt && (!order.packId || !order.closed)
+        if (shouldCheck) {
+          await trace.run('save', context => order.packId ? receiveSamplePack(order.packId, order.revision) : checkMyChinaWorkOrder(order, context), { writeOutcome: 'committed' })
           await trace.run('refresh', () => Promise.all([
             cache.invalidateQueries({ queryKey: ['china-work-screen', accountId] }),
             cache.invalidateQueries({ queryKey: ['product-drafts'] }),
           ]), { writeOutcome: 'committed' })
         }
-        trace.done({ writeOutcome: order.assigneeCheckedAt ? 'none' : 'committed' })
+        trace.done({ writeOutcome: shouldCheck ? 'committed' : 'none' })
       } else {
         await trace.run('save', context => shipMyChinaWorkOrder(order, context))
         await trace.run('refresh', () => Promise.all([
@@ -154,11 +162,12 @@ export function ChinaAssignedWorkOrders({ orders, brandById, accountId }: {
                     <p className="mt-1 text-xs text-muted-foreground">{orderStatus(order)}</p>
                   </div>
                   {order.assigneeCheckedAt
-                    ? <Button type="button" variant="secondary" size="sm" className="w-full text-muted-foreground" disabled={busy} onClick={() => void handleOrder(order, 'download')}><Check className="size-3.5" aria-hidden="true" />받기</Button>
-                    : <Button type="button" variant="outline" size="sm" className="w-full text-primary" disabled={busy} onClick={() => void handleOrder(order, 'download')}><Download className="size-3.5" aria-hidden="true" />받기</Button>}
+                    ? <Button type="button" variant="secondary" size="sm" className="w-full text-muted-foreground" disabled={busy} onClick={() => void handleOrder(order, 'download')}><Check className="size-3.5" aria-hidden="true" />{order.packId ? '전체 받기' : '받기'}</Button>
+                    : <Button type="button" variant="outline" size="sm" className="w-full text-primary" disabled={busy} onClick={() => void handleOrder(order, 'download')}><Download className="size-3.5" aria-hidden="true" />{order.packId ? '전체 받기' : '받기'}</Button>}
                   {order.closed ? <Badge variant="muted" className="h-8 w-full justify-center"><Check className="mr-1 size-3.5" aria-hidden="true" />{order.returnedAt || order.receivedAt ? '발송 완료' : '완료'}</Badge>
-                    : <Button type="button" variant="outline" size="sm" className="w-full text-primary" disabled={busy || !order.assigneeCheckedAt} onClick={() => void handleOrder(order, 'ship')}><Send className="size-3.5" aria-hidden="true" />발송 하기</Button>}
+                    : <Button type="button" variant="outline" size="sm" className="w-full text-primary" disabled={busy || !order.assigneeCheckedAt || Boolean(order.packId && !order.managerChecked)} onClick={() => void handleOrder(order, 'ship')}><Send className="size-3.5" aria-hidden="true" />발송 하기</Button>}
                 </div>
+                {order.packId && <SampleWorkOrderPackDetails id={order.packId} label={order.fileName || '작업지시서'} />}
               </td>
               </tr>
             })}

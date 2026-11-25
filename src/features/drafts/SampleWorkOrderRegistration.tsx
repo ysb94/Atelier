@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { SampleDestinationSelect } from './SampleDestinationSelect'
-import { SampleWorkOrderFileField, type SampleWorkOrderFile } from './SampleWorkOrderFileField'
+import type { SampleWorkOrderFile } from './SampleWorkOrderFileField'
+import { SampleWorkOrderPackField } from './SampleWorkOrderPackField'
 import { isSampleDestination } from '@/lib/drafts/sample-receipt'
 import { nextRegistrationStages, sampleRegistrationLabel, type SampleRegistrationStage } from '@/lib/drafts/sample-registration'
 
-export function SampleWorkOrderRegistration({ originCountry, nextRound, nextColorRound = 1, latestIsFinal = false, finalCount = 0, readOnly, saving, onRegister }: {
+export function SampleWorkOrderRegistration({ draftId, originCountry, nextRound, nextColorRound = 1, latestIsFinal = false, finalCount = 0, readOnly, saving, onRegister }: {
+  draftId: string | null
   originCountry: string; nextRound: number; nextColorRound?: number; latestIsFinal?: boolean; finalCount?: number; readOnly: boolean; saving: boolean
   onRegister: (stage: SampleRegistrationStage, file: SampleWorkOrderFile, country: string) => Promise<void>
 }) {
@@ -39,7 +41,8 @@ export function SampleWorkOrderRegistration({ originCountry, nextRound, nextColo
     <div className="flex flex-wrap justify-center gap-2" role="radiogroup" aria-label="다음 샘플 단계">
       {stages.map(value => <Button key={value} type="button" role="radio" size="sm" disabled={disabled} aria-checked={stage === value} variant={stage === value ? 'default' : 'outline'} onClick={() => { setStage(value); setRegistered(null) }}>{sampleRegistrationLabel(value, nextRound, finalCount, nextColorRound)} 진행</Button>)}
     </div>
-    <SampleWorkOrderFileField label={label} readOnly={readOnly} saving={saving} onRegister={register}
+    <SampleWorkOrderPackField key={stage} draftId={draftId} slot={stage} label={label} readOnly={readOnly} saving={saving} onRegister={register}
+      validateRegistration={() => { if (!isSampleDestination(country)) throw new Error('샘플 진행처를 선택해 주세요.') }}
       side={<SampleDestinationSelect label="다음 샘플 진행처" value={country} disabled={disabled} onChange={value => {
         countryTouched.current = true; setCountry(value); setRegistered(null)
       }} />} />
