@@ -160,5 +160,119 @@ try {
   await db.exec('reset role')
   assert.equal(Number(await value('select remaining_leave from app.employee_roster')),7)
   assert.equal(Number(await value("select count(*) from public.my_home_notification_reads where event_key='old-event'")),1)
+  const beforeConfirmation = await oldSnapshot()
+  const staffSession = crypto.randomUUID()
+  await db.exec(`alter table public.profiles add column job_grade text;
+    update public.profiles set job_grade='사원' where id='${staff}';
+    create table auth.sessions(id uuid,user_id uuid);
+    create table auth.mfa_amr_claims(session_id uuid,authentication_method text);
+    create function auth.jwt() returns jsonb language sql stable as $$select jsonb_build_object('session_id',nullif(current_setting('request.jwt.claim.session_id',true),''))$$;
+    insert into auth.sessions values('${staffSession}','${staff}');
+    insert into auth.mfa_amr_claims values('${staffSession}','oauth');
+    create schema storage;
+    create table storage.buckets(id text primary key,name text,public boolean,file_size_limit integer,allowed_mime_types text[]);
+    create table storage.objects(bucket_id text,name text,metadata jsonb,primary key(bucket_id,name));
+    alter table storage.objects enable row level security;
+    grant usage on schema storage to authenticated;
+    grant insert,select on storage.objects to authenticated;
+    insert into app.test_approvers values('${approver}','${dept}');`)
+  const originalRows = await oldSnapshot()
+  const ledger = () => value(`select jsonb_build_object(
+    'days',(select jsonb_agg(d order by id) from app.holiday_work_days d),
+    'settlements',(select jsonb_agg(s order by id) from app.holiday_work_settlements s),
+    'events',(select jsonb_agg(e order by event_key) from app.holiday_work_events e))`)
+  const originalLedger = await ledger()
+  await db.exec(await readFile('supabase/migrations/20261125033732_holiday_work_compensation_confirmation.sql', 'utf8'))
+  assert.deepEqual(await oldSnapshot(), originalRows)
+  assert.deepEqual(await ledger(), originalLedger, 'migration does not reopen or rewrite prior records')
+  assert.equal(await value("select public from storage.buckets where id='holiday-work-confirmations'"),false)
+  assert.equal((await value("select count(*)::int from app.holiday_work_confirmations")),0)
+  assert.equal(beforeConfirmation.clocks.length,originalRows.clocks.length)
+
+  await as(staff)
+  const confirmationWork = await submit('2026-10-25',0,[{start:540,end:660}])
+  await as(approver)
+  await call('review',{id:confirmationWork,version:1,decision:'approve',note:'확인'})
+  await assert.rejects(() => call('confirmation-request',{workId:confirmationWork,version:2}), /권한/)
+  await as(ops)
+  const request = {workId:confirmationWork,version:2,allowLeave:false}
+  const confirmationId = (await call('confirmation-request',request)).id
+  assert.equal((await call('confirmation-request',request)).id,confirmationId,'repeat sends one notification')
+  const current = (await list('operations')).rows.find(r=>r.id===confirmationWork).confirmation
+  assert.equal(current.work.name,'직원')
+  assert.equal(current.work.department,'디자인')
+  assert.equal(current.work.grade,'사원')
+  assert.equal(current.work.actualMinutes,120)
+  assert.equal(current.work.creditUnits,360)
+  const response = {workId:confirmationWork,confirmationId}
+  const confirmedCash={id:crypto.randomUUID(),ids:[confirmationWork],versions:{[confirmationWork]:2},mode:'cash',rate:10000,month:'2026-10-01',note:'확인서 기준'}
+  await assert.rejects(() => call('settle',confirmedCash), /서명본/)
+  await as(peer)
+  await assert.rejects(() => call('confirmation-respond',{...response,choice:'cash'}), /권한/)
+  await as(foreign)
+  assert.equal((await notices()).some(n=>n.entity_id===confirmationWork),false)
+  await assert.rejects(() => call('confirmation-file',{...response,path:'other',verified:true}), /권한/)
+  await as(staff)
+  const requested = (await notices()).find(n=>n.entity_id===confirmationWork && n.event_type==='holiday-confirmation-request')
+  await db.query('select public.read_my_home_work_notification($1)',[requested.event_key])
+  assert.equal((await notices()).find(n=>n.event_key===requested.event_key).action_needed,true)
+  await assert.rejects(() => call('confirmation-respond',{...response,choice:'cash'}), /직접 로그인/)
+  await db.query("select set_config('request.jwt.claim.session_id',$1,false)",[staffSession])
+  await assert.rejects(() => call('confirmation-respond',{...response,choice:'leave'}), /서면합의/)
+  await call('confirmation-respond',{...response,choice:'cash'})
+  await call('confirmation-respond',{...response,choice:'cash'})
+  assert.equal((await notices()).find(n=>n.event_key===requested.event_key).action_needed,false)
+  const bucket='holiday-work-confirmations'
+  const signedPath=`${company}/${confirmationId}/${crypto.randomUUID()}.pdf`
+  const putFile = (path,metadata) => db.query('insert into storage.objects values($1,$2,$3)',[bucket,path,metadata])
+  await assert.rejects(() => putFile(signedPath,{size:512,mimetype:'application/pdf'}), /row-level security/)
+  await as(ops)
+  const submitted=(await notices()).filter(n=>n.entity_id===confirmationWork && n.event_type==='holiday-confirmation-submitted')
+  assert.equal(submitted.length,1)
+  assert.equal(submitted[0].action_needed,true)
+  await assert.rejects(() => call('settle',confirmedCash), /서명본/)
+  await assert.rejects(() => call('confirmation-file',{...response,path:signedPath,verified:true}), /업로드/)
+  await assert.rejects(() => putFile(`${otherCompany}/${confirmationId}/${crypto.randomUUID()}.pdf`,{size:512,mimetype:'application/pdf'}), /row-level security/)
+  const badMime=`${company}/${confirmationId}/${crypto.randomUUID()}.pdf`
+  await putFile(badMime,{size:512,mimetype:'image/jpeg'})
+  await assert.rejects(() => call('confirmation-file',{...response,path:badMime,verified:true}), /업로드/)
+  await putFile(signedPath,{size:512,mimetype:'application/pdf'})
+  await call('confirmation-file',{...response,path:signedPath,verified:true})
+  await call('confirmation-file',{...response,path:signedPath,verified:true})
+  await assert.rejects(() => call('settle',{...confirmedCash,mode:'leave',days:0.25,expires:'2027-12-31'}), /서명본/)
+  await call('settle',confirmedCash)
+  await call('settle',confirmedCash)
+  const settledWork=(await list('operations')).rows.find(r=>r.id===confirmationWork)
+  assert.equal(settledWork.remainingUnits,0)
+  assert.equal(settledWork.settlements.length,1)
+  assert.equal(settledWork.confirmation.signedPath,signedPath)
+  assert.equal((await notices()).find(n=>n.event_key===submitted[0].event_key).action_needed,false)
+  assert.equal(await value("select count(*)::int from storage.objects"),1,'only linked files are visible')
+  await as(staff)
+  assert.equal(await value("select count(*)::int from storage.objects"),0,'employee does not have signed-file storage access')
+  assert.equal((await list()).rows.find(r=>r.id===confirmationWork).confirmation.signedPath,null)
+  await assert.rejects(() => db.exec('select * from app.holiday_work_confirmations'), /permission denied/)
+
+  const revisedWork=await submit('2026-10-24')
+  await as(approver);await call('review',{id:revisedWork,version:1,decision:'approve'})
+  await as(ops)
+  const firstId=(await call('confirmation-request',{workId:revisedWork,version:2,allowLeave:true})).id
+  await as(staff)
+  await call('confirmation-respond',{workId:revisedWork,confirmationId:firstId,choice:'correction',reason:'실제 시간 정정'})
+  assert.equal((await list()).rows.find(r=>r.id===revisedWork).state,'returned')
+  await submit('2026-10-24',3,[{start:540,end:720}])
+  await as(approver);await call('review',{id:revisedWork,version:4,decision:'approve'})
+  await as(ops)
+  const secondId=(await call('confirmation-request',{workId:revisedWork,version:5,allowLeave:true})).id
+  assert.notEqual(secondId,firstId)
+  await as(staff)
+  await assert.rejects(() => call('confirmation-respond',{workId:revisedWork,confirmationId:firstId,choice:'leave'}), /변경/)
+  await call('confirmation-respond',{workId:revisedWork,confirmationId:secondId,choice:'leave'})
+  await as(ops)
+  const leavePath=`${company}/${secondId}/${crypto.randomUUID()}.pdf`
+  await putFile(leavePath,{size:512,mimetype:'application/pdf'})
+  await call('confirmation-file',{workId:revisedWork,confirmationId:secondId,path:leavePath,verified:true})
+  await call('settle',{id:crypto.randomUUID(),ids:[revisedWork],versions:{[revisedWork]:5},mode:'leave',days:0.5,expires:'2027-12-31',note:'직원 선택 확인'})
+  assert.equal((await list('operations')).rows.find(r=>r.id===revisedWork).remainingUnits,60)
   console.log('holiday-work isolated DB: migration, permissions, review, versioned notices, agreement lock, partial credit, cash, duplicate guards passed')
 } catch (error) { console.error('holiday-work DB verification failed:', error.message, error.code, error.where ?? '', error.position ?? ''); process.exitCode=1 } finally { await db.close() }
