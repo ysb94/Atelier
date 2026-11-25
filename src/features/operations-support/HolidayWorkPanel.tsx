@@ -32,6 +32,7 @@ export function HolidayWorkPanel({ scope, month: monthProp }: { scope: 'mine' | 
   const caseId = scope==='operations' ? params.get('offsiteCase') ?? undefined : undefined
   const work = useHolidayWork(month, scope), [search, setSearch] = useState(''), [filter, setFilter] = useState('all')
   const confirmationWorkflow = work.data?.confirmationWorkflow === true
+  const confirmedSettlement = work.data?.confirmedSettlement === true
   const requests = useMonthlyWorkRequests(month, scope === 'operations' && work.enabled)
   const offsites = useMemo(() => new Map((scope === 'operations' ? requests.rows : [])
     .filter(request => firstOffsiteHoliday(request)).map(request => [request.id, request])), [scope, requests.rows])
@@ -123,10 +124,10 @@ export function HolidayWorkPanel({ scope, month: monthProp }: { scope: 'mine' | 
       </StatGrid>
       {editing && <div ref={editorAnchor}><HolidayWorkInput key={editing === 'plan' ? `plan:${month}` : `${editing.employeeId}:${editing.date}:${editing.version}`} row={editing === 'plan' ? undefined : editing} planned={editing === 'plan'} month={month} save={save} close={() => setEditing(null)} /></div>}
       {row && <div ref={detailAnchor}><HolidayWorkDetail key={`${row.employeeId}:${row.date}`} row={row} event={detailEvent?.note} scope={scope}
-        confirmationWorkflow={confirmationWorkflow} offlineCompensation={work.data.offlineCompensation === true} save={save} close={close} edit={() => setEditing(row)}
+        confirmationWorkflow={confirmationWorkflow} confirmedSettlement={confirmedSettlement} offlineCompensation={work.data.offlineCompensation === true} save={save} close={close} edit={() => setEditing(row)}
         settle={() => { setBasket([row]); setSettling(true) }} /></div>}
       {read.error && <p role="alert" className="text-sm text-danger">{read.error}<Button type="button" variant="outline" size="sm" onClick={read.retry}>읽음 저장 재시도</Button></p>}
-      {scope === 'operations' && <>
+      {scope === 'operations' && !confirmedSettlement && <>
         {basket.length > 0 && <Card className="flex flex-wrap items-center gap-3 p-3"><p className="text-sm">{basket[0].employeeName} · 선택 {basket.length}일 · {holidayCredit(settlementRows.reduce((s, r) => s + r.remainingUnits, 0))}<span className="block text-xs text-muted-foreground">월을 바꿔 같은 직원의 시간을 모을 수 있습니다. 시간은 자동 소멸하지 않습니다.</span></p><Button type="button" disabled={confirmationWorkflow && !settlementMethod} onClick={() => setSettling(true)}>선택한 시간 정산</Button><Button type="button" variant="outline" onClick={() => { setBasket([]); setSettling(false) }}>선택 해제</Button></Card>}
         {settling && basket.length > 0 && (!confirmationWorkflow || settlementMethod) && <HolidaySettlementEditor rows={settlementRows} compensationMethod={settlementMethod || undefined}
           policyReady={settlementMethod === 'leave' || Boolean(work.data.policy)} save={save} close={() => { setSettling(false); setBasket([]) }} />}
@@ -141,7 +142,7 @@ export function HolidayWorkPanel({ scope, month: monthProp }: { scope: 'mine' | 
               return trip ? [trip] : []
             })
             const offsiteLookupReady = !item.source.offsites.length || requests.isSuccess
-            const canSelect = scope === 'operations' && item.canSettle && item.remainingUnits > 0 && !item.legacySettled
+            const canSelect = scope === 'operations' && !confirmedSettlement && item.canSettle && item.remainingUnits > 0 && !item.legacySettled
               && (confirmationWorkflow ? Boolean(holidayConfirmedMethod(item)) : offsiteLookupReady && trips.length === 0)
             return <tr key={`${item.employeeId}:${item.date}`} className="border-t border-border">
               <td className="p-3">{item.employeeName}<span className="block text-xs text-muted-foreground">{item.departmentName || '부서 미지정'}</span></td>
@@ -178,7 +179,7 @@ export function HolidayWorkPanel({ scope, month: monthProp }: { scope: 'mine' | 
         </tbody>
       </table></Card>
       {visible.length + visibleOffsites.length > limit && <Button type="button" variant="outline" onClick={() => setLimit(n => n + 50)}>더 보기</Button>}
-      {scope === 'operations' && <details className="rounded-xl border border-border bg-card p-3">
+      {scope === 'operations' && !confirmedSettlement && <details className="rounded-xl border border-border bg-card p-3">
         <summary className="cursor-pointer text-sm font-medium">정산 기준</summary>
         <div className="mt-3 space-y-2">
           <p className="text-xs text-muted-foreground">토요일은 회사 기준 1.5배, 일요일·공휴일은 8시간 이내 1.5배·초과분 2배, 22시~06시 근무는 0.5배를 추가해 표시합니다. 지급 전 계약·근무일 구분과 통상시급을 확인하세요.</p>
@@ -188,8 +189,8 @@ export function HolidayWorkPanel({ scope, month: monthProp }: { scope: 'mine' | 
   </section>
 }
 
-export function HolidayWorkDetail({ row, event, scope, confirmationWorkflow, offlineCompensation = false, save, close, edit, settle, canEdit = true }: {
-  row: HolidayWork; event?: string; scope: 'mine' | 'review' | 'operations'; confirmationWorkflow: boolean; offlineCompensation?: boolean
+export function HolidayWorkDetail({ row, event, scope, confirmationWorkflow, confirmedSettlement = false, offlineCompensation = false, save, close, edit, settle, canEdit = true }: {
+  row: HolidayWork; event?: string; scope: 'mine' | 'review' | 'operations'; confirmationWorkflow: boolean; confirmedSettlement?: boolean; offlineCompensation?: boolean
   save: HolidaySave; close?: () => void; edit: () => void; settle?: () => void; canEdit?: boolean
 }) {
   const [note, setNote] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null)
@@ -205,14 +206,14 @@ export function HolidayWorkDetail({ row, event, scope, confirmationWorkflow, off
     <p className="text-sm">실제 {row.actualMinutes === null ? '미확인' : holidayCredit(row.actualMinutes * 2)} · 야간 {holidayCredit((row.nightMinutes ?? 0) * 2)} · 가산 보상 {row.creditUnits === null ? '부서 확인 후 확정' : holidayCredit(row.creditUnits)}</p>
     <p className="text-xs text-muted-foreground">외근 원본 {row.source.offsites.length}건 · 승인된 근무 신청 {row.source.overtimes?.length ?? 0}건 · 출퇴근 참고 {row.source.clocks.map(c => `${c.date} 출근 ${c.in} / 퇴근 ${c.out ? new Date(c.out).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '미등록'}`).join(', ') || '없음'}</p>
     {row.reviewNote && <p className="text-sm">부서 확인 의견: {row.reviewNote}</p>}
-    {confirmationWorkflow && scope !== 'review' && <HolidayWorkConfirmationPanel key={row.confirmation?.id ?? 'preview'} row={row} scope={scope} offlineCompensation={offlineCompensation} save={save} />}
-    {settle && confirmationWorkflow && scope === 'operations' && row.remainingUnits > 0 && holidayConfirmedMethod(row)
+    {confirmationWorkflow && scope !== 'review' && <HolidayWorkConfirmationPanel key={row.confirmation?.id ?? 'preview'} row={row} scope={scope} offlineCompensation={offlineCompensation} confirmedSettlement={confirmedSettlement} save={save} />}
+    {settle && confirmationWorkflow && !confirmedSettlement && scope === 'operations' && row.remainingUnits > 0 && holidayConfirmedMethod(row)
       && <Button type="button" onClick={settle}>정산 확정</Button>}
     <fieldset disabled={busy} className="space-y-3">
       {row.canReview && scope === 'review' && <><label className="block text-sm">확인 의견 · 보완 요청 시 필수<Textarea aria-label="휴일 실제 시간 확인 의견" value={note} maxLength={500} onChange={e => setNote(e.target.value)} /></label><div className="flex gap-2"><Button type="button" onClick={() => void change('review', { id: row.id, version: row.version, decision: 'approve', note })}>실제 시간 확인</Button><Button type="button" variant="outline" disabled={!note.trim()} onClick={() => void change('review', { id: row.id, version: row.version, decision: 'return', note })}>보완 요청</Button></div></>}
       {canEdit && row.canSubmit && !row.legacySettled && <Button type="button" variant="outline" onClick={edit}>실제 시간 입력</Button>}
       {row.canSubmit && ['planned', 'returned'].includes(row.state) && <Button type="button" variant="outline" onClick={() => void change('cancel', { date: row.date, version: row.version })}>예정 등록 취소</Button>}
-      {row.settlements.map(item => <article key={item.id} className="space-y-2 rounded-lg border border-border p-3 text-sm"><p>{item.mode === 'leave' ? `보상휴가 ${item.days}일 · ${item.expires}까지` : `${item.amountWon?.toLocaleString('ko-KR') ?? '비공개'}원 · ${item.paidOn ? `${item.paidOn} 지급 완료` : `${item.paymentMonth?.slice(0, 7)} 지급 예정`}`}</p><p className="text-xs text-muted-foreground">묶음 정산 총액·휴가 기준입니다. 이 날짜에서 사용한 보상 시간: {holidayCredit(item.units)}</p><p className="whitespace-pre-wrap">{item.note}</p>{scope === 'operations' && item.mode === 'cash' && !item.paidOn && <><Input aria-label="휴일 수당 실제 지급일" type="date" value={paidOn} onChange={e => setPaidOn(e.target.value)} /><label className="flex items-center gap-2"><input type="checkbox" checked={paidConfirmed} onChange={e => setPaidConfirmed(e.target.checked)} />실제 지급을 확인했습니다.</label><Button type="button" disabled={!paidConfirmed || !paidOn} onClick={() => void change('paid', { id: item.id, version: item.version, date: paidOn, confirmed: paidConfirmed })}>수당 지급 완료 기록</Button></>}</article>)}
+      {row.settlements.map(item => <article key={item.id} className="space-y-2 rounded-lg border border-border p-3 text-sm"><p>{item.mode === 'overtime' ? `야근 누적 반영 ${holidayCredit((item.overtimeMinutes ?? 0) * 2)}` : item.mode === 'leave' ? `보상휴가 ${item.days}일 · ${item.expires}까지` : `${item.amountWon?.toLocaleString('ko-KR') ?? '비공개'}원 · ${item.paidOn ? `${item.paidOn} 지급 완료` : `${item.paymentMonth?.slice(0, 7)} 지급 예정`}`}</p>{item.mode !== 'overtime' && <p className="text-xs text-muted-foreground">이 날짜에서 사용한 보상 시간: {holidayCredit(item.units)}</p>}<p className="whitespace-pre-wrap">{item.note}</p>{scope === 'operations' && item.mode === 'cash' && !item.paidOn && <><Input aria-label="휴일 수당 실제 지급일" type="date" value={paidOn} onChange={e => setPaidOn(e.target.value)} /><label className="flex items-center gap-2"><input type="checkbox" checked={paidConfirmed} onChange={e => setPaidConfirmed(e.target.checked)} />실제 지급을 확인했습니다.</label><Button type="button" disabled={!paidConfirmed || !paidOn} onClick={() => void change('paid', { id: item.id, version: item.version, date: paidOn, confirmed: paidConfirmed })}>수당 지급 완료 기록</Button></>}</article>)}
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
     </fieldset>
   </Card>

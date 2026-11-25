@@ -6,6 +6,8 @@ import { useAuth } from '@/lib/supabase/auth'
 import type { HolidaySave } from './HolidayWorkEditor'
 import { holidayCredit, holidayTime, HOLIDAY_COMPENSATION_METHODS, HOLIDAY_LOCATIONS, type HolidayConfirmationWork, type HolidayWork, type HolidayWorkConfirmation } from './holiday-work'
 import { renderHolidayConfirmation } from './holiday-work-confirmation-print'
+import { koreaDateKey } from '@/features/settings/my-attendance'
+import { durationInputMinutes, formatDurationClock } from './overtime-hours'
 
 function workDetails(row: HolidayWork): HolidayConfirmationWork {
   return {
@@ -50,8 +52,40 @@ function PrintConfirmation({ confirmation }: { confirmation: HolidayWorkConfirma
   </div>
 }
 
-export function HolidayWorkConfirmationPanel({ row, scope, offlineCompensation, save }: {
-  row: HolidayWork; scope: 'mine' | 'operations'; offlineCompensation: boolean; save: HolidaySave
+function ConfirmedSettlement({ row, confirmation, busy, save }: {
+  row: HolidayWork; confirmation: HolidayWorkConfirmation; busy: boolean; save: HolidaySave
+}) {
+  const [id] = useState(() => crypto.randomUUID())
+  const [verified, setVerified] = useState(false)
+  const [hours, setHours] = useState(() => row.settlements.length ? '' : formatDurationClock(row.actualMinutes ?? 0))
+  const [days, setDays] = useState('')
+  const [expires, setExpires] = useState('')
+  const today = koreaDateKey()
+  const leave = confirmation.choice === 'leave'
+  const minutes = durationInputMinutes(hours)
+  const valid = leave
+    ? Number(days) > 0 && Number(days) <= 365 && Number.isInteger(Number(days) * 4) && expires >= today
+    : minutes != null && minutes > 0 && minutes <= 1440
+  return <fieldset disabled={busy} className="space-y-3">
+    <label className="flex items-start gap-2 text-sm">
+      <input className="mt-1 accent-primary" type="checkbox" checked={verified} onChange={event => setVerified(event.target.checked)} />
+      직원이 제출한 보상방법을 확인했습니다.
+    </label>
+    {leave ? <div className="grid gap-3 sm:grid-cols-2">
+      <label className="text-sm">보상휴가 지급 일수<Input type="number" min="0.25" max="365" step="0.25" value={days} onChange={event => setDays(event.target.value)} /></label>
+      <label className="text-sm">사용기한<Input type="date" min={today} value={expires} onChange={event => setExpires(event.target.value)} /></label>
+    </div> : <label className="block max-w-52 text-sm">실제 근무시간 (시:분)
+      <Input value={hours} placeholder="4:30" onChange={event => setHours(event.target.value)} />
+    </label>}
+    <Button type="button" disabled={!verified || !valid} onClick={() => void save('settle-confirmed', {
+      id, workId: row.id, version: row.version, confirmationId: confirmation.id, verified,
+      ...(leave ? { days: Number(days), expires } : { minutes }),
+    })}>{leave ? '보상휴가 부여' : '야근 누적 반영'}</Button>
+  </fieldset>
+}
+
+export function HolidayWorkConfirmationPanel({ row, scope, offlineCompensation, confirmedSettlement = false, save }: {
+  row: HolidayWork; scope: 'mine' | 'operations'; offlineCompensation: boolean; confirmedSettlement?: boolean; save: HolidaySave
 }) {
   const { profile } = useAuth()
   const confirmation = row.confirmation
@@ -67,7 +101,7 @@ export function HolidayWorkConfirmationPanel({ row, scope, offlineCompensation, 
   const [error, setError] = useState('')
   const running = useRef(false)
   if (!row.id || row.legacySettled || (!confirmation && (!operations || !row.canSettle || row.remainingUnits <= 0))) return null
-  const canEnableLeave = operations && offlineCompensation && row.state === 'approved' && row.canSettle &&
+  const canEnableLeave = operations && !confirmedSettlement && offlineCompensation && row.state === 'approved' && row.canSettle &&
     Boolean(confirmation && !confirmation.choice && !confirmation.allowLeave) && row.settlements.length === 0
 
   async function run(action: () => Promise<void>) {
@@ -84,14 +118,15 @@ export function HolidayWorkConfirmationPanel({ row, scope, offlineCompensation, 
     <h4 className="font-semibold">주말·휴일근로 보상방법 선택 및 확인서</h4>
     <WorkDetails work={work} />
     {!confirmation ? <fieldset disabled={busy} className="space-y-2">
-      {offlineCompensation && <label className="block text-sm">직원에게 제공할 보상방법
+      {confirmedSettlement && <p className="text-sm">직원에게 제공할 보상방법 <strong>가산임금 지급 또는 보상휴가 부여</strong></p>}
+      {!confirmedSettlement && offlineCompensation && <label className="block text-sm">직원에게 제공할 보상방법
         <Select value={allowLeave ? 'both' : 'cash'} onChange={event => setAllowLeave(event.target.value === 'both')}>
           <option value="cash">가산임금 지급</option><option value="both">가산임금 지급 또는 보상휴가 부여</option>
         </Select>
       </label>}
-      {allowLeave && offlineCompensation && <p className="text-xs text-muted-foreground">오프라인으로 확인한 기준이 이 근무일에 적용되는 경우에 선택해 주세요.</p>}
+      {!confirmedSettlement && allowLeave && offlineCompensation && <p className="text-xs text-muted-foreground">오프라인으로 확인한 기준이 이 근무일에 적용되는 경우에 선택해 주세요.</p>}
       <Button type="button" onClick={() => void run(() => save('confirmation-request', { workId: row.id, version: row.version,
-        ...(offlineCompensation && allowLeave ? { leaveAuthorized: true } : {}) }))}>직원에게 확인 요청</Button>
+        ...(!confirmedSettlement && offlineCompensation && allowLeave ? { leaveAuthorized: true } : {}) }))}>직원에게 확인 요청</Button>
     </fieldset> : row.state !== 'approved' ? <p role="status" className="whitespace-pre-wrap text-sm">{confirmation.correctionReason ?? row.reviewNote ?? '근무정보 정정 중'}</p>
       : !confirmation.choice ? <>
         <p role="status" className="text-sm">{operations ? '직원 제출 대기' : 'My home 상단의 휴일근무 보상 확인서에서 보상방법을 제출해 주세요.'}</p>
@@ -104,11 +139,13 @@ export function HolidayWorkConfirmationPanel({ row, scope, offlineCompensation, 
       </>
       : confirmation.choice === 'correction' ? <p role="status" className="whitespace-pre-wrap text-sm">정정 요청 제출 · {confirmation.correctionReason}</p>
       : <>
-        <p className="text-sm"><strong>{HOLIDAY_COMPENSATION_METHODS[confirmation.choice]}</strong> · {row.remainingUnits === 0 ? '정산 확정' : confirmation.signedAt ? '서명본 등록 완료' : '운영지원 확인 대기'}</p>
-        {operations && <PrintConfirmation confirmation={confirmation} />}
+        <p className="text-sm"><strong>{HOLIDAY_COMPENSATION_METHODS[confirmation.choice]}</strong> · {row.remainingUnits === 0 ? '정산 확정' : !confirmedSettlement && confirmation.signedAt ? '서명본 등록 완료' : '운영지원 확인 대기'}</p>
+        {confirmedSettlement && operations && row.canSettle && row.remainingUnits > 0 && <ConfirmedSettlement
+          key={row.version} row={row} confirmation={confirmation} busy={busy} save={(action, payload) => run(() => save(action, payload))} />}
+        {!confirmedSettlement && operations && <PrintConfirmation confirmation={confirmation} />}
         {operations && (confirmation.signedPath ? <Button type="button" variant="outline" disabled={busy}
           onClick={() => void run(() => downloadHolidayConfirmationFile(confirmation.signedPath!))}>서명본 받기</Button>
-          : <fieldset disabled={busy} className="space-y-2">
+          : !confirmedSettlement && <fieldset disabled={busy} className="space-y-2">
             <label className="block text-sm">서명본<Input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={event => setFile(event.target.files?.[0] ?? null)} /></label>
             <label className="flex gap-2 text-sm"><input type="checkbox" checked={verified} onChange={event => setVerified(event.target.checked)} />직원과 회사의 서명 및 선택 내용을 확인했습니다.</label>
             <Button type="button" variant="outline" disabled={!file || !verified || !profile?.companyId} onClick={() => void run(async () => {

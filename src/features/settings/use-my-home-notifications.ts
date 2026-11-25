@@ -92,7 +92,16 @@ export function useMyHomeNotifications({ coordinator = false, background = false
     const userId=profile.id
     let disposed=false
     let timer: ReturnType<typeof setTimeout> | undefined
-    const refresh=()=>{clearTimeout(timer);timer=setTimeout(()=>{void Promise.all(['my-home-work-notices','holiday-work',...lateAppealsQueryKey].map(key=>cache.invalidateQueries({queryKey:[key]})))},150)}
+    let refreshHolidayTotals=false
+    const refresh=()=>{
+      clearTimeout(timer)
+      timer=setTimeout(()=>{
+        const keys: unknown[][]=[['my-home-work-notices'],['holiday-work'],...lateAppealsQueryKey.map(key=>[key])]
+        if(refreshHolidayTotals)keys.push(['holiday-overtime-credits'],['my-extra-leave',userId],['my-attendance-basis',userId],['employee-extra-leave'])
+        refreshHolidayTotals=false
+        void Promise.all(keys.map(queryKey=>cache.invalidateQueries({queryKey})))
+      },150)
+    }
     const channel=db.channel(`my-home-work:${profile.id}`)
       .on('postgres_changes',{event:'*',schema:'public',table:'my_home_request_events',filter:`employee_id=eq.${userId}`},()=>{
         refresh()
@@ -104,7 +113,10 @@ export function useMyHomeNotifications({ coordinator = false, background = false
         ].map(queryKey=>cache.invalidateQueries({queryKey})))
       })
       .on('postgres_changes',{event:'*',schema:'public',table:'my_home_notification_reads',filter:`reader_id=eq.${profile.id}`},refresh)
-    if(holidaySignals&&profile.companyId)channel.on('postgres_changes',{event:'*',schema:'public',table:'holiday_work_signals',filter:`company_id=eq.${profile.companyId}`},refresh)
+    if(holidaySignals&&profile.companyId)channel.on('postgres_changes',{event:'*',schema:'public',table:'holiday_work_signals',filter:`company_id=eq.${profile.companyId}`},()=>{
+      refreshHolidayTotals=true
+      refresh()
+    })
     channel.subscribe(status=>{if(disposed)return;diagnosticRealtime('notification','work_notice_channel',status);if(status==='SUBSCRIBED')refresh()})
     return()=>{disposed=true;clearTimeout(timer);void db.removeChannel(channel).catch(error=>startWorkflow('notification','unsubscribe').fail(error))}
   },[coordinator,enabled,profile?.id,profile?.companyId,cache,holidaySignals,workEnabled])

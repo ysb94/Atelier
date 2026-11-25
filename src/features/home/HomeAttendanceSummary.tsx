@@ -13,6 +13,7 @@ import { useHeadOfficeSelfService } from '@/lib/company/workforce-management-con
 import { emptyList, formatNumber } from '@/lib/utils'
 import { actualOvertimeHours, countMyLateDays } from './my-attendance-summary'
 import { useOvertimeActuals } from '@/features/operations-support/use-overtime-actuals'
+import { useHolidayOvertimeCredits } from '@/features/operations-support/use-holiday-work'
 import { useLeaveAdvances } from '@/features/operations-support/use-leave-advances'
 import { useMyClockIn } from './use-my-clock-in'
 import './company-home.css'
@@ -79,6 +80,8 @@ function HeadOfficeAttendanceSummary() {
   const outstanding = advances.data?.employees[0]?.outstanding ?? 0
   const today = koreaDateKey()
   const month = today.slice(0, 7)
+  const holidayOvertime = useHolidayOvertimeCredits(month, 'mine')
+  const holidayMinutes = holidayOvertime.rows.filter(row => row.date <= today).reduce((sum, row) => sum + row.minutes, 0)
   const dates = useMemo(() => attendanceMonthDates(month), [month])
   const incidentAdjustments = useAttendanceIncidentAdjustments(dates[0], dates[dates.length - 1], userId, allowed && active, 30_000)
   const excludedLateDates = useMemo(() => new Set(incidentAdjustments.data?.rows.filter(row => row.kind === 'late' && row.minutes === 0).map(row => row.work_date)), [incidentAdjustments.data])
@@ -113,15 +116,15 @@ function HeadOfficeAttendanceSummary() {
   }), [basisRow, clock.rows, month, today, requests, lunchHours, leaves.error, lunch.error, actuals.ready, actuals.rows, excludedLateDates])
   const lateLoading = !clock.exempt && (clock.loading || (allowed && (basis.isPending || leaves.isPending || lunch.isPending || incidentAdjustments.isLoading)))
   const leaveLoading = allowed && basis.isPending
-  const overtimeLoading = allowed && (leaves.isPending || actuals.isPending)
-  const overtimeError = Boolean(leaves.error || actuals.error)
+  const overtimeLoading = allowed && (leaves.isPending || actuals.isPending || holidayOvertime.isPending)
+  const overtimeError = Boolean(leaves.error || actuals.error || holidayOvertime.error)
 
   return <details className="home-attendance-summary">
     <summary><h2>내 근태 현황</h2>{advances.data?.ready && outstanding > 0 && <strong className="text-xs tabular-nums text-danger">선사용 {formatNumber(-outstanding)}일</strong>}</summary>
     <dl>
       <div><dt>이번 달 지각</dt><dd>{clock.exempt ? '제외' : lateLoading ? '…' : basis.isError || leaves.isError || lunch.isError || incidentAdjustments.isError ? '조회 실패' : summary.late == null ? '기준 미설정' : amount(summary.late, '회')}</dd></div>
       <div><dt>남은 연차</dt><dd className={basisRow?.additionalAnnualLeave != null && basisRow.additionalAnnualLeave > 0 ? 'is-split' : undefined}>{leaveLoading ? '…' : basis.isError ? '조회 실패' : basisRow?.additionalAnnualLeave != null && basisRow.additionalAnnualLeave > 0 && basisRow.baseAnnualLeave != null ? <AdditionalLeaveHistory userId={userId}>{remainingLeaveAmount(basisRow.baseAnnualLeave, basisRow.additionalAnnualLeave, basisRow.remainingAnnualLeave)}</AdditionalLeaveHistory> : remainingLeaveAmount(basisRow?.baseAnnualLeave, basisRow?.additionalAnnualLeave, basisRow?.remainingAnnualLeave ?? null)}</dd></div>
-      <div><dt>이번 달 야근</dt><dd>{overtimeError ? '조회 실패' : overtimeLoading ? '…' : summary.overtime == null ? '실제 시간 연결 대기' : amount(summary.overtime, '시간')}</dd></div>
+      <div><dt>이번 달 야근</dt><dd>{overtimeError ? '조회 실패' : overtimeLoading ? '…' : summary.overtime == null ? '실제 시간 연결 대기' : amount(summary.overtime + holidayMinutes / 60, '시간')}</dd></div>
     </dl>
     <p>야근은 실제 출퇴근 기록으로 집계하며, 퇴근 미기록은 제외합니다. 월별 기록은 My home에서 확인하세요.</p>
   </details>

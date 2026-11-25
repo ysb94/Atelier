@@ -37,5 +37,42 @@ export async function verifyHolidayLeaveIntegration({db,actor,value,create,ops,c
   await db.exec('reset role')
   assert.equal(Number(await value('select count(*) from app.employee_extra_leave_usage where grant_id=$1 and refunded_at is null',[grant])),0,'normal cancellation restores compensation leave usage')
   assert.equal(Number(await value('select remaining_annual_leave from public.employee_roster where profile_id=$1',[employee])),7)
-  console.log('holiday-work real leave integration: grant/lifecycle, FEFO quarter-day consumption and cancellation passed with original base balance preserved')
+
+  const session = crypto.randomUUID()
+  await db.exec(`
+    alter table public.profiles add column job_grade text;
+    create table auth.sessions(id uuid,user_id uuid);
+    create table auth.mfa_amr_claims(session_id uuid,authentication_method text);
+    create function auth.jwt() returns jsonb language sql stable as $$select jsonb_build_object('session_id',nullif(current_setting('request.jwt.claim.session_id',true),''))$$;
+    insert into auth.sessions values('${session}','${employee}');
+    insert into auth.mfa_amr_claims values('${session}','oauth');
+    select set_config('request.jwt.claim.session_id','${session}',false);
+    create schema storage;
+    create table storage.buckets(id text primary key,name text,public boolean,file_size_limit integer,allowed_mime_types text[]);
+    create table storage.objects(bucket_id text,name text,metadata jsonb,primary key(bucket_id,name));
+    alter table storage.objects enable row level security;
+    delete from app.holiday_work_policy where company_id='${company}';
+  `)
+  for (const migration of [
+    '20261125033732_holiday_work_compensation_confirmation.sql',
+    '20261125063357_holiday_work_offline_compensation.sql',
+    '20261125075906_holiday_work_confirmed_compensation.sql',
+  ]) await db.exec(await readFile('supabase/migrations/'+migration,'utf8'))
+
+  await actor(employee)
+  const { id: workId } = await call('submit', { date: '2026-10-11', location: 'office', version: 0, note: '실제 근무', intervals: [{ start: 540, end: 660 }] })
+  await actor(peer); await call('review', { id: workId, version: 1, decision: 'approve' })
+  await actor(ops)
+  const { id: confirmationId } = await call('confirmation-request', { workId, version: 2 })
+  await actor(employee); await call('confirmation-respond', { workId, confirmationId, choice: 'leave' })
+  const settlement = { id: crypto.randomUUID(), workId, version: 2, confirmationId, verified: true, days: 0.5, expires: '2027-12-31' }
+  await actor(ops)
+  await call('settle-confirmed', settlement)
+  await call('settle-confirmed', settlement)
+  await db.exec('reset role')
+  const actualGrant = await value('select grant_id from app.holiday_work_settlements where id=$1', [settlement.id])
+  assert.equal(Number(await value('select days from app.employee_extra_leave where id=$1', [actualGrant])), 0.5)
+  assert.equal(Number(await value('select sum(days) from app.employee_extra_leave where employee_id=$1 and deleted_at is null', [employee])), 0.75)
+  assert.equal(Number(await value('select remaining_annual_leave from public.employee_roster where profile_id=$1', [employee])), 7)
+  console.log('holiday-work real leave integration: confirmed leave grant without signed file/policy, existing FEFO consumption and cancellation, base balance preserved')
 }

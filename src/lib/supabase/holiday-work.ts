@@ -1,10 +1,10 @@
 import { getSupabase } from './client'
 import { diagnosticQuery } from './diagnostic-query'
 import { diagnosticOperation, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
-import type { HolidayWorkList } from '@/features/operations-support/holiday-work'
+import type { HolidayOvertimeCredit, HolidayWorkList } from '@/features/operations-support/holiday-work'
 
 export type HolidayAction = 'plan' | 'submit' | 'review' | 'cancel' | 'settle' | 'policy' | 'paid' | 'offsite-settle'
-  | 'confirmation-request' | 'confirmation-respond' | 'confirmation-return' | 'confirmation-file'
+  | 'confirmation-request' | 'confirmation-respond' | 'confirmation-return' | 'confirmation-file' | 'settle-confirmed'
 async function call<T>(action: string, payload: object, context?: DiagnosticContext): Promise<T> {
   return diagnosticQuery<T>('offsite', `holiday_${action}`, getSupabase().rpc('holiday_work', { p_action: action, p_payload: payload }), context)
 }
@@ -23,6 +23,16 @@ export async function changeHolidayWork(action: HolidayAction, payload: object) 
     trace.done({ writeOutcome: 'committed' })
     return result
   })
+}
+
+export async function listHolidayOvertimeCredits(month: string, scope: 'mine' | 'operations') {
+  const { data, error } = await getSupabase().rpc('holiday_work', {
+    p_action: 'overtime-credits', p_payload: { month: `${month}-01`, scope },
+  })
+  if (error && ['PGRST202', '42883'].includes(error.code)) return []
+  // The previous dispatcher returns this exact error for an unknown action.
+  if (error?.code === '23514' && error.message === '지원하지 않는 처리입니다.') return []
+  return diagnosticQuery<HolidayOvertimeCredit[]>('offsite', 'holiday_overtime_credits', Promise.resolve({ data, error }))
 }
 
 const confirmationBucket = 'holiday-work-confirmations'

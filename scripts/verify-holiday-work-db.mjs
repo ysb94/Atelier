@@ -179,7 +179,7 @@ try {
   const originalRows = await oldSnapshot()
   const ledger = () => value(`select jsonb_build_object(
     'days',(select jsonb_agg(d order by id) from app.holiday_work_days d),
-    'settlements',(select jsonb_agg(s order by id) from app.holiday_work_settlements s),
+    'settlements',(select jsonb_agg(to_jsonb(s)-'confirmation_id'-'overtime_minutes' order by id) from app.holiday_work_settlements s),
     'events',(select jsonb_agg(e order by event_key) from app.holiday_work_events e))`)
   const originalLedger = await ledger()
   await db.exec(await readFile('supabase/migrations/20261125033732_holiday_work_compensation_confirmation.sql', 'utf8'))
@@ -324,5 +324,58 @@ try {
   await db.exec('reset role')
   assert.equal(await value('select count(*)::int from app.holiday_work_policy'),0)
   assert.equal(await value('select offline_leave_authorized_by from app.holiday_work_confirmations where id=$1',[offlineId]),ops)
-  console.log('holiday-work isolated DB: migration, permissions, review, versioned notices, offline authorization, signed-file guard, partial credit, cash, duplicate guards passed')
+  await as(staff)
+  const hoursWork = await submit('2026-10-04')
+  const daysWork = await submit('2026-10-17')
+  await as(approver)
+  for (const id of [hoursWork, daysWork]) await call('review', { id, version: 1, decision: 'approve' })
+  await as(ops)
+  const hoursConfirmation = (await call('confirmation-request', { workId: hoursWork, version: 2 })).id
+  const daysConfirmation = (await call('confirmation-request', { workId: daysWork, version: 2 })).id
+  await db.exec('reset role')
+  const beforeConfirmed = { ledger: await ledger(), confirmations: await confirmations(), original: await oldSnapshot() }
+  await db.exec(await readFile('supabase/migrations/20261125075906_holiday_work_confirmed_compensation.sql','utf8'))
+  assert.deepEqual({ ledger: await ledger(), confirmations: await confirmations(), original: await oldSnapshot() }, beforeConfirmed)
+
+  const hoursDecision = { id: crypto.randomUUID(), workId: hoursWork, version: 2, confirmationId: hoursConfirmation, verified: true, minutes: 135 }
+  const daysDecision = { id: crypto.randomUUID(), workId: daysWork, version: 2, confirmationId: daysConfirmation, verified: true, days: 1, expires: '2027-12-31' }
+  const credits = (scope = 'mine', month = '2026-10-01') => call('overtime-credits', { scope, month })
+  await as(ops)
+  assert.equal((await list('operations')).confirmedSettlement, true)
+  await assert.rejects(() => call('settle-confirmed', hoursDecision), /이미 처리|변경/)
+  await as(staff)
+  assert.equal((await list()).rows.find(r => r.id === daysWork).confirmation.allowLeave, true, 'previous cash-only requests immediately show both choices')
+  await call('confirmation-respond', { workId: hoursWork, confirmationId: hoursConfirmation, choice: 'cash' })
+  await call('confirmation-respond', { workId: daysWork, confirmationId: daysConfirmation, choice: 'leave' })
+  await assert.rejects(() => call('settle-confirmed', hoursDecision), /권한/)
+  await assert.rejects(() => credits('operations'), /권한/)
+  await as(ops)
+  await assert.rejects(() => call('settle-confirmed', { ...hoursDecision, verified: false }), /확인해/)
+  await assert.rejects(() => call('settle-confirmed', { ...hoursDecision, version: 1 }), /변경/)
+  assert.equal((await call('settle-confirmed', hoursDecision)).id, hoursDecision.id)
+  assert.equal((await call('settle-confirmed', hoursDecision)).id, hoursDecision.id)
+  await assert.rejects(() => call('settle-confirmed', { ...hoursDecision, id: crypto.randomUUID(), version: 3 }), /이미 처리|변경/)
+  assert.equal((await call('settle-confirmed', daysDecision)).id, daysDecision.id)
+  assert.equal((await call('settle-confirmed', daysDecision)).id, daysDecision.id)
+  const processed = (await list('operations')).rows.filter(r => [hoursWork,daysWork].includes(r.id))
+  assert.ok(processed.every(r => r.remainingUnits === 0 && r.settlements.length === 1 && r.confirmation.signedPath === null))
+  assert.equal(processed.find(r => r.id === hoursWork).actualMinutes, 120, 'original reported time preserved')
+  assert.equal(processed.find(r => r.id === hoursWork).settlements[0].overtimeMinutes, 135)
+  assert.equal(processed.find(r => r.id === daysWork).settlements[0].days, 1)
+  assert.equal((await credits('operations')).length, 1)
+  assert.ok((await notices()).filter(n => [hoursWork,daysWork].includes(n.entity_id) && n.event_type === 'holiday-confirmation-submitted').every(n => !n.action_needed))
+  await as(staff)
+  assert.deepEqual((await credits()).map(({ employeeId, date, minutes }) => [employeeId, date, minutes]), [[staff, '2026-10-04', 135]])
+  assert.deepEqual(await credits('mine', '2026-11-01'), [])
+  await as(peer)
+  assert.deepEqual(await credits(), [])
+  await as(foreign)
+  assert.deepEqual(await credits(), [])
+  await as(ops)
+  await assert.rejects(() => value('select app.holiday_work_settle_confirmed($1)', [daysDecision]), /permission denied/)
+  await db.exec('reset role')
+  assert.equal(await value('select count(*)::int from app.employee_extra_leave where note=$1', ['휴일근무 보상휴가 · 2026-10-17']), 1)
+  assert.equal(await value('select count(*)::int from app.holiday_work_policy'),0)
+  assert.deepEqual(await oldSnapshot(), beforeConfirmed.original)
+  console.log('holiday-work isolated DB: legacy records, both choices, unsigned settlement, leave ledger, overtime credits, retries, and access passed')
 } catch (error) { console.error('holiday-work DB verification failed:', error.message, error.code, error.where ?? '', error.position ?? ''); process.exitCode=1 } finally { await db.close() }

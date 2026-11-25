@@ -30,14 +30,14 @@ export function HolidayOffsiteCaseDialog({ request, month, close }: { request: L
   const error = work.error ?? (work.data?.ready === false ? new Error('외근 기록을 조회할 수 없습니다.') : null)
   return <HolidayOffsiteSettlementDialog request={request} rows={work.rows} active={work.enabled}
     loading={work.isPending} error={error} refresh={work.refetch} policy={work.data?.policy ?? null} offlineCompensation={work.data?.offlineCompensation === true}
-    confirmationWorkflow={work.data?.confirmationWorkflow === true}
+    confirmationWorkflow={work.data?.confirmationWorkflow === true} confirmedSettlement={work.data?.confirmedSettlement === true}
     save={async (action, payload) => { await work.save.mutateAsync({ action, payload }) }} close={close} />
 }
 
-function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error, refresh, policy, confirmationWorkflow, offlineCompensation, save, close }: {
+function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error, refresh, policy, confirmationWorkflow, confirmedSettlement, offlineCompensation, save, close }: {
   request: LeaveRequest; rows: HolidayWork[]; active: boolean; loading: boolean
   error: Error | null; refresh: () => Promise<unknown>; policy: HolidayWorkList['policy']; offlineCompensation: boolean
-  confirmationWorkflow: boolean; save: HolidaySave; close: () => void
+  confirmationWorkflow: boolean; confirmedSettlement: boolean; save: HolidaySave; close: () => void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const { profile } = useAuth()
@@ -60,7 +60,7 @@ function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error,
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [weekdaySavedMode, setWeekdaySavedMode] = useState<'leave' | 'time' | null>(null)
-  const [confirmationDay, setConfirmationDay] = useState<string | null>(null)
+  const [confirmationDay, setConfirmationDay] = useState<string | null>()
   const [settlementDay, setSettlementDay] = useState<string | null>(null)
   const submitting = useRef(false)
   const [settlementId] = useState(() => crypto.randomUUID())
@@ -71,6 +71,9 @@ function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error,
     return () => { if (element?.open) element.close() }
   }, [active])
 
+  const pendingConfirmations = rows.filter(row => row.canSettle && row.remainingUnits > 0 && !row.legacySettled)
+  const openConfirmationDay = confirmationDay === undefined && confirmedSettlement && pendingConfirmations.length === 1
+    ? pendingConfirmations[0].id : confirmationDay
   const weekdayDates = preview.data?.dates.filter(row => isWorkday(row.date, {})) ?? []
   const weekdayDone = Boolean(weekdaySavedMode || preview.data?.settlement)
   const weekdays = weekdayDone ? [] : weekdayDates.filter(row => (row.minutes ?? 0) > 0)
@@ -160,15 +163,19 @@ function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error,
           {row.actualMinutes != null && row.creditUnits != null
             ? <span>실제 {holidayCredit(row.actualMinutes * 2)}{row.creditUnits === row.actualMinutes * 3 ? ' × 1.5' : ''} → <strong>보상 {holidayCredit(row.creditUnits)}</strong></span>
             : <span>{holidayPhase(row, confirmationWorkflow)}</span>}
+          {row.settlements.map(item => item.mode === 'overtime' || item.mode === 'leave'
+            ? <p key={item.id} className="w-full text-sm">{item.mode === 'overtime'
+              ? `야근 누적 반영 ${holidayCredit((item.overtimeMinutes ?? 0) * 2)}`
+              : `보상휴가 ${item.days}일 · ${item.expires}까지`}</p> : null)}
           {row.actualMinutes != null && <small className="w-full text-right text-muted-foreground">{holidayPhase(row, confirmationWorkflow)}{row.remainingUnits > 0 && row.remainingUnits !== row.creditUnits && ` · 남은 보상 ${holidayCredit(row.remainingUnits)}`}</small>}
           {confirmationWorkflow && row.id && (row.confirmation || (row.canSettle && row.remainingUnits > 0 && !row.legacySettled)) && <>
-            <Button type="button" size="sm" variant="outline" aria-expanded={confirmationDay === row.id}
-              onClick={() => { setConfirmationDay(confirmationDay === row.id ? null : row.id); setSettlementDay(null) }}>
-              {row.date} 확인서 {confirmationDay === row.id ? '닫기' : '열기'}
+            <Button type="button" size="sm" variant="outline" aria-expanded={openConfirmationDay === row.id}
+              onClick={() => { setConfirmationDay(openConfirmationDay === row.id ? null : row.id); setSettlementDay(null) }}>
+              {row.date} 확인서 {openConfirmationDay === row.id ? '닫기' : '열기'}
             </Button>
-            {confirmationDay === row.id && <div className="mt-2 w-full space-y-2">
-              <HolidayWorkConfirmationPanel key={row.confirmation?.id ?? row.id} row={row} scope="operations" offlineCompensation={offlineCompensation} save={save} />
-              {row.remainingUnits > 0 && compensationMethod && (settlementDay === row.id
+            {openConfirmationDay === row.id && <div className="mt-2 w-full space-y-2">
+              <HolidayWorkConfirmationPanel key={row.confirmation?.id ?? row.id} row={row} scope="operations" offlineCompensation={offlineCompensation} confirmedSettlement={confirmedSettlement} save={save} />
+              {!confirmedSettlement && row.remainingUnits > 0 && compensationMethod && (settlementDay === row.id
                 ? <HolidaySettlementEditor rows={[row]} policyReady={compensationMethod === 'leave' || policyReady} compensationMethod={compensationMethod}
                   save={save} close={() => setSettlementDay(null)} />
                 : <Button type="button" onClick={() => setSettlementDay(row.id)}>정산 확정</Button>)}
@@ -181,7 +188,7 @@ function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error,
       {weekdayDone && <p className="text-sm text-muted-foreground">평일 추가 근무 처리 완료</p>}
       {weekdayMissing && <p role="alert" className="text-sm text-danger">평일 근무 기준을 먼저 확인해 주세요.</p>}
       {holidays.length > 100 && <p role="alert" className="text-sm text-danger">휴일 기록이 100건을 넘습니다. 아래 근무 목록에서 날짜를 나눠 정산해 주세요.</p>}
-      <fieldset disabled={busy} className="space-y-4">
+      {(!confirmedSettlement || weekdayDates.length > 0) ? <fieldset disabled={busy} className="space-y-4">
         <legend className="mb-2 text-sm font-medium">{confirmationWorkflow ? '평일 추가근무 처리 방식' : '처리 방식'}</legend>
         <div className="grid grid-cols-3 gap-2">{MODES.map(item => <Button key={item.value} type="button" size="sm"
           variant={mode === item.value ? 'default' : 'outline'} aria-pressed={mode === item.value}
@@ -215,7 +222,7 @@ function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error,
         </>}
         {message && <p role="alert" className="text-sm text-danger">{message}</p>}
         <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={close}>닫기</Button><Button type="button" disabled={!canSave} onClick={() => void submit()}>{busy ? '저장 중…' : '저장'}</Button></div>
-      </fieldset>
+      </fieldset> : <div className="flex justify-end"><Button type="button" variant="outline" onClick={close}>닫기</Button></div>}
     </div>
   </dialog>
 }

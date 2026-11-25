@@ -10,7 +10,11 @@ export type HolidayWorkConfirmation = {
   id: string; work: HolidayConfirmationWork; requestedAt: string; choice: HolidayCompensationChoice | 'correction' | null
   respondedAt: string | null; correctionReason: string | null; signedPath: string | null; signedAt: string | null; allowLeave: boolean
 }
-export type HolidaySettlement = { id: string; mode: 'cash' | 'leave'; units: number; amountWon: number | null; paymentMonth: string | null; paidOn: string | null; days: number | null; expires: string | null; note: string; version: number }
+export type HolidaySettlement = { id: string; mode: 'cash' | 'leave' | 'overtime'; units: number; amountWon: number | null; paymentMonth: string | null; paidOn: string | null; days: number | null; expires: string | null; note: string; version: number; overtimeMinutes?: number }
+export type HolidayOvertimeCredit = {
+  id: string; employeeId: string; employeeName: string; departmentId: string | null; departmentName: string | null
+  date: string; minutes: number
+}
 export type HolidayWork = {
   id: string | null; employeeId: string; employeeName: string; departmentName: string | null; date: string
   dayKind: 'rest' | 'holiday'; location: 'office' | 'offsite' | 'mixed'; state: 'unreported' | 'planned' | 'submitted' | 'returned' | 'approved' | 'cancelled'
@@ -21,7 +25,7 @@ export type HolidayWork = {
   jobGrade?: string | null
   confirmation?: HolidayWorkConfirmation
 }
-export type HolidayWorkList = { ready: boolean; rows: HolidayWork[]; isOperations: boolean; policy: { ref: string; date: string } | null; confirmationWorkflow?: boolean; offlineCompensation?: boolean }
+export type HolidayWorkList = { ready: boolean; rows: HolidayWork[]; isOperations: boolean; policy: { ref: string; date: string } | null; confirmationWorkflow?: boolean; offlineCompensation?: boolean; confirmedSettlement?: boolean }
 export const HOLIDAY_STATES = { unreported: '실제 시간 미제출', planned: '예정', submitted: '부서 확인 대기', returned: '보완 요청', approved: '시간 확인 완료', cancelled: '취소' }
 export const HOLIDAY_LOCATIONS = { office: '사무실', offsite: '외근', mixed: '사무실·외근' }
 export function holidayClock(value: string): number | null {

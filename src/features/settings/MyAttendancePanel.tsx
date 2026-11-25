@@ -670,7 +670,7 @@ function ScheduleHolidayWork({ date, row, work, canRegister, today, save, routed
 
   return <>
     {row && row.state !== 'cancelled' ? <HolidayWorkDetail row={row} scope="mine" confirmationWorkflow={confirmationWorkflow}
-      event={event?.note} save={save} edit={() => setEditor('actual')} canEdit={date <= today} />
+      confirmedSettlement={work.data.confirmedSettlement === true} event={event?.note} save={save} edit={() => setEditor('actual')} canEdit={date <= today} />
       : canRegister && <div className="flex flex-wrap gap-2">
         {date >= today && <Button type="button" onClick={() => setEditor('plan')}>근무 예정 등록</Button>}
         {date <= today && <Button type="button" variant="outline" onClick={() => setEditor('actual')}>실제 시간 입력</Button>}
