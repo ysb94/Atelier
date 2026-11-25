@@ -12,7 +12,8 @@ import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { sampleElapsedDays, sampleTripSpanDays } from '@/lib/drafts/sample-work-order'
 import { listChinaWorkAssignees } from '@/lib/supabase/china-work-assignees'
 import { applyChinaWorkOrder } from '@/lib/supabase/china-work-orders'
-import { downloadSamplePack, receiveSamplePack, samplePackId } from '@/lib/supabase/sample-work-order-packs'
+import { receiveSamplePack, samplePackId } from '@/lib/supabase/sample-work-order-packs'
+import { useSamplePackDownload } from '@/features/drafts/useSamplePackDownload'
 import { listOrgChartMembers, type OrgChartMember } from '@/lib/supabase/profiles'
 import { cn, emptyList, formatNumber } from '@/lib/utils'
 import type { WorkOrderGroup, WorkOrderRow } from './work-order-types'
@@ -122,6 +123,7 @@ export function ChinaWorkOrderBoard({ groups, brandById, emptyMessage }: { group
   const queryClient = useQueryClient()
   const [receivingId, setReceivingId] = useState<string | null>(null)
   const [receiveError, setReceiveError] = useState('')
+  const bulk = useSamplePackDownload()
   const [choices, setChoices] = useState<Record<string, { assigneeId: string; saving: boolean }>>({})
   const [handingOffId, setHandingOffId] = useState<string | null>(null)
   const [assignmentWarning, setAssignmentWarning] = useState<string[]>([])
@@ -142,8 +144,10 @@ export function ChinaWorkOrderBoard({ groups, brandById, emptyMessage }: { group
     const trace = startWorkflow('app', 'china_work_check')
     try {
       trace.step('validate_input')
-      if (pack) await trace.run('get_file', () => downloadSamplePack(pack, `${row.draft.draftNo} ${row.stageLabel}`))
-      else downloadWorkOrder(row.url, row.fileName)
+      if (pack) {
+        const saved = await trace.run('get_file', () => bulk.download(pack, `${row.draft.draftNo} ${row.stageLabel}`))
+        if (!saved) { trace.done({ writeOutcome: 'none' }); return }
+      } else downloadWorkOrder(row.url, row.fileName)
       if (row.fileCheckedAt) { trace.done({ writeOutcome: 'none' }); return }
       await trace.run('save', async () => {
         if (pack) await receiveSamplePack(pack, row.draft.updatedAt)
@@ -268,5 +272,6 @@ export function ChinaWorkOrderBoard({ groups, brandById, emptyMessage }: { group
       </table>
     </div>
     {assignmentWarning.length > 0 && <ChinaAssignmentWarning messages={assignmentWarning} onClose={() => setAssignmentWarning([])} />}
+    {bulk.dialog}
   </Card>
 }
