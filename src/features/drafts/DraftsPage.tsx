@@ -465,25 +465,29 @@ export function CompanyDraftsPage() {
           <span>미확정 : MD {formatNumber(sheetCounts.mdOpen)}건</span>
         </div>
         <div className="flex min-w-0 flex-col gap-1.5 lg:flex-row lg:items-start lg:gap-4 xl:gap-6">
-          <div className="flex shrink-0 flex-wrap items-center gap-1" role="group" aria-label="기획안 출시 필터">
-            <BoardFilterChip
-              selected={boardFilter === 'all'}
-              onSelect={() => setBoardFilter('all')}
-              label="전체"
-              count={sheetCounts.total}
-            />
-            {brandScope === 'all' && <BoardFilterChip
-              selected={boardFilter === 'unassigned'}
-              onSelect={() => setBoardFilter('unassigned')}
-              label={UNASSIGNED_DRAFT_FOLDER_LABEL}
-              count={sheetCounts.pending}
-            />}
-            <BoardFilterChip
-              selected={boardFilter === 'scheduled'}
-              onSelect={() => setBoardFilter('scheduled')}
-              label="출시 폴더 지정"
-              count={sheetCounts.scheduled}
-            />
+          <div className="flex shrink-0 flex-wrap items-center gap-1">
+            {brandScope === 'all' && (
+              <div className="flex flex-wrap items-center gap-1" role="group" aria-label="기획안 출시 필터">
+                <BoardFilterChip
+                  selected={boardFilter === 'all'}
+                  onSelect={() => setBoardFilter('all')}
+                  label="전체"
+                  count={sheetCounts.total}
+                />
+                <BoardFilterChip
+                  selected={boardFilter === 'unassigned'}
+                  onSelect={() => setBoardFilter('unassigned')}
+                  label={UNASSIGNED_DRAFT_FOLDER_LABEL}
+                  count={sheetCounts.pending}
+                />
+                <BoardFilterChip
+                  selected={boardFilter === 'scheduled'}
+                  onSelect={() => setBoardFilter('scheduled')}
+                  label="출시 확정"
+                  count={sheetCounts.scheduled}
+                />
+              </div>
+            )}
             <label className="ml-1 inline-flex h-7 cursor-pointer items-center gap-1.5 px-1 text-xs font-medium">
               <input
                 type="checkbox"
