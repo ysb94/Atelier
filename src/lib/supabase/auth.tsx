@@ -13,6 +13,8 @@ import { getSupabase, isSupabaseConfigured } from '@/lib/supabase/client'
 import { clearImpersonationState, readImpersonationState, returnToOperator } from '@/lib/supabase/impersonation'
 import { hasPermission } from '../company/permissions'
 import { getMyProfile, type Profile } from '@/lib/supabase/profiles'
+import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
+import { useEmployeeDepartureSession } from './employee-departure-session'
 
 type AuthState = {
   /** 세션·프로필 확인이 끝났는지 */
@@ -81,6 +83,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false)
   const currentAuth = useRef<{ session: Session | null; version: number }>({ session: null, version: 0 })
   const pendingProfile = useRef<{ userId: string; token: string; promise: ReturnType<typeof loadProfileSafe> } | null>(null)
+  const revokedEmployee = useRef<string | null>(null)
+
+  const signOutDepartedEmployee = useCallback((userId: string) => {
+    if (currentAuth.current.session?.user.id !== userId) return
+    revokedEmployee.current = userId
+    currentAuth.current.session = null
+    currentAuth.current.version++
+    pendingProfile.current = null
+    clearImpersonationState()
+    setSession(null)
+    setProfile(null)
+    setProfileError(null)
+    setSessionError(null)
+    setReady(true)
+    const trace = startWorkflow('app', 'employee_departure_sign_out')
+    void trace.run('clear_local_session', async () => {
+      const { error } = await getSupabase().auth.signOut({ scope: 'local' })
+      if (error && ![401,403,404].includes(error.status ?? 0)) throw error
+    }).then(() => trace.done(), error => trace.fail(error))
+  }, [])
+  useEmployeeDepartureSession(session?.user.id, signOutDepartedEmployee)
 
   // Only simultaneous reads share a result. There is no cached permission TTL:
   // later auth events and explicit refreshes still read the current permissions.
@@ -106,6 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const acceptSession = (nextSession: Session | null, initial = false) => {
       if (!active || (initial && receivedSession)) return
+      if (nextSession && nextSession.user.id === revokedEmployee.current) return
       receivedSession = true
       setSessionError(null)
       const changedUser = currentAuth.current.session?.user.id !== nextSession?.user.id

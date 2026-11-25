@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { chatKeys } from '@/features/chat/use-chat'
 import { readPollInterval, sharedReadPolicy } from '@/lib/query/shared-read-policy'
-import { listPersonalWorkCards, personalWorkAction, personalWorkErrorMessage, personalWorkUnavailable,
+import { listPersonalWorkCards, personalWorkAction, personalWorkErrorMessage, personalWorkOwner, personalWorkUnavailable,
   type PersonalWorkCard, type PersonalWorkInput, type PersonalWorkStatus } from '@/lib/supabase/personal-work'
 import { cn } from '@/lib/utils'
 import { MyWorkCardDrawer } from './MyWorkCardDrawer'
@@ -42,7 +42,7 @@ function actionFor(card: PersonalWorkCard, status: PersonalWorkStatus) {
   if (card.status === 'todo' && status === 'doing') return 'start'
   if (card.status === 'doing' && status === 'todo') return 'pause'
   if (card.status === 'doing' && status === 'feedback') return 'submit'
-  if (card.status === 'doing' && status === 'done' && card.created_by === card.assignee_id) return 'complete'
+  if (card.status === 'doing' && status === 'done' && personalWorkOwner(card) === card.assignee_id) return 'complete'
 }
 
 export function MyWorkBoard({ feedbackActorId: actorId, active = true }: { feedbackActorId?: string; active?: boolean }) {
@@ -70,7 +70,7 @@ export function MyWorkBoard({ feedbackActorId: actorId, active = true }: { feedb
   const feedbackCard = cards.find(card => card.id === feedbackDrop?.cardId)
   const ownCards = cards.filter(card => card.assignee_id === actorId).sort((first, second) => order.indexOf(first.id) - order.indexOf(second.id))
   const reviewCards = cards.filter(card => card.reviewer_id === actorId && card.status === 'feedback')
-  const assignedCards = cards.filter(card => card.created_by === actorId && card.assignee_id !== actorId && card.status !== 'feedback')
+  const assignedCards = cards.filter(card => personalWorkOwner(card) === actorId && card.assignee_id !== actorId && card.status !== 'feedback')
   const ready = Boolean(actorId) && query.isSuccess
 
   async function save(input: PersonalWorkInput) {
@@ -224,8 +224,8 @@ export function MyWorkBoard({ feedbackActorId: actorId, active = true }: { feedb
     {renderRelated('내가 배정한 업무', assignedCards)}
     {(feedbackSettings || feedbackCard) && <MyWorkFeedbackDialog actorId={actorId} settings={feedbackSettings}
       cardTitle={feedbackCard?.title} recipientIds={recipientIds}
-      fixedReviewer={feedbackCard && feedbackCard.created_by !== feedbackCard.assignee_id
-        ? { id: feedbackCard.created_by, name: feedbackCard.creator_name } : undefined}
+      fixedReviewer={feedbackCard && personalWorkOwner(feedbackCard) !== feedbackCard.assignee_id
+        ? { id: personalWorkOwner(feedbackCard), name: feedbackCard.owner_name ?? feedbackCard.creator_name } : undefined}
       onSettings={() => setFeedbackSettings(true)} onSave={saveFeedbackRecipients}
       onClose={() => { setFeedbackSettings(false); setFeedbackDrop(null) }}
       onRequest={async (reviewer, note, command) => {

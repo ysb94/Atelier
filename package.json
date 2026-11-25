@@ -134,6 +134,7 @@
     "verify:developer-delegate": "tsx --tsconfig tsconfig.app.json scripts/verify-developer-delegate.mjs",
     "verify:release-access": "tsx --tsconfig tsconfig.app.json src/lib/company/release-access.verify.ts",
     "verify:release-access-browser": "node scripts/verify-release-access-browser.mjs",
+    "verify:employee-departure": "node scripts/verify-employee-departure-db.mjs",
     "verify:permission-settings-browser": "node scripts/verify-page-preview-browser.mjs --permissions-only",
     "verify:page-preview": "tsx --tsconfig tsconfig.app.json src/lib/company/profile-preview.verify.ts && tsx --tsconfig tsconfig.app.json src/lib/company/page-preview-cases.verify.ts && tsx --tsconfig tsconfig.app.json src/lib/company/page-preview-coverage.verify.ts",
     "verify:page-preview-browser": "node scripts/verify-page-preview-browser.mjs",

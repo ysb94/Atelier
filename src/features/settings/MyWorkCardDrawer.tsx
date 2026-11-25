@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select, Textarea } from '@/components/ui/input'
-import { listPersonalWorkMembers, personalWorkErrorMessage, type PersonalWorkCard, type PersonalWorkInput } from '@/lib/supabase/personal-work'
+import { listPersonalWorkMembers, personalWorkErrorMessage, personalWorkOwner, type PersonalWorkCard, type PersonalWorkInput } from '@/lib/supabase/personal-work'
 import { MyWorkCardHistory } from './MyWorkCardHistory'
 
 type Command = Omit<PersonalWorkInput, 'id' | 'revision' | 'command'>
@@ -34,7 +34,7 @@ export function MyWorkCardDrawer({ actorId, card, statusLabel, onClose, onAction
   const nextTitle = title.trim()
   const changed = nextTitle !== card?.title || description !== card?.description
   const isAssignee = card?.assignee_id === actorId
-  const isCreator = card?.created_by === actorId
+  const isCreator = card ? personalWorkOwner(card) === actorId : false
   const canEdit = !card || ((isAssignee || isCreator) && card.status !== 'feedback')
   const canReview = card?.status === 'feedback' && card.reviewer_id === actorId
   const canDelete = card && isCreator && card.status !== 'feedback'
@@ -105,6 +105,7 @@ export function MyWorkCardDrawer({ actorId, card, statusLabel, onClose, onAction
         </div>}
         {card && <dl className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground">
           <div><dt className="inline">등록 · </dt><dd className="inline">{card.creator_name} · {dateFormat.format(new Date(card.created_at))}</dd></div>
+          {card.owner_id && card.owner_id !== card.created_by && <div><dt className="inline">인계 관리 · </dt><dd className="inline">{card.owner_name}</dd></div>}
           <div><dt className="inline">업무 담당자 · </dt><dd className="inline">{card.assignee_name}</dd></div>
           {card.reviewer_name && <div><dt className="inline">피드백 담당자 · </dt><dd className="inline">{card.reviewer_name}</dd></div>}
         </dl>}

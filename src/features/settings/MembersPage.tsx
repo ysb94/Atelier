@@ -29,6 +29,10 @@ import {
 import { personNameError } from '@/lib/company/person-name'
 import { NEW_EMPLOYEES_HREF } from '@/features/org/new-employee-access'
 import { isPreviewProfile } from '@/lib/company/profile-preview'
+import { usePagePreview } from '@/lib/company/page-preview-context'
+import { hasPermission } from '@/lib/company/permissions'
+import { listEmployeeDepartures } from '@/lib/supabase/employee-departure'
+import { EmployeeDepartureDialog } from './EmployeeDepartureDialog'
 
 const emptyTitles: PersonnelTitle[] = []
 
@@ -217,12 +221,17 @@ function MemberEditor({
 export function MembersPage({ embedded = false }: { embedded?: boolean } = {}) {
   useRenderWatch('MembersPage')
   const { profile: me, session } = useAuth()
+  const preview = usePagePreview()
   const queryClient = useQueryClient()
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [filter, setFilter] = useState<'all' | 'active' | 'disabled'>('all')
+  const [departureId, setDepartureId] = useState<string | null>(null)
+  const [departureMessage, setDepartureMessage] = useState('')
+  const [filter, setFilter] = useState<'all' | 'active' | 'disabled' | 'departed'>('all')
   const [newDeptName, setNewDeptName] = useState('')
   const safeSession = Boolean(me?.id && me.id === session?.user.id && !isPreviewProfile(me))
   const canManageMembers = safeSession && canManagePersonnel(me)
+  const canProcessDeparture = embedded && canManageMembers && !preview?.active
+    && (hasPermission(me, 'permissions.manage') || (me?.permissionMode === 'legacy' && me.isAdmin))
   const canEditAssignment = safeSession && canEditOrgAssignment(me)
   const canViewMemberList = canViewMembers(me)
 
@@ -246,6 +255,9 @@ export function MembersPage({ embedded = false }: { embedded?: boolean } = {}) {
     queryFn: listPersonnelTitles,
     enabled: canViewMemberList,
   })
+  const departuresQuery = useQuery({ queryKey: ['employee-departures', me?.id], queryFn: listEmployeeDepartures,
+    enabled: canManageMembers && !preview?.active, retry: false })
+  const departed = useMemo(() => new Map(departuresQuery.data?.map(entry => [entry.employeeId, entry.resignedOn])), [departuresQuery.data])
 
   const profiles = useMemo(
     () => profilesQuery.data ?? [],
@@ -269,12 +281,26 @@ export function MembersPage({ embedded = false }: { embedded?: boolean } = {}) {
 
   const visible = useMemo(() => {
     return profiles.filter(p => p.id !== me?.id && p.companyId === me?.companyId
-      && (p.status === 'active' || p.status === 'disabled') && (filter === 'all' || p.status === filter))
-  }, [profiles, me?.id, me?.companyId, filter])
+      && (p.status === 'active' || p.status === 'disabled')
+      && (filter === 'all' || (filter === 'departed' ? departed.has(p.id) : p.status === filter && !departed.has(p.id))))
+  }, [profiles, me?.id, me?.companyId, filter, departed])
+  const departingEmployee = canProcessDeparture ? profiles.find(person => person.id === departureId) : undefined
 
   const invalidate = async () => {
     await queryClient.invalidateQueries({ queryKey: ['manageable-profiles'] })
     await queryClient.invalidateQueries({ queryKey: ['departments'] })
+  }
+
+  async function departureCompleted(handoverOnly: boolean, deferred: boolean) {
+    setDepartureId(null)
+    setEditingId(null)
+    setDepartureMessage(handoverOnly ? '선택한 후임자에게 인계했습니다.'
+      : deferred ? '퇴사 처리 완료. 후임이 미정인 업무는 퇴사 목록에서 인계할 수 있습니다.' : '퇴사 처리를 완료했습니다.')
+    await Promise.all([
+      ['manageable-profiles'], ['employee-departures'], ['orgChartMembers'], ['employee-roster'],
+      ['department-approvers'], ['permission-directory'], ['department-workforce-management'], ['personal-work-cards'], ['personal-work-feedback-notices'],
+      ['department-work'], ['work-requests'], ['work-request-settings'], ['my-home-work-notices'],
+    ].map(queryKey => queryClient.invalidateQueries({ queryKey })))
   }
 
   const createDeptMutation = useMutation({
@@ -306,14 +332,15 @@ export function MembersPage({ embedded = false }: { embedded?: boolean } = {}) {
 
       <p className="mb-4 rounded-xl border border-border bg-card p-3 text-sm">가입 신청 승인·거절은 <Link className="text-primary underline" to={NEW_EMPLOYEES_HREF}>조직도 → 신규직원</Link>에서 처리합니다.</p>
       {!canManageMembers && <p className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">조회 전용 · 계정 정보 변경과 정지는 기존 직원 관리 권한을 따릅니다.</p>}
+      {departureMessage && <p role="status" className="mb-4 text-sm text-success">{departureMessage}</p>}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <FilterTabs<'all'|'active'|'disabled'> ariaLabel="계정 상태" value={filter} onChange={setFilter} tabs={[{value:'all',label:'전체'},{value:'active',label:STATUS_LABEL.active},{value:'disabled',label:STATUS_LABEL.disabled}]}/>
+        <FilterTabs<'all'|'active'|'disabled'|'departed'> ariaLabel="계정 상태" value={filter} onChange={setFilter} tabs={[{value:'all',label:'전체'},{value:'active',label:STATUS_LABEL.active},{value:'disabled',label:STATUS_LABEL.disabled},...(canManageMembers ? [{value:'departed' as const,label:'퇴사'}] : [])]}/>
         <Button
           type="button"
           size="sm"
           variant="ghost"
-          onClick={() => void profilesQuery.refetch()}
+          onClick={() => { void profilesQuery.refetch(); if (canManageMembers) void departuresQuery.refetch() }}
         >
           새로고침
         </Button>
@@ -347,7 +374,7 @@ export function MembersPage({ embedded = false }: { embedded?: boolean } = {}) {
                             : 'danger'
                       }
                     >
-                      {STATUS_LABEL[member.status]}
+                      {departed.has(member.id) ? `퇴사 · ${departed.get(member.id)}` : STATUS_LABEL[member.status]}
                     </Badge>
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">
@@ -379,19 +406,22 @@ export function MembersPage({ embedded = false }: { embedded?: boolean } = {}) {
                     </p>
                   ) : null}
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={!canManageMembers}
-                  onClick={() =>
-                    setEditingId((prev) =>
-                      prev === member.id ? null : member.id,
-                    )
-                  }
-                >
-                  {editingId === member.id ? '닫기' : '관리'}
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={!canManageMembers || departed.has(member.id)}
+                    onClick={() => setEditingId(prev => prev === member.id ? null : member.id)}
+                  >
+                    {editingId === member.id ? '닫기' : '관리'}
+                  </Button>
+                  {canProcessDeparture && <Button type="button" size="sm" variant="outline"
+                    className={departed.has(member.id) ? undefined : 'text-danger'}
+                    onClick={() => { setDepartureMessage(''); setDepartureId(member.id) }}>
+                    {departed.has(member.id) ? '인계 관리' : '퇴사 처리'}
+                  </Button>}
+                </div>
               </div>
 
               {editingId === member.id && canManageMembers ? (
@@ -412,6 +442,8 @@ export function MembersPage({ embedded = false }: { embedded?: boolean } = {}) {
           ))}
         </div>
       )}
+      {departingEmployee && <EmployeeDepartureDialog key={departingEmployee.id} employee={departingEmployee} staff={profiles}
+        onClose={() => setDepartureId(null)} onCompleted={departureCompleted} />}
 
       {canEditAssignment ? (
         <section className="mt-10 space-y-4">
