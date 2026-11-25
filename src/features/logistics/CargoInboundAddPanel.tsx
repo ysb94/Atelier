@@ -134,7 +134,10 @@ type CargoInboundAddPanelProps = {
 
 type CargoShipDateDialogProps = {
   shipDate: string
+  brands: CargoInboundAddPanelProps['brands']
+  brandId: string
   submitting: boolean
+  onBrandChange: (value: string) => void
   onShipDateChange: (value: string) => void
   onClose: () => void
   onConfirm: () => void
@@ -143,7 +146,10 @@ type CargoShipDateDialogProps = {
 /** 선적일은 화물 내용을 확인한 뒤, 실제 등록 직전에 한 번 더 확인한다. */
 function CargoShipDateDialog({
   shipDate,
+  brands,
+  brandId,
   submitting,
+  onBrandChange,
   onShipDateChange,
   onClose,
   onConfirm,
@@ -203,6 +209,21 @@ function CargoShipDateDialog({
               autoFocus
               onChange={(event) => onShipDateChange(event.target.value)}
             />
+            {brands.length > 1 ? (
+              <label className="block space-y-1.5">
+                <span className="text-sm font-medium text-foreground">브랜드</span>
+                <Select
+                  value={brandId}
+                  disabled={submitting}
+                  onChange={(event) => onBrandChange(event.target.value)}
+                >
+                  <option value="">브랜드 선택</option>
+                  {brands.map((brand) => (
+                    <option key={brand.id} value={brand.id}>{brand.name}</option>
+                  ))}
+                </Select>
+              </label>
+            ) : null}
           </div>
 
           <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
@@ -212,7 +233,7 @@ function CargoShipDateDialog({
             <Button
               type="button"
               size="sm"
-              disabled={!shipDate || submitting}
+              disabled={!shipDate || !brandId || submitting}
               onClick={onConfirm}
             >
               {submitting ? '저장 중...' : '선적됨에 등록'}
@@ -233,9 +254,10 @@ export function CargoInboundAddPanel({
   useRenderWatch('CargoInboundAddPanel')
   const pasteBoxRef = useRef<HTMLDivElement>(null)
   const [shipDate, setShipDate] = useState(todayShipDateValue)
-  const [brandId, setBrandId] = useState(() =>
-    brands.length === 1 ? brands[0]!.id : '',
-  )
+  const [selectedBrandId, setSelectedBrandId] = useState('')
+  const brandId = brands.length === 1
+    ? brands[0].id
+    : brands.find((brand) => brand.id === selectedBrandId)?.id ?? ''
   const [shipDateDialogOpen, setShipDateDialogOpen] = useState(false)
   const [rows, setRows] = useState<CargoDraftRow[]>([])
   const [pasteActive, setPasteActive] = useState(false)
@@ -343,22 +365,6 @@ export function CargoInboundAddPanel({
           </Button>
         </div>
       </div>
-
-      <label className="block max-w-xs space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">브랜드</span>
-        <Select
-          value={brandId}
-          disabled={brands.length === 0 || submitting}
-          onChange={(event) => setBrandId(event.target.value)}
-        >
-          <option value="">브랜드 선택</option>
-          {brands.map((brand) => (
-            <option key={brand.id} value={brand.id}>
-              {brand.name}
-            </option>
-          ))}
-        </Select>
-      </label>
 
       <div
         ref={pasteBoxRef}
@@ -554,7 +560,7 @@ export function CargoInboundAddPanel({
           <Button
             type="button"
             size="sm"
-            disabled={rows.length === 0 || !brandId || submitting}
+            disabled={rows.length === 0 || brands.length === 0 || submitting}
             onClick={() => setShipDateDialogOpen(true)}
           >
             <CalendarDays className="size-3.5" />
@@ -566,7 +572,10 @@ export function CargoInboundAddPanel({
       {shipDateDialogOpen ? (
         <CargoShipDateDialog
           shipDate={shipDate}
+          brands={brands}
+          brandId={brandId}
           submitting={submitting}
+          onBrandChange={setSelectedBrandId}
           onShipDateChange={setShipDate}
           onClose={() => {
             if (!submitting) setShipDateDialogOpen(false)
