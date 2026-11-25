@@ -26,6 +26,8 @@ import { attendanceStartReminderItems } from './attendance-start-reminders'
 import { useVisualWorkflowNotices, visualWorkflowNoticeItem } from '@/features/work-requests/use-visual-workflow-notices'
 
 type WorkNotice = { event_key: string; entity_id: string; created_at: string; event_type: string; tab: 'approvals'|'overtime'|'my-attendance'|'holiday-work'|'operations-leave'; title?: string; action_key?: string; action_label?: string | null; kind: RequestKind; employee_name: string; from_date: string; to_date: string; start_time: string; end_time: string; note: string; decision_note: string|null; action_needed: boolean; status: string; current?: boolean; read_at: string|null }
+export type HolidayConfirmationRequest = Pick<WorkNotice, 'event_key' | 'entity_id' | 'created_at' | 'from_date'>
+const employeeConfirmationRequest = (item: WorkNotice) => item.tab === 'my-attendance' && item.event_type === 'holiday-confirmation-request'
 async function workNotices(context?: DiagnosticContext): Promise<WorkNotice[]> {
   try {
     try { return await diagnosticQuery<WorkNotice[]>('notification','list_work_notices',getSupabase().rpc('list_my_managed_work_notifications'),context) ?? [] }
@@ -38,6 +40,24 @@ async function workNotices(context?: DiagnosticContext): Promise<WorkNotice[]> {
   }
   catch(error) { const code=(error as Error & {cause?:{code?:string}}).cause?.code;throw new Error(['PGRST202','42883'].includes(code ?? '') ? '신청·퇴근 알림 서버 연결 대기: 추가 DB 설정이 필요합니다.' : '업무 알림을 불러오지 못했습니다.',{cause:error}) }
 }
+export function useHolidayConfirmationRequests(active: boolean) {
+  const { profile, session } = useAuth()
+  const preview = usePagePreview()
+  const selfService = useHeadOfficeSelfService()
+  const enabled = Boolean(active && selfService && !preview?.active && profile?.status === 'active' && profile.id === session?.user.id)
+  const query = useQuery({ queryKey: ['my-home-work-notices', profile?.id], queryFn: () => workNotices(), ...sharedReadPolicy, enabled })
+  return useMemo(() => {
+    if (!enabled || !query.data) return emptyList<HolidayConfirmationRequest>()
+    const requests = new Map<string, HolidayConfirmationRequest>()
+    for (const item of query.data) {
+      if (!employeeConfirmationRequest(item) || !item.action_needed || item.current === false) continue
+      const previous = requests.get(item.entity_id)
+      if (!previous || previous.created_at < item.created_at) requests.set(item.entity_id, item)
+    }
+    return [...requests.values()].sort((a, b) => a.from_date.localeCompare(b.from_date))
+  }, [enabled, query.data])
+}
+
 export function useMyHomeNotifications({ coordinator = false, background = false } = {}) {
   const { profile, session } = useAuth()
   const selfService = useHeadOfficeSelfService()
@@ -109,7 +129,7 @@ export function useMyHomeNotifications({ coordinator = false, background = false
       return { ...item, href: url.pathname+url.search, target: { source: 'late-statement' as const, entityId: url.searchParams.get('lateStatement')!, eventVersion: item.createdAt, tab, href: url.pathname+url.search },
         action: item.kind === 'late_statement_manager' ? { key: `late:${item.id}`, label: '사유서 확인 필요' } : null }
     })
-    const workItems = workRows.map(item => {
+    const workItems = workRows.filter(item => !employeeConfirmationRequest(item)).map(item => {
       const operationsLeave = item.tab === 'operations-leave'
       const holiday = item.event_type.startsWith('holiday-')
       const holidayPath = item.tab === 'holiday-work' ? '/operations-support/attendance?attendanceView=holiday' : `/settings/profile?part=${item.tab}`

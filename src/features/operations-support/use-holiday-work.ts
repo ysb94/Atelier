@@ -11,12 +11,13 @@ import { useDiagnosticGate } from '@/lib/diagnostics/use-diagnostic-gate'
 import { emptyList } from '@/lib/utils'
 import type { HolidayWork } from './holiday-work'
 
-export function useHolidayWork(month: string, scope: 'mine' | 'review' | 'operations', requestId?: string) {
+export function useHolidayWork(month: string, scope: 'mine' | 'review' | 'operations', requestId?: string, freshDetail = false) {
   const { profile, session } = useAuth(), preview = usePagePreview(), active = useWorkspaceTabActivity(), cache = useQueryClient()
   const workforce = useWorkforceManagement(), selfService = useHeadOfficeSelfService()
   const enabled = Boolean(active && !preview?.active && profile?.companyId && profile?.status === 'active' && session?.user.id === profile.id && (scope !== 'mine' || selfService))
   useDiagnosticGate('offsite','holiday_access',enabled,enabled?'enabled':preview?.active?'preview':!active?'hidden_tab':!session?'no_session':profile?.status!=='active'?'inactive_employee':'identity_mismatch')
-  const query = useQuery({ queryKey: ['holiday-work', profile?.id, profile?.companyId, scope, month, requestId ?? null], queryFn: () => listHolidayWork(month, scope, requestId), ...sharedReadPolicy, enabled, refetchInterval: readPollInterval(30_000, enabled) })
+  const query = useQuery({ queryKey: ['holiday-work', profile?.id, profile?.companyId, scope, month, requestId ?? null], queryFn: () => listHolidayWork(month, scope, requestId), ...sharedReadPolicy, enabled,
+    refetchOnMount: freshDetail ? 'always' : sharedReadPolicy.refetchOnMount, refetchInterval: readPollInterval(30_000, enabled) })
   const save = useMutation({ mutationFn: ({ action, payload }: { action: HolidayAction; payload: object }) => changeHolidayWork(action, payload), onSuccess: async () => {
     const trace = startWorkflow('offsite', 'holiday_refresh')
     try {

@@ -4,10 +4,8 @@ import { Input, Textarea } from '@/components/ui/input'
 import { downloadHolidayConfirmationFile, uploadHolidayConfirmationFile } from '@/lib/supabase/holiday-work'
 import { useAuth } from '@/lib/supabase/auth'
 import type { HolidaySave } from './HolidayWorkEditor'
-import { holidayCredit, holidayTime, HOLIDAY_LOCATIONS, type HolidayCompensationChoice, type HolidayConfirmationWork, type HolidayWork, type HolidayWorkConfirmation } from './holiday-work'
+import { holidayCredit, holidayTime, HOLIDAY_COMPENSATION_METHODS, HOLIDAY_LOCATIONS, type HolidayConfirmationWork, type HolidayWork, type HolidayWorkConfirmation } from './holiday-work'
 import { renderHolidayConfirmation } from './holiday-work-confirmation-print'
-
-const methods = { cash: '가산임금 지급', leave: '보상휴가 부여' } as const
 
 function workDetails(row: HolidayWork): HolidayConfirmationWork {
   return {
@@ -60,7 +58,6 @@ export function HolidayWorkConfirmationPanel({ row, scope, policy, save }: {
   const work = confirmation?.work ?? workDetails(row)
   const operations = scope === 'operations'
   const [allowLeave, setAllowLeave] = useState(false)
-  const [choice, setChoice] = useState<HolidayCompensationChoice | 'correction' | ''>('')
   const [reason, setReason] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [verified, setVerified] = useState(false)
@@ -92,23 +89,10 @@ export function HolidayWorkConfirmationPanel({ row, scope, policy, save }: {
       <p className="text-xs text-muted-foreground">{policy && policy.date <= work.date ? `서면합의 기준 ${policy.ref}` : '이 근무일에 적용되는 서면합의 기준이 없어 가산임금으로 요청합니다.'}</p>
       <Button type="button" onClick={() => void run(() => save('confirmation-request', { workId: row.id, version: row.version, allowLeave }))}>직원에게 확인 요청</Button>
     </fieldset> : row.state !== 'approved' ? <p role="status" className="whitespace-pre-wrap text-sm">{confirmation.correctionReason ?? row.reviewNote ?? '근무정보 정정 중'}</p>
-      : !confirmation.choice ? operations ? <p role="status" className="text-sm">직원 제출 대기</p>
-      : <fieldset disabled={busy} className="space-y-2">
-        <legend className="text-sm font-medium">보상방법 선택</legend>
-        {(['cash', 'leave'] as const).map(method => <label key={method} className="flex gap-2 text-sm">
-          <input type="radio" name={`holiday-choice-${confirmation.id}`} checked={choice === method}
-            disabled={method === 'leave' && !confirmation.allowLeave} onChange={() => setChoice(method)} />{methods[method]}
-        </label>)}
-        {!confirmation.allowLeave && <p className="text-xs text-muted-foreground">이 확인서에서 선택할 수 있는 보상방법은 가산임금 지급입니다.</p>}
-        {row.settlements.length === 0 && <label className="flex gap-2 text-sm">
-          <input type="radio" name={`holiday-choice-${confirmation.id}`} checked={choice === 'correction'} onChange={() => setChoice('correction')} />근무정보 정정 요청
-        </label>}
-        {choice === 'correction' && <label className="block text-sm">정정 사유<Textarea value={reason} onChange={event => setReason(event.target.value)} maxLength={500} /></label>}
-        <Button type="button" disabled={!choice || (choice === 'correction' && !reason.trim()) || (choice === 'leave' && !confirmation.allowLeave)}
-          onClick={() => void run(() => save('confirmation-respond', { workId: row.id, confirmationId: confirmation.id, choice, reason: reason.trim() }))}>제출</Button>
-      </fieldset> : confirmation.choice === 'correction' ? <p role="status" className="whitespace-pre-wrap text-sm">정정 요청 제출 · {confirmation.correctionReason}</p>
+      : !confirmation.choice ? <p role="status" className="text-sm">{operations ? '직원 제출 대기' : 'My home 상단의 휴일근무 보상 확인서에서 보상방법을 제출해 주세요.'}</p>
+      : confirmation.choice === 'correction' ? <p role="status" className="whitespace-pre-wrap text-sm">정정 요청 제출 · {confirmation.correctionReason}</p>
       : <>
-        <p className="text-sm"><strong>{methods[confirmation.choice]}</strong> · {row.remainingUnits === 0 ? '정산 확정' : confirmation.signedAt ? '서명본 등록 완료' : '운영지원 확인 대기'}</p>
+        <p className="text-sm"><strong>{HOLIDAY_COMPENSATION_METHODS[confirmation.choice]}</strong> · {row.remainingUnits === 0 ? '정산 확정' : confirmation.signedAt ? '서명본 등록 완료' : '운영지원 확인 대기'}</p>
         {operations && <PrintConfirmation confirmation={confirmation} />}
         {operations && (confirmation.signedPath ? <Button type="button" variant="outline" disabled={busy}
           onClick={() => void run(() => downloadHolidayConfirmationFile(confirmation.signedPath!))}>서명본 받기</Button>

@@ -1,6 +1,7 @@
 import { PageHeader } from '@/components/layout/PageHeader'
 import { HomeAttendanceSummary } from '@/features/home/HomeAttendanceSummary'
 import { LateArrivalHeaderButton } from '@/features/home/LateArrivalClockIn'
+import { HolidayWorkConfirmationHeaderButton } from './HolidayWorkConfirmationHeaderButton'
 import { AttendanceClockInReminder } from '@/features/home/AttendanceEntryGate'
 import { LateStatementApprovalList, LateStatementNoticeDialog } from '@/features/home/LateStatementReview'
 import { LateArrivalAppealNoticeDialog } from '@/features/home/LateArrivalAppeal'
@@ -113,7 +114,7 @@ function ProfileSettingsContent() {
         <PageHeader title="My home" />
         <div className="flex min-w-0 flex-col items-center gap-2">
           {active && <AttendanceClockInReminder />}
-          <div className="flex flex-wrap justify-center gap-2"><RequiredInformationButton /><LateArrivalHeaderButton /></div>
+          <div className="flex flex-wrap justify-center gap-2"><RequiredInformationButton /><LateArrivalHeaderButton /><HolidayWorkConfirmationHeaderButton key={profile?.id} /></div>
         </div>
         <div className="sm:justify-self-end"><HomeAttendanceSummary /></div>
       </div>

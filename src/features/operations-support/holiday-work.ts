@@ -1,5 +1,6 @@
 export type HolidayInterval = { start: number; end: number }
 export type HolidayCompensationChoice = 'cash' | 'leave'
+export const HOLIDAY_COMPENSATION_METHODS = { cash: '가산임금 지급', leave: '보상휴가 부여' } as const
 export type HolidayConfirmationWork = {
   name: string; department: string | null; grade: string | null; date: string; location: HolidayWork['location']
   intervals: HolidayInterval[]; actualMinutes: number; creditUnits: number; remainingUnits: number; reason: string
