@@ -111,6 +111,7 @@ export function DraftBrandScopeBar({
   onSelect,
   countLabels,
   showUnassigned,
+  unassignedFirst = false,
   trailing,
 }: {
   brandScope: DraftBrandScope
@@ -120,8 +121,21 @@ export function DraftBrandScopeBar({
   onSelect: (value: DraftBrandScope) => void
   countLabels?: readonly [string, string]
   showUnassigned?: boolean
+  unassignedFirst?: boolean
   trailing?: ReactNode
 }) {
+  const unassignedCard = showUnassigned || unassignedScopeCounts.total > 0 ? (
+    <BrandStatCard
+      label="브랜드 미정"
+      badge={{ name: '미정', color: '#8a8e94', logoUrl: null }}
+      total={unassignedScopeCounts.total}
+      pending={unassignedScopeCounts.pending}
+      scheduled={unassignedScopeCounts.scheduled}
+      countLabels={countLabels}
+      selected={brandScope === UNASSIGNED_DRAFT_BRAND}
+      onSelect={() => onSelect(brandScope === UNASSIGNED_DRAFT_BRAND ? 'all' : UNASSIGNED_DRAFT_BRAND)}
+    />
+  ) : null
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2">
       <BrandStatCard
@@ -134,6 +148,7 @@ export function DraftBrandScopeBar({
         selected={brandScope === 'all'}
         onSelect={() => onSelect('all')}
       />
+      {unassignedFirst && unassignedCard}
       {brandCards.map((card) => (
         <BrandStatCard
           key={card.brand.id}
@@ -147,18 +162,7 @@ export function DraftBrandScopeBar({
           onSelect={() => onSelect(brandScope === card.brand.slug ? 'all' : card.brand.slug)}
         />
       ))}
-      {showUnassigned || unassignedScopeCounts.total > 0 ? (
-        <BrandStatCard
-          label="브랜드 미정"
-          badge={{ name: '미정', color: '#8a8e94', logoUrl: null }}
-          total={unassignedScopeCounts.total}
-          pending={unassignedScopeCounts.pending}
-          scheduled={unassignedScopeCounts.scheduled}
-          countLabels={countLabels}
-          selected={brandScope === UNASSIGNED_DRAFT_BRAND}
-          onSelect={() => onSelect(brandScope === UNASSIGNED_DRAFT_BRAND ? 'all' : UNASSIGNED_DRAFT_BRAND)}
-        />
-      ) : null}
+      {!unassignedFirst && unassignedCard}
       {trailing ? <div className="ml-auto">{trailing}</div> : null}
     </div>
   )

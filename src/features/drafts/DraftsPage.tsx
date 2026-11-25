@@ -457,6 +457,7 @@ export function CompanyDraftsPage() {
         brandCards={brandCards}
         unassignedScopeCounts={unassignedScopeCounts}
         onSelect={setBrandScope}
+        unassignedFirst
       />
 
       <div className="mb-3 border-b border-border pb-2">
