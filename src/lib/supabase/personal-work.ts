@@ -20,6 +20,8 @@ export type PersonalWorkCard = {
   created_at: string
   created_by: string
   creator_name: string
+  owner_id?: string
+  owner_name?: string
   assignee_id: string
   assignee_name: string
   reviewer_id: string | null
@@ -27,6 +29,10 @@ export type PersonalWorkCard = {
   events: PersonalWorkEvent[]
 }
 export type PersonalWorkMember = { id: string; name: string; position: string | null }
+
+export function personalWorkOwner(card: PersonalWorkCard) {
+  return card.owner_id ?? card.created_by
+}
 export type PersonalWorkInput = {
   id: string
   command: string

@@ -1,5 +1,6 @@
 import { getSupabase as baseClient } from './page-preview-client'
 import { fixtureProfile, releaseFixture } from './release-auth'
+import { RELEASE_VISUAL_ID } from '@/lib/company/release-access'
 import { hasPermission } from '@/lib/company/permissions'
 import type { PersonalWorkCard, PersonalWorkEvent } from '@/lib/supabase/personal-work'
 import type { PersonalWorkFeedbackNotice } from '@/features/settings/use-personal-work-feedback-notices'
@@ -7,6 +8,9 @@ import type { PersonalWorkFeedbackNotice } from '@/features/settings/use-persona
 const coworker = {id:'fixture-coworker',name:'부서원',position:'사원'}
 const personalWork = new Map<string, PersonalWorkCard>()
 const feedbackNotices = new Map<string, PersonalWorkFeedbackNotice & { recipient_id: string }>()
+let departure: { resignedOn: string; processedAt: string; handedOver: boolean } | undefined
+const departureEmployee = 'fixture-departure-employee'
+const departureSuccessor = 'fixture-departure-successor'
 let workMinute = 0
 
 function workFixture(name:string,args:Record<string,unknown>) {
@@ -77,7 +81,12 @@ export function getSupabase(){
     const profile=fixtureProfile()
     let single=false
     const value={id:profile.id,email:profile.email,display_name:profile.displayName,company_id:profile.companyId,status:profile.status,is_admin:profile.isAdmin,department_id:profile.departmentId,position:profile.position,job_grade:profile.jobGrade,name_confirmed_at:'2026-01-01',requested_at:'2026-01-01'}
-    const query={select(){return query},eq(){return query},in(){return query},order(){return query},maybeSingle(){single=true;return query},then(resolve:(result:unknown)=>unknown){return Promise.resolve({data:single?value:[value],error:null}).then(resolve)}}
+    const query={select(){return query},eq(){return query},in(){return query},order(){return query},maybeSingle(){single=true;return query},then(resolve:(result:unknown)=>unknown){
+      const rows=releaseFixture.role==='operations'?[value,
+        {...value,id:departureEmployee,display_name:'퇴사 검증 직원',email:'departing@example.invalid',status:departure?'disabled':'active'},
+        {...value,id:departureSuccessor,display_name:'인계 검증 직원',department_id:RELEASE_VISUAL_ID,email:'successor@example.invalid'}]:[value]
+      return Promise.resolve({data:single?value:rows,error:null}).then(resolve)
+    }}
     return query
   }
   if(table!=='department_request_approvers')return base.from(table)
@@ -92,6 +101,25 @@ export function getSupabase(){
  },rpc(name:string,args?:Record<string,unknown>){
   if(['list_personal_work_cards','list_personal_work_members','personal_work_action','submit_personal_work_feedback','read_personal_work_feedback_notice'].includes(name))return Promise.resolve(workFixture(name,args??{}))
   if(name==='list_work_requests')return Promise.resolve({data:{requests:[],files:[],timers:[],managerAvailable:true},error:null})
+  if(name==='list_employee_departures')return Promise.resolve({data:departure?[{employeeId:departureEmployee,resignedOn:departure.resignedOn}]:[],error:null})
+  if(name==='preview_employee_departure'&&args?.p_employee===departureEmployee)return Promise.resolve({data:{
+    version:departure?.handedOver?'handed-over':departure?'departed':'active',processedAt:departure?.processedAt??null,
+    resignedOn:departure?.resignedOn??null,personalCount:departure?.handedOver?0:1,sentCount:0,
+    requestGroups:departure?.handedOver?[]:[{owner:'design',departmentId:RELEASE_VISUAL_ID,count:1,settingsCount:0}],
+    approvalCount:departure?.handedOver?0:1,canHandoverApprovals:true,
+  },error:null})
+  if(name==='confirm_employee_departure'&&args?.p_employee===departureEmployee){
+    releaseFixture.workCommands.push(args.p_work_successor===null&&args.p_approval_successor===null
+      && JSON.stringify(args.p_request_successors)==='{}'?'departure-deferred':'departure-immediate')
+    departure={resignedOn:String(args.p_resigned_on),processedAt:new Date().toISOString(),handedOver:false}
+    return Promise.resolve({data:departure,error:null})
+  }
+  if(name==='handover_departed_employee_work'&&args?.p_employee===departureEmployee&&departure){
+    releaseFixture.workCommands.push(args.p_work_successor===departureSuccessor&&args.p_approval_successor===departureSuccessor
+      && (args.p_request_successors as {design?:string})?.design===departureSuccessor?'departure-handover':'departure-handover-mismatch')
+    departure.handedOver=true
+    return Promise.resolve({data:departure,error:null})
+  }
   if(name==='is_my_attendance_exempt')return Promise.resolve({data:hasPermission(fixtureProfile(),'attendance.exempt'),error:null})
   if(name==='clock_in_today'){releaseFixture.writes.push(name);return Promise.resolve({data:'09:00:00',error:null})}
   return base.rpc(name,args)
