@@ -162,12 +162,12 @@ function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error,
           <span>{row.date}</span>
           {row.actualMinutes != null && row.creditUnits != null
             ? <span>실제 {holidayCredit(row.actualMinutes * 2)}{row.creditUnits === row.actualMinutes * 3 ? ' × 1.5' : ''} → <strong>보상 {holidayCredit(row.creditUnits)}</strong></span>
-            : <span>{holidayPhase(row, confirmationWorkflow)}</span>}
+            : <span>{holidayPhase(row, confirmationWorkflow, confirmedSettlement)}</span>}
           {row.settlements.map(item => item.mode === 'overtime' || item.mode === 'leave'
             ? <p key={item.id} className="w-full text-sm">{item.mode === 'overtime'
               ? `야근 누적 반영 ${holidayCredit((item.overtimeMinutes ?? 0) * 2)}`
               : `보상휴가 ${item.days}일 · ${item.expires}까지`}</p> : null)}
-          {row.actualMinutes != null && <small className="w-full text-right text-muted-foreground">{holidayPhase(row, confirmationWorkflow)}{row.remainingUnits > 0 && row.remainingUnits !== row.creditUnits && ` · 남은 보상 ${holidayCredit(row.remainingUnits)}`}</small>}
+          {row.actualMinutes != null && <small className="w-full text-right text-muted-foreground">{holidayPhase(row, confirmationWorkflow, confirmedSettlement)}{row.remainingUnits > 0 && row.remainingUnits !== row.creditUnits && ` · 남은 보상 ${holidayCredit(row.remainingUnits)}`}</small>}
           {confirmationWorkflow && row.id && (row.confirmation || (row.canSettle && row.remainingUnits > 0 && !row.legacySettled)) && <>
             <Button type="button" size="sm" variant="outline" aria-expanded={openConfirmationDay === row.id}
               onClick={() => { setConfirmationDay(openConfirmationDay === row.id ? null : row.id); setSettlementDay(null) }}>

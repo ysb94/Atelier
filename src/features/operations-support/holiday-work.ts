@@ -49,12 +49,14 @@ export function holidayCredit(units: number) {
   const seconds = Math.max(0, units) * 30
   return [Math.floor(seconds / 3600) ? `${Math.floor(seconds / 3600)}시간` : '', Math.floor(seconds / 60) % 60 ? `${Math.floor(seconds / 60) % 60}분` : '', seconds % 60 ? '30초' : ''].filter(Boolean).join(' ') || '0분'
 }
-export function holidayPhase(row: HolidayWork, confirmationWorkflow = false) {
+export function holidayPhase(row: HolidayWork, confirmationWorkflow = false, confirmedSettlement = false) {
   if (row.legacySettled) return '기존 외근·야근 처리 이력'
   if (row.state !== 'approved') return HOLIDAY_STATES[row.state]
   if (confirmationWorkflow && row.remainingUnits > 0) {
     if (!row.confirmation) return '직원 확인 요청 필요'
     if (!row.confirmation.choice) return '직원 제출 대기'
+    if (confirmedSettlement && row.confirmation.choice === 'leave') return '보상휴가 부여 대기'
+    if (confirmedSettlement && row.confirmation.choice === 'cash') return '야근 누적 반영 대기'
     if (!row.confirmation.signedAt) return '운영지원 확인 대기'
     return row.settlements.length ? '일부 정산 · 잔여 시간 보관' : '운영지원 정산 대기'
   }

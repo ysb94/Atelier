@@ -144,19 +144,31 @@ export function HolidayWorkPanel({ scope, month: monthProp }: { scope: 'mine' | 
             const offsiteLookupReady = !item.source.offsites.length || requests.isSuccess
             const canSelect = scope === 'operations' && !confirmedSettlement && item.canSettle && item.remainingUnits > 0 && !item.legacySettled
               && (confirmationWorkflow ? Boolean(holidayConfirmedMethod(item)) : offsiteLookupReady && trips.length === 0)
+            const pendingConfirmation = confirmedSettlement && scope === 'operations' && item.canSettle && item.remainingUnits > 0 && !item.legacySettled
+            const choice = item.confirmation?.choice
+            let detailLabel = confirmationWorkflow && trips.length === 0 && item.canSettle && item.remainingUnits > 0 ? '진행' : '상세'
+            if (pendingConfirmation) {
+              if (!item.confirmation) detailLabel = '확인 요청'
+              else if (choice === 'leave') detailLabel = '보상휴가 처리'
+              else if (choice === 'cash') detailLabel = '근무시간 처리'
+              else detailLabel = '제출 상태'
+            }
             return <tr key={`${item.employeeId}:${item.date}`} className="border-t border-border">
               <td className="p-3">{item.employeeName}<span className="block text-xs text-muted-foreground">{item.departmentName || '부서 미지정'}</span></td>
               <td className="p-3">{item.date}<span className="block text-xs text-muted-foreground">{HOLIDAY_LOCATIONS[item.location]}{trips.length === 1 && trips[0].place && ` · ${trips[0].place}`}</span></td>
               <td className="p-3">{item.actualMinutes === null ? '미확인' : holidayCredit(item.actualMinutes * 2)}</td>
               <td className="p-3">{item.creditUnits === null ? '—' : holidayCredit(item.creditUnits)}</td>
               <td className="p-3">{holidayCredit(item.remainingUnits)}</td>
-              <td className="p-3"><StatusPill tone={item.state === 'submitted' || item.remainingUnits > 0 ? 'warning' : 'muted'}>{holidayPhase(item, confirmationWorkflow)}</StatusPill></td>
+              <td className="p-3"><StatusPill tone={item.state === 'submitted' || item.remainingUnits > 0 ? 'warning' : 'muted'}>{holidayPhase(item, confirmationWorkflow, confirmedSettlement)}</StatusPill></td>
               <td className="p-3"><div className="flex flex-wrap items-center gap-2">
-                {trips.map((trip, index) => <Button key={trip.id} type="button" size="sm" variant={item.remainingUnits > 0 ? 'default' : 'outline'}
+                {trips.map((trip, index) => <Button key={trip.id} type="button" size="sm" variant={!confirmedSettlement && item.remainingUnits > 0 ? 'default' : 'outline'}
                   title={`${trip.from} ${trip.start} ~ ${trip.to} ${trip.end}${trip.place ? ` · ${trip.place}` : ''}`}
-                  onClick={() => selectOffsite(trip.id)}>{trips.length === 1 ? '진행' : `외근 ${index + 1} 진행`}</Button>)}
-                <Button type="button" size="sm" variant="outline" onClick={() => setSelected(item.id ?? `${item.employeeId}:${item.date}`)}>
-                  {confirmationWorkflow && trips.length === 0 && item.canSettle && item.remainingUnits > 0 ? '진행' : '상세'}
+                  onClick={() => selectOffsite(trip.id)}>{confirmedSettlement
+                    ? trips.length === 1 ? '외근 상세' : `외근 ${index + 1} 상세`
+                    : trips.length === 1 ? '진행' : `외근 ${index + 1} 진행`}</Button>)}
+                <Button type="button" size="sm" variant={pendingConfirmation && choice !== null ? 'default' : 'outline'}
+                  onClick={() => setSelected(item.id ?? `${item.employeeId}:${item.date}`)}>
+                  {detailLabel}
                 </Button>
                 {item.canSubmit && !item.legacySettled && <Button type="button" size="sm" variant="outline" onClick={() => setEditing(item)}>실제 시간 입력</Button>}
                 {canSelect && <label className="flex items-center gap-1"><input type="checkbox" aria-label={`${item.employeeName} ${item.date} 정산 선택`}
@@ -199,7 +211,7 @@ export function HolidayWorkDetail({ row, event, scope, confirmationWorkflow, con
     setBusy(true); setError(null)
     try { await save(action, payload) } catch (cause) { setError(cause instanceof Error ? cause.message : '처리하지 못했습니다.') } finally { setBusy(false) }
   }
-  return <Card className="space-y-3 p-4" aria-label="주말·공휴일 근무 상세"><header className="flex justify-between gap-2"><h3 className="font-semibold">{row.employeeName} · {row.date} · {holidayPhase(row, confirmationWorkflow)}</h3>{close && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={close}>상세 닫기</Button>}</header>
+  return <Card className="space-y-3 p-4" aria-label="주말·공휴일 근무 상세"><header className="flex justify-between gap-2"><h3 className="font-semibold">{row.employeeName} · {row.date} · {holidayPhase(row, confirmationWorkflow, confirmedSettlement)}</h3>{close && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={close}>상세 닫기</Button>}</header>
     {event && <p className="rounded-lg bg-muted p-3 text-sm">{event}</p>}<p className="whitespace-pre-wrap text-sm">{row.reason || '근무 내역을 입력해 주세요.'}</p>
     {row.plannedIntervals?.length > 0 && <p className="text-sm">예정 구간: {row.plannedIntervals.map(i => `${holidayTime(i.start)}~${holidayTime(i.end)}`).join(', ')}</p>}
     <p className="text-sm">실제 구간: {row.intervals.map(i => `${holidayTime(i.start)}~${holidayTime(i.end)}`).join(', ') || '미제출'}</p>
