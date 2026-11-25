@@ -2,16 +2,16 @@ import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import {
-  listDraftTeamWork, saveDraftTeamWork, type DraftTeamRecord, type DraftTeamSection, type DraftTeamValues,
+  listDraftTeamWork, saveDraftTeamWork, type DraftOrderNumbers, type DraftTeamRecord, type DraftTeamSection, type DraftTeamValues,
 } from '@/lib/supabase/draft-team-work'
 
 export type DraftTeamWork = {
   ready: boolean
   records?: ReadonlyMap<DraftTeamSection, DraftTeamRecord>
-  save: <S extends DraftTeamSection>(section: S, value: DraftTeamValues[S], confirmed: boolean, revision: string | null) => Promise<string>
+  save: <S extends DraftTeamSection>(section: S, value: DraftTeamValues[S], confirmed: boolean, revision: string | null, styleNumbers?: DraftOrderNumbers) => Promise<string>
 }
 
-export function useDraftTeamWork(actorId: string | undefined, drafts: readonly { id: string }[], enabled = true) {
+export function useDraftTeamWork(actorId: string | undefined, drafts: readonly { id: string; brandId?: string | null }[], enabled = true) {
   const active = useWorkspaceTabActivity()
   const client = useQueryClient()
   const ids = useMemo(() => drafts.map(draft => draft.id).sort(), [drafts])
@@ -37,14 +37,19 @@ export function useDraftTeamWork(actorId: string | undefined, drafts: readonly {
     return {
       ready: query.isSuccess,
       records: byDraft.get(draftId),
-      async save(section, value, confirmed, revision) {
+      async save(section, value, confirmed, revision, styleNumbers) {
         try {
-          const row = await saveDraftTeamWork(draftId, section, value, confirmed, revision)
+          const row = await saveDraftTeamWork(draftId, section, value, confirmed, revision, styleNumbers)
           await client.cancelQueries({ queryKey: key, exact: true })
           client.setQueryData<DraftTeamRecord[]>(key, current => [
             ...(current ?? []).filter(item => item.draft_id !== draftId || item.section !== section), row,
           ])
           void client.invalidateQueries({ queryKey: ['draft-team-work', actorId], refetchType: 'none' })
+          if (styleNumbers) {
+            const brandId = drafts.find(draft => draft.id === draftId)?.brandId
+            if (brandId) void client.invalidateQueries({ queryKey: ['styles', brandId] })
+            void client.invalidateQueries({ queryKey: ['brands'] })
+          }
           return row.revision
         } catch (error) {
           if ((error as { code?: string })?.code === '40001') void client.invalidateQueries({ queryKey: key, exact: true })
@@ -77,13 +82,13 @@ export function useDraftTeamSection<S extends DraftTeamSection>(
     setError('')
   }
 
-  async function save(confirmed: boolean, payload = value, mode: 'manual' | 'temporary' = 'manual') {
+  async function save(confirmed: boolean, payload = value, mode: 'manual' | 'temporary' = 'manual', styleNumbers?: DraftOrderNumbers) {
     if (locked || conflict || inFlight.current) return
     inFlight.current = true
     setSaving(mode)
     setError('')
     try {
-      const savedRevision = await work.save(section, payload, confirmed, edit ? edit.revision : revision)
+      const savedRevision = await work.save(section, payload, confirmed, edit ? edit.revision : revision, styleNumbers)
       setEdit(current => current && current !== edit ? { ...current, revision: savedRevision } : undefined)
     } catch (failure) {
       const { code, message } = (failure ?? {}) as { code?: string; message?: string }

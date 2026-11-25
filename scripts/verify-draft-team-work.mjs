@@ -164,12 +164,82 @@ try {
   await asUser(author)
   await assert.rejects(confirmOrder(manualOrder.revision), /단가를 먼저 확정/)
   await writeSpecs({ confirmedPriceRequestId: quote })
-  assert.equal((await confirmOrder(manualOrder.revision)).confirmed,true)
+  const checkedOrder = await confirmOrder(manualOrder.revision)
+  assert.equal(checkedOrder.confirmed,true)
+
+  await db.exec('reset role')
+  await db.exec('alter table public.styles add unique (brand_id,style_no)')
+  await db.query("update public.brands set slug='masmarulez' where id=$1", [brand])
+  await db.exec(await readFile('supabase/migrations/20261125054155_brand_style_number_issuance.sql', 'utf8'))
+  await assert.rejects(db.query("update public.brands set style_number_prefix='M' where id=$1", [differentBrand]), { code: '23505' })
+  await assert.rejects(db.query("update public.brands set style_number_prefix='V1' where id=$1", [differentBrand]), { code: '23514' })
+  const addExistingStyle = number => db.query("insert into public.styles(brand_id,season_id,style_no,name) values($1,$2,$3,'기존 상품')",
+    [brand, folder, number])
+  await addExistingStyle('M0001')
+  await addExistingStyle('M0003')
+  const preview = async id => (await db.query('select public.draft_order_style_number_preview($1) as data', [id])).rows[0].data
+  const issue = async (id, payload, revision, numbers) => (await db.query(
+    'select * from public.confirm_draft_order_quantity($1,$2,$3,$4)', [id, JSON.stringify(payload), revision, JSON.stringify(numbers)],
+  )).rows[0]
+  await asUser(author)
+  const firstPreview = await preview(draft)
+  assert.deepEqual(firstPreview, { prefix: 'M', numbers: { [black]: 'M0002' } })
+  assert.deepEqual((await list()).find(row => row.section === 'md-quantity').issued_style_numbers, {})
+  await asUser(outsider)
+  await assert.rejects(preview(draft), { code: '42501' })
+  await asUser('', 'anon')
+  await assert.rejects(preview(draft), { code: '42501' })
+  await db.exec('reset role')
+  await addExistingStyle('M0002')
+  await asUser(author)
+  await assert.rejects(issue(draft, reduced, checkedOrder.revision, firstPreview.numbers), /품번 후보가 변경됐습니다/)
+  assert.equal((await list()).find(row => row.section === 'md-quantity').revision, checkedOrder.revision, 'A stale preview rolls back confirmation')
+  const current = await preview(draft)
+  const issued = await issue(draft, reduced, checkedOrder.revision, current.numbers)
+  const blackSku = issued.issued_style_numbers[black]
+  assert.equal(blackSku.number, 'M0004')
+  const sku = (await db.query('select style_no,name,planned_qty,brand_id from public.styles where id=$1', [blackSku.style_id])).rows[0]
+  assert.deepEqual(sku, { style_no:'M0004', name:'팀별 작업 저장 검증 블랙', planned_qty:1200, brand_id:brand })
+  await assert.rejects(issue(draft, reduced, checkedOrder.revision, current.numbers), { code: '40001' })
+  await assert.rejects(moveTo(differentBrand, otherFolder), /품번이 등록된 기획안은 브랜드를 변경할 수 없습니다/)
+
+  await db.exec('reset role')
+  await db.query("update public.brands set style_number_prefix='MM' where id=$1", [brand])
+  await asUser(author)
+  const reissued = await issue(draft, reduced, issued.revision, (await preview(draft)).numbers)
+  assert.deepEqual(reissued.issued_style_numbers, issued.issued_style_numbers, 'Reconfirming preserves the issued number after a prefix change')
+  assert.equal((await db.query('select count(*)::int as count from public.styles where brand_id=$1', [brand])).rows[0].count, 4)
+  const secondQuantity = { quantities: { [otherColor]: '8' }, arrival: '2027-01-02' }
+  await db.query('update public.product_drafts set brand_id=$2,season_id=$3,specs=$4 where id=$1', [secondDraft, differentBrand, otherFolder, {
+    nameConfirmed:true, colorNames:{ [otherColor]: { nameEn:'Blue', nameKo:'다른 컬러' } }, colorImageChoices:{[otherColor]:'None'},
+    manualPrice:{destination:'한국', currency:'KRW', vendor:'', savedAt:'2026-11-24T00:00:00Z', amounts:{[otherColor]:10}},
+  }])
+  assert.deepEqual(await preview(secondDraft), { prefix:null, numbers:{} })
+  await assert.rejects(issue(secondDraft, secondQuantity, null, {}), /품번 접두어를 설정해 주세요/)
+  assert.deepEqual(await list(secondDraft), [])
+  await db.exec('reset role')
+  await db.query("update public.brands set style_number_prefix='V' where id=$1", [differentBrand])
+  await asUser(author)
+  const otherNumbers = await preview(secondDraft)
+  assert.deepEqual(otherNumbers, { prefix:'V', numbers:{[otherColor]:'V0001'} })
+  const otherIssued = await issue(secondDraft, secondQuantity, null, otherNumbers.numbers)
+  assert.equal(otherIssued.issued_style_numbers[otherColor].number, 'V0001')
+  await db.exec('reset role')
+  await db.query(`insert into public.styles(brand_id,season_id,style_no,name)
+    select $1,$2,'V' || lpad(number::text,4,'0'),'기존 상품' from generate_series(2,9999) number`, [differentBrand, otherFolder])
+  await asUser(author)
+  const unissuedDraft = (await db.query("select public.save_product_draft($1,$2,null,$3,$4,'[]') id", [company,
+    differentBrand, { nameKo:'네 자리 품번 소진' }, JSON.stringify([{ id:crypto.randomUUID(), name:'별도 컬러' }]),
+  ])).rows[0].id
+  assert.deepEqual(await preview(unissuedDraft), { prefix:'V', numbers:{} }, 'No fifth digit is issued after 9999')
+  const legacySaved = await confirmOrder(reissued.revision)
+  assert.deepEqual(legacySaved.issued_style_numbers, issued.issued_style_numbers, 'Legacy confirmation preserves assigned numbers')
   await db.query('delete from public.product_drafts where id=$1', [draft])
   await db.exec('reset role')
   assert.deepEqual(await list(), [])
   console.log('Draft AMD/MD: section saves, revisions, role boundaries, color validation and original data preservation passed')
   console.log('Draft order confirmation: name, colors, price, brand, folder, opening date and permissions passed')
+  console.log('Brand SKU issuance: prefix settings, atomic registration, stale previews and repeat confirmation passed')
 } finally {
   await db.close()
 }

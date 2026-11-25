@@ -10,6 +10,7 @@ export type Brand = {
   foundedYear: number
   /** data URL 또는 원격 URL. 없으면 이름 앞 2글자 아바타 */
   logoUrl?: string | null
+  styleNumberPrefix?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -23,6 +24,7 @@ export type BrandInput = {
   color: string
   foundedYear: number
   logoUrl?: string | null
+  styleNumberPrefix?: string | null
 }
 
 /** 브랜드별 내부 상품 카테고리. 카페24 번호와 분리한 계층형 마스터다. */

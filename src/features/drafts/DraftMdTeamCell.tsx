@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { RELEASE_MD_ID } from '@/lib/company/release-access'
 import { listOrgChartMembers } from '@/lib/supabase/profiles'
-import type { DraftTeamValues } from '@/lib/supabase/draft-team-work'
+import type { DraftOrderNumbers, DraftTeamValues } from '@/lib/supabase/draft-team-work'
 import type { ProductDraft } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import {
@@ -175,6 +175,8 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
   const listingConfirmed = listing.confirmed
   const listingLocked = listing.locked || listingConfirmed || listing.conflict
   const quantityConfirmed = quantity.confirmed && matchesTeamColors(quantity.value.quantities, draft.colors)
+  const issuedStyleNumbers = teamWork.records?.get('md-quantity')?.issued_style_numbers
+  const needsStyleRegistration = quantityConfirmed && Boolean(issuedStyleNumbers && draft.colors.some(color => !issuedStyleNumbers[color.id]))
   const quantityLocked = quantity.inputLocked || quantityConfirmed || quantity.conflict
   const priceLocked = price.locked || price.confirmed || price.conflict
   const optionsLocked = options.locked || options.confirmed || options.conflict
@@ -191,7 +193,7 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
   const surcharge = selectedOption?.id === 'option-surcharge'
   const { arrival } = quantity.value
 
-  function confirmQuantities() {
+  function confirmQuantities(styleNumbers: DraftOrderNumbers) {
     if (orderRequirements) return
     let expectedArrival = arrival
     if (!expectedArrival) {
@@ -200,7 +202,7 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
       expectedArrival = expectedDay.toISOString().slice(0, 10)
     }
     setEditingArrival(false)
-    void quantity.save(true, quantityPayload({ ...quantity.value, arrival: expectedArrival }))
+    void quantity.save(true, quantityPayload({ ...quantity.value, arrival: expectedArrival }), 'manual', styleNumbers)
   }
 
   function setPrice(field: keyof Omit<DraftTeamValues['md-price'], 'auto'>, value: string) {
@@ -244,6 +246,8 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
               confirmBlockedReason={orderRequirements ? `수량 확정 전에 완료해 주세요. ${orderRequirements}` : undefined}
               locked={quantity.locked} confirmed={quantityConfirmed} busy={quantity.busy} editing={quantity.editing}
               conflict={quantity.conflict} onEdit={quantity.startEdit} onSave={() => setConfirmingQuantity(true)} onReset={quantity.reset} />
+            {needsStyleRegistration && !readOnly && <Button type="button" variant="outline" size="sm" className="draft-team-control"
+              disabled={quantity.locked || Boolean(orderRequirements)} onClick={() => setConfirmingQuantity(true)}>품번 등록</Button>}
           </div>
           <div className="draft-color-lines">
             {draft.colors.map((color, index) => {
@@ -251,8 +255,10 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
               const entered = quantity.value.quantities[color.id]
               const amount = entered ?? color.orderQty?.toString() ?? ''
               const state = quantityConfirmed && amount ? 'is-confirmed' : entered ? 'is-temporary' : ''
+              const number = issuedStyleNumbers?.[color.id]?.number
               return (
-                <div key={color.id} className={`draft-color-line${index % 2 === 1 ? ' is-alt' : ''}`}>
+                <div key={color.id} className={cn('draft-color-line', index % 2 === 1 && 'is-alt', number && 'flex-col !gap-0')}>
+                  {number && <span className="max-w-full truncate text-[9px] leading-[9px] font-medium tabular-nums" title={`${name} 품번 ${number}`}>{number}</span>}
                   <label className={cn('draft-md-order-quantity', state)}>
                     <Input inputMode="numeric" aria-label={`${name} 발주 수량`} disabled={quantityLocked}
                       aria-description={state === 'is-confirmed' ? '확정됨' : state === 'is-temporary' ? '임시 입력' : undefined}
@@ -393,10 +399,10 @@ export function DraftMdTeamCell({ draft, readOnly, hidden, actorId, teamWork, pr
       {confirmingQuantity && !readOnly && !hidden && <DraftOrderConfirmationDialog
         draft={draft} actorId={actorId} quantities={quantityPayload(quantity.value).quantities}
         destinationName={priceDestinationName} chinaTeamOrder={chinaTeamOrder}
-        locked={quantity.locked || quantity.conflict || quantityConfirmed || Boolean(orderRequirements)}
-        onBack={() => setConfirmingQuantity(false)} onConfirm={() => {
+        locked={quantity.locked || quantity.conflict || (quantityConfirmed && !needsStyleRegistration) || Boolean(orderRequirements)}
+        onBack={() => setConfirmingQuantity(false)} onConfirm={styleNumbers => {
           setConfirmingQuantity(false)
-          confirmQuantities()
+          confirmQuantities(styleNumbers)
         }} />}
       {managingOptions && (
         <DraftMdOptionDialog label={DRAFT_MD_OPTION_LABELS[managingOptions]} options={catalog.lists[managingOptions]}

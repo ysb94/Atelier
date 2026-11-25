@@ -1,27 +1,12 @@
-import { useEffect, useId, useMemo, useRef } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
-import { diagnosticOperation } from '@/lib/diagnostics/workflow-trace'
 import { draftColorNames } from '@/lib/drafts/color-names'
-import { listAllStyleRefs } from '@/lib/supabase/styles'
+import { previewDraftOrderNumbers, type DraftOrderNumbers } from '@/lib/supabase/draft-team-work'
 import type { ProductDraft } from '@/lib/types'
 
-type OrderDraft = Pick<ProductDraft, 'brandId' | 'draftNo' | 'nameEn' | 'nameKo' | 'colors' | 'specs'>
-
-function availableOrderNumbers(usedNumbers: readonly string[], count: number) {
-  const occupied = new Set<number>()
-  for (const value of usedNumbers) {
-    const match = /^M(\d{1,5})$/i.exec(value.replace(/\s+/g, ''))
-    if (match) occupied.add(Number(match[1]))
-  }
-
-  const candidates: string[] = []
-  for (let number = 1; number <= 99999 && candidates.length < count; number += 1) {
-    if (!occupied.has(number)) candidates.push(`M${String(number).padStart(4, '0')}`)
-  }
-  return candidates
-}
+type OrderDraft = Pick<ProductDraft, 'id' | 'brandId' | 'draftNo' | 'nameEn' | 'nameKo' | 'colors' | 'specs'>
 
 export function DraftOrderConfirmationDialog({ draft, actorId, quantities, destinationName, chinaTeamOrder, locked, onBack, onConfirm }: {
   draft: OrderDraft
@@ -31,29 +16,25 @@ export function DraftOrderConfirmationDialog({ draft, actorId, quantities, desti
   chinaTeamOrder: boolean
   locked: boolean
   onBack: () => void
-  onConfirm: () => void
+  onConfirm: (numbers: DraftOrderNumbers) => void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const titleId = useId()
   const messageId = useId()
   const { brandId, colors } = draft
   const styleNumbers = useQuery({
-    queryKey: ['draft-order-number-preview', actorId, brandId],
-    queryFn: () => diagnosticOperation('app', 'draft_order_number_preview', async trace => {
-      if (!brandId) return []
-      const styles = await trace.run('load_registered_style_numbers', context => listAllStyleRefs(brandId, context))
-      return styles.map(style => style.styleNo)
-    }),
+    queryKey: ['draft-order-number-preview', actorId, draft.id, brandId],
+    queryFn: () => previewDraftOrderNumbers(draft.id),
     enabled: Boolean(brandId && colors.length),
     gcTime: 0,
     refetchOnMount: 'always',
     refetchOnWindowFocus: false,
     retry: false,
   })
-  const candidates = useMemo(() => styleNumbers.data ? availableOrderNumbers(styleNumbers.data, colors.length) : [], [styleNumbers.data, colors.length])
+  const candidates = styleNumbers.data?.numbers
   const loadingNumbers = Boolean(brandId && colors.length && styleNumbers.isPending && !styleNumbers.isError)
-  const notEnoughNumbers = Boolean(styleNumbers.isSuccess && candidates.length < colors.length)
-  const confirmDisabled = locked || !colors.length || Boolean(brandId && (loadingNumbers || styleNumbers.isFetching || styleNumbers.isError || notEnoughNumbers))
+  const notEnoughNumbers = Boolean(styleNumbers.isSuccess && colors.some(color => !candidates?.[color.id]))
+  const confirmDisabled = locked || !brandId || !colors.length || !candidates || styleNumbers.isFetching || styleNumbers.isError || notEnoughNumbers
 
   useEffect(() => {
     const popup = dialog.current
@@ -73,17 +54,17 @@ export function DraftOrderConfirmationDialog({ draft, actorId, quantities, desti
         <table className="w-full min-w-[18rem] text-left text-sm">
           <thead className="bg-muted text-xs">
             <tr>
-              <th scope="col" className="whitespace-nowrap px-3 py-2 font-semibold">M번호 후보</th>
+              <th scope="col" className="whitespace-nowrap px-3 py-2 font-semibold">품번</th>
               <th scope="col" className="w-full px-3 py-2 font-semibold">상품명·컬러명</th>
               <th scope="col" className="whitespace-nowrap px-3 py-2 text-right font-semibold">수량</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {colors.map((color, index) => {
+            {colors.map(color => {
               const names = draftColorNames(color.name, draft.specs.colorNames?.[color.id])
               const quantity = quantities[color.id]
               return <tr key={color.id}>
-                <td className="whitespace-nowrap px-3 py-2 font-medium tabular-nums">{candidates[index] ?? '—'}</td>
+                <td className="whitespace-nowrap px-3 py-2 font-medium tabular-nums">{candidates?.[color.id] ?? '—'}</td>
                 <td className="wrap-anywhere px-3 py-2">
                   <span lang="en" className="block">{[draft.nameEn.trim(), names.nameEn].filter(Boolean).join(' ') || '—'}</span>
                   <span lang="ko" className="mt-0.5 block text-muted-foreground">{[draft.nameKo.trim(), names.nameKo].filter(Boolean).join(' ') || '—'}</span>
@@ -96,13 +77,15 @@ export function DraftOrderConfirmationDialog({ draft, actorId, quantities, desti
       </div> : <p className="text-sm text-muted-foreground">컬러를 먼저 추가해 주세요.</p>}
 
       {colors.length > 0 && <div className="mt-2 text-xs text-muted-foreground">
-        {!brandId ? <p>브랜드를 지정하면 M번호 후보를 확인할 수 있습니다.</p>
-          : loadingNumbers ? <p role="status">사용 가능한 M번호를 확인하는 중입니다.</p>
+        {!brandId ? <p>브랜드를 지정하면 품번을 확인할 수 있습니다.</p>
+          : loadingNumbers ? <p role="status">사용 가능한 품번을 확인하는 중입니다.</p>
           : styleNumbers.isError ? <div className="flex flex-wrap items-center gap-2">
-            <p role="alert" className="text-danger">M번호 후보를 불러오지 못했습니다.</p>
+            <p role="alert" className="text-danger">{(styleNumbers.error as { code?: string })?.code === 'PGRST202'
+              ? '공유 DB 적용 후 품번을 발급할 수 있습니다.' : '품번 후보를 불러오지 못했습니다.'}</p>
             <Button type="button" variant="outline" size="sm" disabled={styleNumbers.isFetching} onClick={() => void styleNumbers.refetch()}>다시 조회</Button>
-          </div> : notEnoughNumbers ? <p role="alert" className="text-danger">컬러 수만큼 사용 가능한 M번호가 없습니다.</p>
-          : <p>M번호는 후보로 표시됩니다.</p>}
+          </div> : notEnoughNumbers ? <p role="alert" className="text-danger">{styleNumbers.data?.prefix
+            ? '이 브랜드에 발급할 수 있는 네 자리 품번이 부족합니다.' : '브랜드 관리에서 품번 접두어를 설정해 주세요.'}</p>
+          : <p>확정하면 이 품번이 전체 상품에 등록됩니다.</p>}
       </div>}
 
       {chinaTeamOrder && <div className="mt-4 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
@@ -114,7 +97,7 @@ export function DraftOrderConfirmationDialog({ draft, actorId, quantities, desti
       </p>
       <footer className="mt-4 flex justify-end gap-2">
         <Button type="button" variant="outline" onClick={onBack}>돌아가기</Button>
-        <Button type="button" disabled={confirmDisabled} onClick={onConfirm}>{chinaTeamOrder ? '수량 확정' : '발주 저장'}</Button>
+        <Button type="button" disabled={confirmDisabled} onClick={() => candidates && onConfirm(candidates)}>{chinaTeamOrder ? '수량 확정' : '발주 저장'}</Button>
       </footer>
     </dialog>, document.body,
   )
