@@ -237,9 +237,56 @@ try {
   await db.query('delete from public.product_drafts where id=$1', [draft])
   await db.exec('reset role')
   assert.deepEqual(await list(), [])
+  await db.exec(`
+    create or replace function app.permission_company_id() returns uuid
+      language sql stable security definer set search_path='' as
+      $$ select company_id from public.profiles where id=auth.uid() and status='active' $$;
+    grant execute on function app.permission_company_id() to authenticated;
+    create publication supabase_realtime;
+  `)
+  const extraFolder = crypto.randomUUID()
+  await db.query("insert into public.seasons(id,brand_id,code) values($1,$2,'JAN')", [extraFolder, brand])
+  const beforeFolders = (await db.query('select * from public.seasons order by id')).rows
+  const beforeDrafts = (await db.query('select * from public.product_drafts order by id')).rows
+  await db.exec(await readFile('supabase/migrations/20261125082958_draft_folder_order.sql', 'utf8'))
+  const viewer = crypto.randomUUID()
+  await db.query("insert into public.profiles(id,company_id,display_name,status,is_admin) values($1,$2,'조회 직원','active',false)", [viewer, company])
+  const saveOrder = async (ids, revision = null, brandId = brand) => (await db.query(
+    'select public.save_draft_folder_order($1,$2::uuid[],$3) as order', [brandId, ids, revision],
+  )).rows[0].order
+  const listOrders = async () => (await db.query('select * from public.draft_folder_orders')).rows
+  await asUser(author)
+  await assert.rejects(saveOrder([folder, unassigned]), { code: '40001' })
+  await assert.rejects(saveOrder([folder, otherFolder]), { code: '40001' })
+  await assert.rejects(saveOrder([folder, folder]), { code: '40001' })
+  const firstOrder = await saveOrder([extraFolder, folder])
+  assert.deepEqual(firstOrder.folder_ids, [extraFolder, folder])
+  await asUser(reviewer)
+  assert.deepEqual(await listOrders(), [firstOrder], 'A separate account reads the brand order')
+  await assert.rejects(saveOrder([folder, extraFolder]), { code: '40001' })
+  await assert.rejects(db.query('update public.draft_folder_orders set folder_ids=$1 where brand_id=$2', [[folder, extraFolder], brand]), { code: '42501' })
+  const nextOrder = await saveOrder([folder, extraFolder], firstOrder.revision)
+  assert.notEqual(nextOrder.revision, firstOrder.revision)
+  await asUser(author)
+  await assert.rejects(saveOrder([extraFolder, folder], firstOrder.revision), { code: '40001' })
+  assert.deepEqual(await listOrders(), [nextOrder])
+  await asUser(viewer)
+  assert.deepEqual(await listOrders(), [nextOrder])
+  await assert.rejects(saveOrder([extraFolder, folder], nextOrder.revision), { code: '42501' })
+  await asUser(outsider)
+  assert.deepEqual(await listOrders(), [])
+  await assert.rejects(saveOrder([folder, extraFolder], nextOrder.revision), { code: '42501' })
+  await asUser('', 'anon')
+  await assert.rejects(listOrders(), { code: '42501' })
+  await assert.rejects(saveOrder([folder, extraFolder], nextOrder.revision), { code: '42501' })
+  await db.exec('reset role')
+  assert.deepEqual((await db.query('select * from public.seasons order by id')).rows, beforeFolders)
+  assert.deepEqual((await db.query('select * from public.product_drafts order by id')).rows, beforeDrafts)
+  assert.equal((await db.query("select count(*)::int as count from pg_publication_tables where pubname='supabase_realtime' and tablename='draft_folder_orders'")).rows[0].count, 1)
   console.log('Draft AMD/MD: section saves, revisions, role boundaries, color validation and original data preservation passed')
   console.log('Draft order confirmation: name, colors, price, brand, folder, opening date and permissions passed')
   console.log('Brand SKU issuance: prefix settings, atomic registration, stale previews and repeat confirmation passed')
+  console.log('Draft folder order: shared read, scoped writes, stale revisions, folder validation, Realtime publication and original data preservation passed')
 } finally {
   await db.close()
 }

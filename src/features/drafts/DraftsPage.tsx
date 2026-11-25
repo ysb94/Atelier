@@ -45,6 +45,7 @@ import { cn, formatNumber, emptyList } from '@/lib/utils'
 import { DraftBrandScopeBar, countScheduleRows } from './DraftBrandScopeBar'
 import { DraftFolderBar, DraftFolderHeading } from './DraftFolderBar'
 import { DraftFolderOpeningDate } from './DraftFolderOpeningDate'
+import { useDraftFolderOrder } from './use-draft-folder-order'
 import { matchesDraftFolder, UNASSIGNED_DRAFT_FOLDER_LABEL } from './draft-folder-filter'
 import { DraftSheetRow, type DraftConfirmFlag } from './DraftSheetRow'
 import { DraftBoardView } from './DraftBoardView'
@@ -293,6 +294,10 @@ export function CompanyDraftsPage() {
     brandScope !== 'all' && brandScope !== UNASSIGNED_DRAFT_BRAND
       ? brands.find((item) => item.slug === brandScope)
       : undefined
+  const folderOrder = useDraftFolderOrder(scopedBrand?.id,
+    profile?.status === 'active' && profile.id === session?.user.id ? profile.id : undefined, companyId)
+  const canReorderFolders = Boolean(scopedBrand &&
+    (workAccess.access?.legacyEdit || workAccess.access?.operator || canWriteDraft(workAccess.access, null, scopedBrand.id)))
 
   const scheduleByDraft = useMemo(() => {
     const map = new Map(
@@ -335,7 +340,7 @@ export function CompanyDraftsPage() {
       const id = scheduleByDraft.get(draft.id)?.group?.id
       if (id) counts.set(id, (counts.get(id) ?? 0) + 1)
     }
-    return previewGroups
+    const items = previewGroups
       .filter(group => matchesDraftBrandScope(group.brandId, brandScope, brandIdBySlug))
       .map(group => {
         return {
@@ -348,7 +353,10 @@ export function CompanyDraftsPage() {
           editable: seasonMap.has(group.id),
         }
       })
-  }, [ownerDrafts, scheduleByDraft, previewGroups, brandScope, brandIdBySlug, scopedBrand, brandById, seasonMap])
+    if (!folderOrder.ids?.length) return items
+    const ranks = new Map(folderOrder.ids.map((id, index) => [id, index]))
+    return items.sort((a, b) => (ranks.get(a.id) ?? ranks.size) - (ranks.get(b.id) ?? ranks.size))
+  }, [ownerDrafts, scheduleByDraft, previewGroups, brandScope, brandIdBySlug, scopedBrand, brandById, seasonMap, folderOrder.ids])
   const selectedFolderIds = folderFilter === 'all' || folderFilter === 'unassigned'
     ? [folderFilter]
     : folderItems.filter(folder => matchesDraftFolder(folder.id, folderFilter, !folderParam ? seasonMap.get(folder.id)?.code : undefined)).map(folder => folder.id)
@@ -502,12 +510,16 @@ export function CompanyDraftsPage() {
           </div>
           {brandScope !== 'all' && (
             <DraftFolderBar
+              key={scopedBrand?.id ?? brandScope}
               folders={folderItems}
               brands={brands.map((brand) => ({ id: brand.id, name: brand.name }))}
               defaultBrandId={scopedBrand?.id}
               selectedIds={selectedFolderIds}
               unassignedCount={unassignedFolderCount}
               onSelect={setFolderFilter}
+              onReorder={canReorderFolders && folderOrder.ready ? folderOrder.reorder : undefined}
+              reordering={folderOrder.isPending}
+              orderError={canReorderFolders ? folderOrder.error : ''}
               onCreate={async (value) => {
                 await createSeason(value.brandId, {
                   name: value.name,

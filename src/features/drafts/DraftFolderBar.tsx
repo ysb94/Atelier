@@ -17,9 +17,15 @@ export type DraftFolderItem = {
 }
 
 type FolderDraft = { brandId: string; name: string }
+type FolderDropTarget = { id: string; side: 'before' | 'after' }
 
 const folderChipClass = 'h-7 gap-1 rounded-full px-1.5 text-[13px]! font-medium! leading-none! shadow-none focus-visible:ring-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring/50'
 const folderScopeClass = 'text-muted-foreground aria-pressed:border-foreground/30 aria-pressed:bg-muted aria-pressed:text-foreground'
+
+function folderDropSide(button: HTMLButtonElement, x: number): FolderDropTarget['side'] {
+  const bounds = button.getBoundingClientRect()
+  return x < bounds.left + bounds.width / 2 ? 'before' : 'after'
+}
 
 export function DraftFolderBar({
   folders,
@@ -29,6 +35,9 @@ export function DraftFolderBar({
   unassignedCount,
   onSelect,
   onCreate,
+  onReorder,
+  reordering,
+  orderError,
 }: {
   folders: DraftFolderItem[]
   brands: { id: string; name: string }[]
@@ -37,6 +46,9 @@ export function DraftFolderBar({
   unassignedCount: number
   onSelect: (id: string) => void
   onCreate: (value: FolderDraft) => Promise<void>
+  onReorder?: (ids: string[]) => Promise<void>
+  reordering?: boolean
+  orderError?: string
 }) {
   const [creating, setCreating] = useState(false)
   const [brandId, setBrandId] = useState(defaultBrandId ?? brands[0]?.id ?? '')
@@ -44,6 +56,27 @@ export function DraftFolderBar({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const folderScroll = useRef<HTMLDivElement>(null)
+  const dragged = useRef<string | null>(null)
+  const savingOrder = useRef(false)
+  const [dropTarget, setDropTarget] = useState<FolderDropTarget | null>(null)
+  const [moveError, setMoveError] = useState('')
+
+  function endDrag() {
+    dragged.current = null
+    setDropTarget(null)
+  }
+
+  async function move(from: number, to: number) {
+    if (!onReorder || savingOrder.current || from < 0 || to < 0 || to >= folders.length || from === to) return
+    const ids = folders.map(folder => folder.id)
+    const [id] = ids.splice(from, 1)
+    ids.splice(to, 0, id)
+    savingOrder.current = true
+    setMoveError('')
+    try { await onReorder(ids) }
+    catch (err) { setMoveError(err instanceof Error ? err.message : '폴더 순서를 저장하지 못했습니다.') }
+    finally { savingOrder.current = false }
+  }
 
   function openCreate() {
     if (folderScroll.current) folderScroll.current.scrollLeft = 0
@@ -115,19 +148,56 @@ export function DraftFolderBar({
               {error && <p role="alert">{error}</p>}
             </form>
           )}
-          {folders.map(folder => {
+          {folders.map((folder, index) => {
             const selected = selectedIds.includes(folder.id)
             const Icon = selected ? FolderOpen : Folder
+            const canDrag = Boolean(onReorder && !reordering && !creating && folder.editable && folders.length > 1)
+            const side = dropTarget?.id === folder.id ? dropTarget.side : undefined
             return (
               <Button
                 key={folder.id}
                 type="button"
                 variant="outline"
                 size="sm"
-                className={cn(folderChipClass, 'border-warning/25 bg-warning/5 text-muted-foreground hover:border-warning/50 hover:bg-warning/10 aria-pressed:border-warning/55 aria-pressed:bg-warning/15 aria-pressed:text-foreground')}
+                className={cn(folderChipClass, 'border-warning/25 bg-warning/5 text-muted-foreground hover:border-warning/50 hover:bg-warning/10 aria-pressed:border-warning/55 aria-pressed:bg-warning/15 aria-pressed:text-foreground',
+                  canDrag && 'relative cursor-grab active:cursor-grabbing',
+                  side && 'after:pointer-events-none after:absolute after:inset-y-1 after:w-0.5 after:rounded-full after:bg-primary',
+                  side === 'before' && 'after:left-0', side === 'after' && 'after:right-0')}
                 aria-pressed={selected}
                 onClick={() => onSelect(folder.id)}
-                title={`${folder.brandName ? `${folder.brandName} · ` : ''}${folder.label} 폴더 · 기획안 ${folder.total}건`}
+                title={`${folder.brandName ? `${folder.brandName} · ` : ''}${folder.label} 폴더 · 기획안 ${folder.total}건${canDrag ? ' · 드래그 또는 Alt + 좌우 방향키로 순서 변경' : ''}`}
+                draggable={canDrag}
+                aria-keyshortcuts={canDrag ? 'Alt+ArrowLeft Alt+ArrowRight' : undefined}
+                onDragStart={canDrag ? event => {
+                  dragged.current = folder.id
+                  event.dataTransfer.effectAllowed = 'move'
+                  event.dataTransfer.setData('text/plain', folder.label)
+                } : undefined}
+                onDragOver={canDrag ? event => {
+                  if (!dragged.current || dragged.current === folder.id) return
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'move'
+                  const side = folderDropSide(event.currentTarget, event.clientX)
+                  setDropTarget(current => current?.id === folder.id && current.side === side ? current : { id: folder.id, side })
+                } : undefined}
+                onDragLeave={event => {
+                  if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return
+                  setDropTarget(current => current?.id === folder.id ? null : current)
+                }}
+                onDrop={canDrag ? event => {
+                  if (!dragged.current) return
+                  event.preventDefault()
+                  const from = folders.findIndex(item => item.id === dragged.current)
+                  const boundary = index + Number(folderDropSide(event.currentTarget, event.clientX) === 'after')
+                  endDrag()
+                  void move(from, boundary - Number(from < boundary))
+                } : undefined}
+                onDragEnd={endDrag}
+                onKeyDown={canDrag ? event => {
+                  if (!event.altKey || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return
+                  event.preventDefault()
+                  void move(index, index + (event.key === 'ArrowLeft' ? -1 : 1))
+                } : undefined}
               >
                 <Icon className="size-3" aria-hidden="true" />
                 {folder.brandName && <span>{folder.brandName}</span>}
@@ -138,6 +208,8 @@ export function DraftFolderBar({
           })}
         </div>
       </div>
+      {reordering && <p role="status" className="text-xs text-muted-foreground">폴더 순서 저장 중…</p>}
+      {(moveError || orderError) && <p role="alert" className="text-xs text-danger">{moveError || orderError}</p>}
     </nav>
   )
 }

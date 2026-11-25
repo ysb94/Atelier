@@ -7,6 +7,7 @@ import tailwindcss from '@tailwindcss/vite'
 import {chromium,webkit} from 'playwright-core'
 const root=process.cwd()
 const stickyHeaderOnly=process.argv.includes('--sticky-header-only')
+const folderOnly=process.argv.includes('--folder-only')
 const useWebKit=process.argv.includes('--webkit')
 let server,browser
 const imageFixture='<svg xmlns="http://www.w3.org/2000/svg" width="16" height="12"><rect width="16" height="12" fill="red"/></svg>'
@@ -94,8 +95,18 @@ async function verifyFolderCreatePlacement(page,origin){
  const unassigned=folders.getByRole('button',{name:/^출시 미정/})
  const add=folders.getByRole('button',{name:'기획안 폴더 추가'})
  const firstFolder=folders.getByRole('button',{name:/^테스트 출시 폴더 1 0$/})
+ const secondFolder=folders.getByRole('button',{name:/^테스트 출시 폴더 2 0$/})
  const lastFolder=folders.getByRole('button',{name:/^테스트 출시 폴더 12 0$/})
  const name=folders.getByRole('textbox',{name:'폴더 이름'})
+ const order = () => folders.getByRole('button', { name: /^테스트 출시 폴더 [12] 0$/ }).allTextContents()
+ assert.deepEqual(await order(), ['테스트 출시 폴더 10', '테스트 출시 폴더 20'])
+ const { width, height } = await secondFolder.boundingBox()
+ await firstFolder.dragTo(secondFolder, { targetPosition: { x: width - 4, y: height / 2 } })
+ await page.waitForFunction(() => document.querySelector('nav button[draggable=true]')?.textContent.startsWith('테스트 출시 폴더 2'))
+ assert.deepEqual(await order(), ['테스트 출시 폴더 20', '테스트 출시 폴더 10'])
+ await firstFolder.press('Alt+ArrowLeft')
+ assert.deepEqual(await order(), ['테스트 출시 폴더 10', '테스트 출시 폴더 20'])
+ assert.equal(await unassigned.getAttribute('draggable'), null)
  async function openEditor(){
    await lastFolder.scrollIntoViewIfNeeded()
    const [unassignedBox,buttonBox]=await Promise.all([unassigned.boundingBox(),add.boundingBox()])
@@ -163,7 +174,11 @@ try{
  const page=await browser.newPage({viewport:{width:1800,height:950},timezoneId:'UTC'}),errors=[]
  page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(15000)
  await page.route('**/*',route=>route.request().url().startsWith(origin+'/')||route.request().url().startsWith('data:')?route.continue():route.abort())
- if(stickyHeaderOnly){
+ if(folderOnly){
+   await verifyFolderCreatePlacement(page,origin)
+   assert.deepEqual(errors,[])
+   console.log('draft folders: mouse drag, keyboard reorder, pinned unassigned/add and mobile creation passed')
+ }else if(stickyHeaderOnly){
    await verifyStickyHeader(page,origin)
    assert.deepEqual(errors,[])
    console.log(`draft sticky header (${useWebKit?'WebKit':'Chromium'}): alignment, stacking, horizontal scroll and table exit passed`)

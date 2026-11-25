@@ -238,7 +238,9 @@ function FolderBarFixture() {
   })))
   return <main className="p-4">
     <DraftFolderBar folders={folders} brands={[brand]} defaultBrandId={brand.id} selectedIds={['all']} unassignedCount={0}
-      onSelect={() => {}} onCreate={async ({ brandId, name }) => {
+      onSelect={() => {}} onReorder={async ids => {
+        setFolders(current => ids.map(id => current.find(folder => folder.id === id)!))
+      }} onCreate={async ({ brandId, name }) => {
         setFolders(current => [...current, { id: name, brandId, name, label: name, total: 0, editable: true }])
       }} />
   </main>
