@@ -34,8 +34,9 @@ begin
   if length(definition) - length(replace(definition, anchor, '')) <> length(anchor) then
     raise exception 'Unexpected personal_work_action notification dispatch';
   end if;
-  execute replace(definition, anchor, $dispatch$
-  if p_action = 'submit' then
+  execute replace(replace(definition, 'FUNCTION app.personal_work_action(',
+    'FUNCTION app.personal_work_action(p_deliver_inbox boolean, '), anchor, $dispatch$
+  if p_action = 'submit' and p_deliver_inbox is true then
     insert into public.personal_work_feedback_notices
       (id, company_id, recipient_id, card_id, card_revision, round, title, note, requester_name, created_at)
     values
@@ -46,15 +47,26 @@ begin
     where card_id = card.id and card_revision = p_revision and recipient_id = actor.id and resolved_at is null;
   end if;
 
-  if p_action <> 'submit' and notified is not null and exists (select 1 from public.profiles where id = notified$dispatch$);
+  if not (p_action = 'submit' and p_deliver_inbox is true)
+    and notified is not null and exists (select 1 from public.profiles where id = notified$dispatch$);
 end;
 $patch$;
 
--- A client with this RPC never falls back to the old chat transport on an older database.
+-- Keep the existing signature and ACL for callers of the generic action.
+create or replace function app.personal_work_action(
+  p_id uuid, p_command uuid, p_action text, p_revision integer default null,
+  p_title text default null, p_description text default null, p_assignee uuid default null,
+  p_reviewer uuid default null, p_note text default null
+) returns void language sql security definer set search_path = '' as $$
+  select app.personal_work_action(false, p_id, p_command, p_action, p_revision, p_title, p_description, p_assignee, p_reviewer, p_note);
+$$;
+
+-- The new endpoint sends a single inbox notice. Older clients calling the
+-- generic action continue to receive the existing direct chat notification.
 create function public.submit_personal_work_feedback(
   p_id uuid, p_command uuid, p_revision integer, p_reviewer uuid default null, p_note text default null
 ) returns void language sql set search_path = '' as $$
-  select app.personal_work_action(p_id, p_command, 'submit', p_revision, null, null, null, p_reviewer, p_note);
+  select app.personal_work_action(true, p_id, p_command, 'submit', p_revision, null, null, null, p_reviewer, p_note);
 $$;
 
 create function app.read_personal_work_feedback_notice(p_id uuid, p_revision integer)
@@ -71,10 +83,12 @@ returns timestamptz language sql set search_path = '' as $$
   select app.read_personal_work_feedback_notice(p_id, p_revision);
 $$;
 
-revoke all on function public.submit_personal_work_feedback(uuid, uuid, integer, uuid, text),
+revoke all on function app.personal_work_action(boolean, uuid, uuid, text, integer, text, text, uuid, uuid, text),
+  public.submit_personal_work_feedback(uuid, uuid, integer, uuid, text),
   app.read_personal_work_feedback_notice(uuid, integer), public.read_personal_work_feedback_notice(uuid, integer)
   from public, anon, authenticated;
-grant execute on function public.submit_personal_work_feedback(uuid, uuid, integer, uuid, text),
+grant execute on function app.personal_work_action(boolean, uuid, uuid, text, integer, text, text, uuid, uuid, text),
+  public.submit_personal_work_feedback(uuid, uuid, integer, uuid, text),
   app.read_personal_work_feedback_notice(uuid, integer), public.read_personal_work_feedback_notice(uuid, integer)
   to authenticated;
 

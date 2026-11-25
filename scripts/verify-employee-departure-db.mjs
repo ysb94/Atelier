@@ -90,8 +90,8 @@ try {
     for (const code of codes) await db.query("insert into public.permission_grants values($1,$2,$3,'company',$1)", [ids.company, ids[person], code])
   }
   for (const migration of ['20260930160000_company_chat.sql','20261123090000_personal_work_cards.sql',
-    '20261124144812_personal_work_feedback_notifications.sql','20261125023152_employee_departure.sql',
-    '20261125032510_employee_departure_handover_inbox.sql']) {
+    '20261125023152_employee_departure.sql','20261125032510_employee_departure_handover_inbox.sql',
+    '20261125065330_personal_work_feedback_notifications.sql']) {
     await db.exec(await readFile(new URL(`../supabase/migrations/${migration}`, import.meta.url), 'utf8'))
   }
   function row(...names) { return names.map(name => ids[name]) }

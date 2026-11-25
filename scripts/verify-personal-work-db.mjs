@@ -70,7 +70,7 @@ try {
       name === 'outsider' ? ids.otherCompany : ids.company,
       name === 'otherDept' ? ids.otherDepartment : ids.department, name, name === 'inactive' ? 'inactive' : 'active'])
   }
-  for (const migration of ['20260930160000_company_chat.sql', '20261123090000_personal_work_cards.sql', '20261124144812_personal_work_feedback_notifications.sql']) {
+  for (const migration of ['20260930160000_company_chat.sql', '20261123090000_personal_work_cards.sql', '20261125065330_personal_work_feedback_notifications.sql']) {
     await db.exec(await readFile(new URL(`../supabase/migrations/${migration}`, import.meta.url), 'utf8'))
   }
 
@@ -144,7 +144,7 @@ try {
   await actor(ids.worker)
   await action(assigned, 'start', { revision: 6 })
   const nextSubmitCommand = randomUUID()
-  await action(assigned, 'submit', { revision: 7, command: nextSubmitCommand })
+  await db.query('select public.submit_personal_work_feedback($1,$2,$3)', [assigned, nextSubmitCommand, 7])
 
   await actor(ids.owner)
   assert.ok((await notices())[0].resolved_at)
@@ -178,11 +178,20 @@ try {
   assert.deepEqual(await notices(), [])
   assert.equal(await readNotice(ownFeedbackEvent, 3), null)
 
+  const legacyCard = randomUUID(), legacyCommand = randomUUID()
+  await actor(ids.worker)
+  await action(legacyCard, 'create', { title: '운영 버전의 기존 업무' })
+  await action(legacyCard, 'start', { revision: 1 })
+  await action(legacyCard, 'submit', { revision: 2, reviewer: ids.owner, command: legacyCommand })
+  await actor(ids.owner)
+  assert.equal((await notices()).some(notice => notice.id === legacyCommand), false, 'legacy clients receive only their chat notice')
+  assert.equal((await card(legacyCard)).status, 'feedback')
+
   await db.exec('reset role')
-  const messages = (await db.query('select author_id, body from public.chat_messages')).rows
-  assert.equal(messages.length, 3)
+  const messages = (await db.query('select id, author_id, body from public.chat_messages')).rows
+  assert.equal(messages.length, 4)
   assert.equal(messages.filter(message => message.author_id === ids.owner).length, 3)
-  assert.equal(messages.filter(message => message.author_id === ids.worker).length, 0)
+  assert.deepEqual(messages.filter(message => message.author_id === ids.worker).map(message => message.id), [legacyCommand])
   assert.ok(messages.some(message => message.body.includes('수정할 내용')))
   console.log('내 업무 DB 검증 통과: 배정, 차수 전환, 피드백 알림, 권한, 읽음과 처리 상태 분리, 재시도')
 } catch (error) {
