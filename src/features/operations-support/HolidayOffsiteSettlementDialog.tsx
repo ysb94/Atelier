@@ -7,7 +7,9 @@ import { changeHolidayWork } from '@/lib/supabase/holiday-work'
 import { offsiteSettlementPreview } from '@/lib/supabase/offsite-settlements'
 import type { LeaveRequest } from '@/lib/supabase/leave-requests'
 import { koreaDateKey } from '@/features/settings/my-attendance'
-import { holidayCredit, holidayPhase, type HolidayWork } from './holiday-work'
+import { holidayConfirmedMethod, holidayCredit, holidayPhase, type HolidayWork, type HolidayWorkList } from './holiday-work'
+import { HolidayWorkConfirmationPanel } from './HolidayWorkConfirmationPanel'
+import { HolidaySettlementEditor, type HolidaySave } from './HolidayWorkEditor'
 import { isWorkday } from './monthly-attendance'
 import { offsitePhase } from './offsite-period'
 import { durationInputMinutes, formatDurationClock, workDurationLabel } from './overtime-hours'
@@ -27,12 +29,15 @@ export function HolidayOffsiteCaseDialog({ request, month, close }: { request: L
   const work = useHolidayWork(month, 'operations', request.id)
   const error = work.error ?? (work.data?.ready === false ? new Error('외근 기록을 조회할 수 없습니다.') : null)
   return <HolidayOffsiteSettlementDialog request={request} rows={work.rows} active={work.enabled}
-    loading={work.isPending} error={error} refresh={work.refetch} policyReady={Boolean(work.data?.policy)} close={close} />
+    loading={work.isPending} error={error} refresh={work.refetch} policy={work.data?.policy ?? null}
+    confirmationWorkflow={work.data?.confirmationWorkflow === true}
+    save={async (action, payload) => { await work.save.mutateAsync({ action, payload }) }} close={close} />
 }
 
-function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error, refresh, policyReady, close }: {
+function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error, refresh, policy, confirmationWorkflow, save, close }: {
   request: LeaveRequest; rows: HolidayWork[]; active: boolean; loading: boolean
-  error: Error | null; refresh: () => Promise<unknown>; policyReady: boolean; close: () => void
+  error: Error | null; refresh: () => Promise<unknown>; policy: HolidayWorkList['policy']
+  confirmationWorkflow: boolean; save: HolidaySave; close: () => void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const { profile } = useAuth()
@@ -55,6 +60,8 @@ function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error,
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [weekdaySavedMode, setWeekdaySavedMode] = useState<'leave' | 'time' | null>(null)
+  const [confirmationDay, setConfirmationDay] = useState<string | null>(null)
+  const [settlementDay, setSettlementDay] = useState<string | null>(null)
   const submitting = useRef(false)
   const [settlementId] = useState(() => crypto.randomUUID())
 
@@ -75,7 +82,8 @@ function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error,
   const weekdayValid = weekdayInput.every(row => row.actual != null && row.actual <= row.minutes!)
   const weekdayTotal = weekdayInput.reduce((sum, row) => sum + (row.actual ?? 0), 0)
   const holidaySaved = rows.some(row => row.settlements.some(item => item.id === settlementId))
-  const holidays = holidaySaved ? [] : rows.filter(row => row.canSettle && row.id && row.remainingUnits > 0 && !row.legacySettled)
+  const policyReady = Boolean(policy)
+  const holidays = holidaySaved || confirmationWorkflow ? [] : rows.filter(row => row.canSettle && row.id && row.remainingUnits > 0 && !row.legacySettled)
   const holidayUnits = holidays.reduce((sum, row) => sum + row.remainingUnits, 0)
   const latestMonth = holidays.reduce((month, row) => row.date.slice(0, 7) > month ? row.date.slice(0, 7) : month, '')
   const today = koreaDateKey()
@@ -135,30 +143,46 @@ function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error,
     }
   }
 
-  return <dialog ref={dialog} aria-label="외근 건 전체 후처리" onCancel={event => {
+  return <dialog ref={dialog} aria-label="외근 건 전체 진행" onCancel={event => {
     event.preventDefault()
     if (!submitting.current) close()
   }} className="fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-auto rounded-xl border border-border bg-card p-5 text-card-foreground shadow-lg backdrop:bg-black/40">
     <div className="space-y-4">
-      <header><h3 className="text-base font-semibold">{request.employeeName} · 외근 후처리</h3><p className="text-sm text-muted-foreground">{request.from}{request.from !== request.to && ` ~ ${request.to}`}</p></header>
+      <header><h3 className="text-base font-semibold">{request.employeeName} · 외근 처리 진행</h3><p className="text-sm text-muted-foreground">{request.from}{request.from !== request.to && ` ~ ${request.to}`}</p></header>
       {!ended && <p className="text-sm">승인되고 종료된 외근부터 정산할 수 있습니다.</p>}
       {ended && (loading || preview.isPending) && <p role="status" className="text-sm">외근 근무 기록을 불러오는 중입니다.</p>}
       {loadError && <div role="alert" className="text-sm text-danger">근무 기록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => void Promise.all([refresh(), preview.refetch()])}>다시 조회</Button></div>}
       {rows.length > 0 && <ul aria-label="주말·공휴일 보상 시간" className="space-y-2 rounded-lg border border-border p-3 text-sm">
-        {rows.map(row => <li key={row.date} className="flex flex-wrap items-baseline justify-between gap-x-3">
+        {rows.map(row => {
+          const compensationMethod = holidayConfirmedMethod(row)
+          return <li key={row.date} className="flex flex-wrap items-baseline justify-between gap-x-3">
           <span>{row.date}</span>
           {row.actualMinutes != null && row.creditUnits != null
             ? <span>실제 {holidayCredit(row.actualMinutes * 2)}{row.creditUnits === row.actualMinutes * 3 ? ' × 1.5' : ''} → <strong>보상 {holidayCredit(row.creditUnits)}</strong></span>
-            : <span>{holidayPhase(row)}</span>}
-          {row.actualMinutes != null && <small className="w-full text-right text-muted-foreground">{holidayPhase(row)}{row.remainingUnits > 0 && row.remainingUnits !== row.creditUnits && ` · 남은 보상 ${holidayCredit(row.remainingUnits)}`}</small>}
-        </li>)}
+            : <span>{holidayPhase(row, confirmationWorkflow)}</span>}
+          {row.actualMinutes != null && <small className="w-full text-right text-muted-foreground">{holidayPhase(row, confirmationWorkflow)}{row.remainingUnits > 0 && row.remainingUnits !== row.creditUnits && ` · 남은 보상 ${holidayCredit(row.remainingUnits)}`}</small>}
+          {confirmationWorkflow && row.id && (row.confirmation || (row.canSettle && row.remainingUnits > 0 && !row.legacySettled)) && <>
+            <Button type="button" size="sm" variant="outline" aria-expanded={confirmationDay === row.id}
+              onClick={() => { setConfirmationDay(confirmationDay === row.id ? null : row.id); setSettlementDay(null) }}>
+              {row.date} 확인서 {confirmationDay === row.id ? '닫기' : '열기'}
+            </Button>
+            {confirmationDay === row.id && <div className="mt-2 w-full space-y-2">
+              <HolidayWorkConfirmationPanel key={row.confirmation?.id ?? row.id} row={row} scope="operations" policy={policy} save={save} />
+              {row.remainingUnits > 0 && compensationMethod && (settlementDay === row.id
+                ? <HolidaySettlementEditor rows={[row]} policyReady={policyReady} compensationMethod={compensationMethod}
+                  save={save} close={() => setSettlementDay(null)} />
+                : <Button type="button" onClick={() => setSettlementDay(row.id)}>정산 확정</Button>)}
+            </div>}
+          </>}
+          </li>
+        })}
       </ul>}
-      {ready && !hasSettlement && <p className="text-sm text-muted-foreground">{holidaySaved ? '이 팝업에서 휴일 정산을 저장했습니다.' : '현재 확정할 수 있는 추가 근무나 휴일 보상이 없습니다.'}</p>}
+      {ready && !hasSettlement && !confirmationWorkflow && <p className="text-sm text-muted-foreground">{holidaySaved ? '이 팝업에서 휴일 정산을 저장했습니다.' : '현재 확정할 수 있는 추가 근무나 휴일 보상이 없습니다.'}</p>}
       {weekdayDone && <p className="text-sm text-muted-foreground">평일 추가 근무 처리 완료</p>}
       {weekdayMissing && <p role="alert" className="text-sm text-danger">평일 근무 기준을 먼저 확인해 주세요.</p>}
       {holidays.length > 100 && <p role="alert" className="text-sm text-danger">휴일 기록이 100건을 넘습니다. 아래 근무 목록에서 날짜를 나눠 정산해 주세요.</p>}
       <fieldset disabled={busy} className="space-y-4">
-        <legend className="mb-2 text-sm font-medium">처리 방식</legend>
+        <legend className="mb-2 text-sm font-medium">{confirmationWorkflow ? '평일 추가근무 처리 방식' : '처리 방식'}</legend>
         <div className="grid grid-cols-3 gap-2">{MODES.map(item => <Button key={item.value} type="button" size="sm"
           variant={mode === item.value ? 'default' : 'outline'} aria-pressed={mode === item.value}
           disabled={item.value !== 'later' && (!ready || !hasSettlement || weekdayMissing || (item.value === 'leave' && !policyReady) || (weekdaySavedMode !== null && item.value !== weekdaySavedMode))}

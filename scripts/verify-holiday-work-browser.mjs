@@ -18,20 +18,28 @@ window.__rows=[{id:'day-a',employeeId:'staff',employeeName:'검증 직원',depar
 export function FixtureAuth({children}){const[role,setRole]=useState('staff');window.__role=role;window.__setRole=setRole;const profile=useMemo(()=>({id:role,companyId:'company',status:'active'}),[role]);return <Auth.Provider value={{profile,session:{user:{id:role}}}}>{children}</Auth.Provider>}
 export const useAuth=()=>useContext(Auth),usePagePreview=()=>null,useRenderWatch=()=>{};
 export const useMeetingNotices=()=>({items:[],series:[],ready:true,error:null}),listMeetingInvitations=async()=>[],listMyLeaveUsageNotices=async()=>[],listMyLateStatementNotices=async()=>[],lateStatementNoticeItems=()=>[],leaveNoticeItems=()=>[];
-window.__offsites=[];window.__caseQueries=[];window.__weekdaySaved=null;window.__failAction=null;
+window.__offsites=[];window.__caseQueries=[];window.__weekdaySaved=null;window.__failAction=null;window.__confirmationWorkflow=false;window.__uploads=[];
 export function useMonthlyWorkRequests(month,enabled=true){const q=useQuery({queryKey:['company-leave-cover',window.__role,month],enabled,queryFn:async()=>window.__offsites.filter(r=>r.from.slice(0,7)<=month&&r.to.slice(0,7)>=month)});return{...q,rows:q.data??[]}}
 export const offsiteSettlementPreview=async(request)=>request==='weekend-trip'
  ? {settlement:null,dates:[{date:'2026-11-07',minutes:480}]}
  : {settlement:window.__weekdaySaved,dates:[{date:'2026-10-30',minutes:360},{date:'2026-10-31',minutes:1380},{date:'2026-11-01',minutes:1380},{date:'2026-11-02',minutes:180}]};
 export const saveOffsiteSettlement=async()=>{throw Error('mixed case must use the holiday workflow')};
 function add(kind,audience,tab,body,action){const r=window.__rows[0];window.__events.unshift({event_key:'holiday:'+kind+':'+r.version,entity_id:r.id,created_at:new Date(Date.now()+r.version*1000).toISOString(),event_type:'holiday-'+kind,tab,kind:'overtime',employee_name:r.employeeName,from_date:r.date,to_date:r.date,start_time:'',end_time:'',note:body,decision_note:null,action_needed:action,status:r.state,current:true,read_at:null,title:r.employeeName+' · '+body,action_key:'holiday-work:'+r.id,audience})}
-function events(){return window.__events.filter(e=>e.audience===window.__role).map(e=>({...e,action_needed:e.event_type==='holiday-submitted'?window.__rows[0].state==='submitted':e.event_type==='holiday-settle'?window.__rows[0].remainingUnits>0:e.action_needed,current:e.event_type==='holiday-submitted'?window.__rows[0].state==='submitted':e.current}))}
-export const getSupabase=()=>({rpc:async(name,args={})=>{
+function events(){return window.__events.filter(e=>e.audience===window.__role).map(e=>{
+ const r=window.__rows.find(row=>row.id===e.entity_id);
+ const pending=e.event_type==='holiday-confirmation-request'?Boolean(r?.confirmation&&!r.confirmation.choice)
+  :e.event_type==='holiday-confirmation-submitted'?Boolean(r?.remainingUnits):undefined;
+ return{...e,action_needed:pending??(e.event_type==='holiday-submitted'?window.__rows[0].state==='submitted':e.event_type==='holiday-settle'?window.__rows[0].remainingUnits>0:e.action_needed),
+  current:pending??(e.event_type==='holiday-submitted'?window.__rows[0].state==='submitted':e.current)};
+})}
+export const getSupabase=()=>({storage:{from:()=>({upload:async(path,file,options)=>{
+ window.__uploads.push({path,size:file.size,type:options.contentType});return{data:{path},error:null};
+ }})},rpc:async(name,args={})=>{
  if(name==='list_my_managed_work_notifications'||name==='list_my_home_work_notifications')return{data:events(),error:null};
  if(name==='read_my_home_work_notification'){window.__reads.push(args.p_key);const e=window.__events.find(e=>e.event_key===args.p_key);if(e)e.read_at=new Date().toISOString();return{data:null,error:null}}
  if(name!=='holiday_work')throw Error('unexpected '+name);
  const{p_action:a,p_payload:p}=args;let r=window.__rows[0];
- if(a==='list'){if(p.request)window.__caseQueries.push(p.request);return{data:{ready:true,isOperations:window.__role==='ops',policy:window.__policy,rows:window.__role==='peer'?[]:window.__rows.filter(r=>p.request?r.source.offsites.some(o=>o.id===p.request):!window.__offsites.length||r.date.startsWith(p.month.slice(0,7))).map(r=>({...r,canSubmit:window.__role==='staff'&&['unreported','returned','planned'].includes(r.state),canReview:window.__role==='approver'&&r.state==='submitted',canSettle:window.__role==='ops'&&r.state==='approved'}))},error:null}}
+ if(a==='list'){if(p.request)window.__caseQueries.push(p.request);return{data:{ready:true,isOperations:window.__role==='ops',confirmationWorkflow:window.__confirmationWorkflow,policy:window.__policy,rows:window.__role==='peer'?[]:window.__rows.filter(r=>p.request?r.source.offsites.some(o=>o.id===p.request):!window.__offsites.length||r.date.startsWith(p.month.slice(0,7))).map(r=>({...r,confirmation:r.confirmation?{...r.confirmation,signedPath:window.__role==='ops'?r.confirmation.signedPath:null}:undefined,canSubmit:window.__role==='staff'&&['unreported','returned','planned'].includes(r.state),canReview:window.__role==='approver'&&r.state==='submitted',canSettle:window.__role==='ops'&&r.state==='approved'}))},error:null}}
  window.__writes.push({a,p});if(window.__fail||a===window.__failAction)return{data:null,error:{code:'23514',message:'저장 연결 실패 · 입력 유지'}};
  if(a==='submit'){r.state='submitted';r.version++;r.intervals=p.intervals;r.reason=p.note;add('submitted','approver','approvals','실제 시간 확인 요청',true)}
  if(a==='review'){r.state='approved';r.version++;r.actualMinutes=120;r.nightMinutes=0;r.creditUnits=360;r.remainingUnits=360;add('approved','staff','my-attendance','시간 확인 완료',false);add('settle','ops','holiday-work','보상 정산 대기',true)}
@@ -39,6 +47,13 @@ export const getSupabase=()=>({rpc:async(name,args={})=>{
  if(a==='paid'){r.settlements.find(s=>s.id===p.id).paidOn=p.date;r.version++}
  if(a==='policy'){window.__policy={ref:p.ref,date:p.date}}
  if(a==='offsite-settle'){window.__weekdaySaved={request_id:p.requestId,mode:p.mode,minutes_by_date:p.minutes,leave_days:p.days,expires_on:p.expires,note:p.note,decided_at:'2026-11-04T12:00:00+09:00'}}
+ if(a==='confirmation-request'){
+  r.confirmation={id:'confirmed-form',work:{name:r.employeeName,department:r.departmentName,grade:r.jobGrade,date:r.date,location:r.location,intervals:r.intervals,actualMinutes:r.actualMinutes,
+   creditUnits:r.creditUnits,remainingUnits:r.remainingUnits,reason:r.reason,requestedBy:'운영 담당자'},choice:null,allowLeave:p.allowLeave,requestedAt:new Date().toISOString()};
+  add('confirmation-request','staff','my-attendance','보상방법 선택 요청',true);
+ }
+ if(a==='confirmation-respond'){r.confirmation.choice=p.choice;r.confirmation.respondedAt='2026-11-25T01:00:00Z';add('confirmation-submitted','ops','holiday-work','보상 확인서 제출',true)}
+ if(a==='confirmation-file'){r.confirmation.signedPath=p.path;r.confirmation.signedAt='2026-11-25T02:00:00Z'}
  return{data:{saved:true,id:r.id},error:null}
 }});
 `)
@@ -91,10 +106,10 @@ try{
      {...base,id:'weekend-work',date:'2026-11-07',actualMinutes:480,creditUnits:1440,remainingUnits:1440,settlements:[],source:{offsites:[{id:'weekend-trip'}],clocks:[]}}];
    window.__setRole('ops');window.__navigate('/operations-support?part=attendance&attendanceView=offsite&oldOffsite=1');
  })
- await page.getByRole('link',{name:'외근 건 전체 후처리로 이동'}).waitFor();assert.equal(await page.getByRole('button',{name:'후처리 확정',exact:true}).count(),0,'mixed trip cannot be split from old tab');assert.equal(await page.getByLabel('2026-10-30 실제 추가 근무 시:분').count(),0)
+ await page.getByRole('link',{name:'주말·공휴일 근무 진행'}).waitFor();assert.equal(await page.getByRole('button',{name:'후처리 확정',exact:true}).count(),0,'mixed trip cannot be split from old tab');assert.equal(await page.getByLabel('2026-10-30 실제 추가 근무 시:분').count(),0)
  await page.evaluate(()=>window.__refresh())
- await page.getByRole('link',{name:'외근 건 전체 후처리로 이동'}).click()
- const modal=page.getByRole('dialog',{name:'외근 건 전체 후처리',exact:true})
+ await page.getByRole('link',{name:'주말·공휴일 근무 진행'}).click()
+ const modal=page.getByRole('dialog',{name:'외근 건 전체 진행',exact:true})
  const saveOffsite=modal.getByRole('button',{name:'저장',exact:true})
  await modal.getByText('2026-11-01',{exact:true}).waitFor()
  assert.equal(await modal.getByRole('button',{name:'휴가로 지급',exact:true}).isDisabled(),true)
@@ -108,7 +123,7 @@ try{
  assert.equal(await unified.getByRole('row').filter({hasText:'검증 직원'}).count(),1,'one monthly row for the same confirmed day')
  assert.equal(await mixedRow.getByRole('checkbox').count(),0,'linked trip has one settlement entry point')
  await unified.getByRole('row').filter({hasText:'외근 승인 대기 직원'}).waitFor()
- await mixedRow.getByRole('button',{name:'후처리',exact:true}).click()
+ await mixedRow.getByRole('button',{name:'진행',exact:true}).click()
  await modal.getByRole('button',{name:'시간으로 정산',exact:true}).click()
  const weekday=modal.getByLabel('2026-10-30 실제 추가 근무 시:분')
  await weekday.fill('2:00');await modal.getByLabel('2026-11-02 실제 추가 근무 시:분').fill('1:00')
@@ -133,5 +148,65 @@ try{
  await saveOffsite.click();await modal.waitFor({state:'hidden'})
  assert.deepEqual(await page.evaluate(()=>window.__rows.find(r=>r.id==='weekend-work').remainingUnits),480)
  assert.equal(await page.evaluate(()=>window.__writes.filter(w=>w.a==='offsite-settle').length),1,'no weekday write for a weekend-only trip')
- assert.deepEqual(errors,[]);assert.deepEqual(external,[]);console.log('holiday-work browser: one unified table, one action per linked trip, pending trip visibility, employee/review/payment regression, cross-month modal, defer, retry and 1.5x passed')
+ await page.evaluate(()=>{
+   const trip=window.__rows.find(r=>r.id==='weekend-work');
+   window.__rows=[{...trip,jobGrade:'사원',reason:'실제 촬영 지원',intervals:[{start:660,end:1140}],state:'approved',remainingUnits:1440,settlements:[]}];
+   window.__events=[];window.__confirmationWorkflow=true;
+   window.__navigate('/operations-support?part=attendance&attendanceView=holiday&holidayMonth=2026-11&offsiteCase=weekend-trip');
+   return window.__refresh();
+ })
+ await modal.getByRole('button',{name:'2026-11-07 확인서 열기',exact:true}).click()
+ const certificate=page.getByRole('region',{name:'주말·휴일근로 보상방법 확인서',exact:true})
+ await certificate.getByText('검증 직원 · 기획팀 · 사원',{exact:true}).waitFor()
+ assert.equal(await certificate.getByText('실제 8시간 · 가산 반영 12시간').count(),1)
+ await certificate.getByRole('button',{name:'직원에게 확인 요청'}).click()
+ await certificate.getByRole('status').getByText('직원 제출 대기').waitFor()
+ await modal.getByRole('button',{name:'닫기',exact:true}).click()
+ await page.evaluate(()=>{window.__setRole('staff');window.__navigate('/settings/profile?part=my-attendance')})
+ await page.getByRole('button',{name:/보상방법 선택 요청/}).click()
+ await certificate.getByRole('radio',{name:'가산임금 지급'}).waitFor()
+ assert.equal(await certificate.getByRole('radio',{name:'보상휴가 부여'}).isDisabled(),true)
+ await page.waitForFunction(()=>window.__reads.some(key=>key.includes('confirmation-request')))
+ assert.equal(await page.getByLabel('처리 필요 1건').count(),1,'reading does not submit compensation selection')
+ await certificate.getByRole('radio',{name:'가산임금 지급'}).check()
+ await certificate.getByRole('button',{name:'제출',exact:true}).click()
+ await certificate.getByText(/운영지원 확인 대기/).waitFor()
+ await page.evaluate(async()=>{window.__setRole('ops');window.__navigate('/operations-support?part=attendance&attendanceView=holiday&holidayMonth=2026-11');await window.__refresh()})
+ await page.getByRole('button',{name:/보상 확인서 제출/}).click()
+ await certificate.getByRole('button',{name:'확인서 출력'}).click()
+ const printFrame=certificate.frameLocator('iframe')
+ await printFrame.getByRole('heading',{name:'주말·휴일근로 보상방법 선택 및 확인서',exact:true}).waitFor()
+ assert.equal(await printFrame.getByText(/☑ 가산임금 지급/).count(),2)
+ assert.equal(await printFrame.getByText('(서명)',{exact:true}).count(),2)
+ const printPage=await browser.newPage()
+ try{
+   await printPage.setContent(await certificate.locator('iframe').getAttribute('srcdoc'))
+   const pdf=await printPage.pdf({path:path.join(dir,'holiday-confirmation.pdf'),preferCSSPageSize:true})
+   assert.equal([...pdf.toString('latin1').matchAll(/\/Type\s*\/Page\b/g)].length,2,'confirmation prints as two A4 pages')
+ }finally{await printPage.close()}
+ await certificate.locator('iframe').evaluate(frame=>{frame.contentWindow.print=()=>{document.body.dataset.printedConfirmation='true'}})
+ await certificate.getByRole('button',{name:'인쇄',exact:true}).click()
+ assert.equal(await page.locator('body').getAttribute('data-printed-confirmation'),'true')
+ await certificate.getByRole('button',{name:'미리보기 닫기',exact:true}).click()
+ assert.equal(await page.getByRole('button',{name:'정산 확정',exact:true}).count(),0)
+ await certificate.getByLabel('서명본',{exact:true}).setInputFiles({name:'signed.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4 fixture')})
+ await certificate.getByLabel('직원과 회사의 서명 및 선택 내용을 확인했습니다.').check()
+ await page.evaluate(()=>window.__failAction='confirmation-file')
+ await certificate.getByRole('button',{name:'서명본 등록',exact:true}).click()
+ await certificate.getByRole('alert').waitFor()
+ assert.equal(await page.getByRole('button',{name:'정산 확정',exact:true}).count(),0)
+ await page.evaluate(()=>window.__failAction=null)
+ await certificate.getByRole('button',{name:'서명본 등록',exact:true}).click()
+ await certificate.getByRole('button',{name:'서명본 받기',exact:true}).waitFor()
+ assert.equal(await page.evaluate(()=>window.__uploads.length),1,'retry attaches the uploaded file without uploading it again')
+ await page.getByRole('button',{name:'정산 확정',exact:true}).click()
+ assert.equal(await settle.getByLabel('휴일 근무 보상 방식').count(),0,'employee choice is fixed')
+ await settle.getByLabel('휴일 근무 통상시급').fill('10000')
+ await settle.getByLabel('휴일 수당 지급 예정 월').fill('2026-11')
+ await settle.getByLabel('휴일 보상 확정 사유').fill('첨부 서명본 확인 후 지급')
+ await settle.getByLabel('근무 확인 내역·가산 기준·중복 지급 여부를 확인했습니다.').check()
+ await settle.getByRole('button',{name:'정산 확정',exact:true}).click()
+ await certificate.getByText(/정산 확정/).waitFor()
+ assert.equal(await page.evaluate(()=>window.__rows[0].remainingUnits),0)
+ assert.deepEqual(errors,[]);assert.deepEqual(external,[]);console.log('holiday-work browser: existing workflow, mixed trips, compensation notification, choice, A4 print, upload retry, and settlement passed')
 }finally{await browser?.close();await new Promise(resolve=>server.close(resolve))}

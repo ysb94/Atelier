@@ -29,7 +29,7 @@ import { personalWorkFeedbackNoticeItem, usePersonalWorkFeedbackNotices } from '
 import { useDepartureHandoverNotices } from './use-departure-handover-notices'
 import { departureHandoverNotification } from '@/lib/supabase/departure-handover'
 
-type WorkNotice = { event_key: string; entity_id: string; created_at: string; event_type: string; tab: 'approvals'|'overtime'|'my-attendance'|'holiday-work'|'operations-leave'; title?: string; action_key?: string; kind: RequestKind; employee_name: string; from_date: string; to_date: string; start_time: string; end_time: string; note: string; decision_note: string|null; action_needed: boolean; status: string; current?: boolean; read_at: string|null }
+type WorkNotice = { event_key: string; entity_id: string; created_at: string; event_type: string; tab: 'approvals'|'overtime'|'my-attendance'|'holiday-work'|'operations-leave'; title?: string; action_key?: string; action_label?: string | null; kind: RequestKind; employee_name: string; from_date: string; to_date: string; start_time: string; end_time: string; note: string; decision_note: string|null; action_needed: boolean; status: string; current?: boolean; read_at: string|null }
 async function workNotices(context?: DiagnosticContext): Promise<WorkNotice[]> {
   try {
     try { return await diagnosticQuery<WorkNotice[]>('notification','list_work_notices',getSupabase().rpc('list_my_managed_work_notifications'),context) ?? [] }
@@ -129,7 +129,7 @@ export function useMyHomeNotifications({ coordinator = false, background = false
         body: holiday ? item.note : item.event_type==='checkout'?`${item.from_date} · 출근 ${item.start_time}\n${item.note}`:`${item.from_date} ~ ${item.to_date} · ${item.start_time}–${item.end_time}${item.decision_note ? `\n처리 의견: ${item.decision_note}` : ''}`,
         createdAt: item.created_at, readAt: item.read_at, current:item.current!==false, href,
         target: { source: item.event_type==='checkout'?'checkout' as const:'request' as const, entityId: item.entity_id, eventVersion: item.event_key, tab: item.tab, href },
-        action: item.action_needed ? { key: item.action_key ?? `request:${item.entity_id}`, label: holiday ? item.tab==='approvals'?'실제 시간 확인 필요':item.tab==='holiday-work'?'보상 처리 필요':'실제 시간 보완 필요' : item.event_type==='checkout'?'실제 퇴근시간 등록 필요':'승인 처리 필요' } : null,
+        action: item.action_needed ? { key: item.action_key ?? `request:${item.entity_id}`, label: item.action_label ?? (holiday ? item.tab==='approvals'?'실제 시간 확인 필요':item.tab==='holiday-work'?'보상 처리 필요':'실제 시간 보완 필요' : item.event_type==='checkout'?'실제 퇴근시간 등록 필요':'승인 처리 필요') } : null,
       }
     })
     return [...meetingItems,...leaveItems,...lateItems,...lateAppealNoticeItems(lateAppeals.data?.rows ?? []),...workItems,...attendanceStartReminderItems(attendanceReminders.rows),...(visual.rows?.map(visualWorkflowNoticeItem) ?? []),...(draftInformation.rows?.map(draftInformationNoticeItem) ?? []),...(personalWorkFeedback.rows?.map(personalWorkFeedbackNoticeItem) ?? []),...(departureHandover.rows?.map(departureHandoverNotification) ?? [])].sort((a,b) => b.createdAt.localeCompare(a.createdAt))
