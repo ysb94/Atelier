@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { ListChecks, MapPin, Package, QrCode, Truck } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
-import { useBrand } from '@/components/layout/brand-context'
-import { SingleBrandOrList } from '@/components/layout/SingleBrandOrList'
+import { BrandScope, useBrand } from '@/components/layout/brand-context'
+import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { CompanyWarehouseList } from '@/features/workspace/company-operation-lists'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
@@ -267,9 +267,22 @@ export function WarehousePage() {
 }
 
 export function CompanyWarehousePage() {
+  const { selection, selectedBrands, brandBySlug, loading, error } = useCompanyBrandScope()
+  const brand = (selection.canEdit ? selectedBrands[0] : undefined) ?? brandBySlug.get('masmarulez')
+
+  if (loading || error) {
+    return (
+      <p role="status" className="text-sm text-muted-foreground">
+        {loading ? '창고를 불러오는 중...' : '창고 정보를 불러오지 못했습니다.'}
+      </p>
+    )
+  }
+
+  if (!brand) return <CompanyWarehouseList />
+
   return (
-    <SingleBrandOrList list={<CompanyWarehouseList />}>
+    <BrandScope brand={brand}>
       <WarehousePage />
-    </SingleBrandOrList>
+    </BrandScope>
   )
 }
