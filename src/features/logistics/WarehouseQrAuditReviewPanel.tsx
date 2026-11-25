@@ -54,6 +54,9 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
   const [units, setUnits] = useState(item.units_per_box?.toString() ?? '')
   const [labelDate, setLabelDate] = useState(item.label_date ?? '')
   const [opened, setOpened] = useState(false)
+  const hasUnsavedPlacementDetails = item.placement_review && (
+    name.trim() !== '' || labelDate !== (item.label_date ?? '')
+  )
 
   const photo = useQuery({
     queryKey: ['warehouse-qr-audit-photo', brandId, item.photo_path],
@@ -68,6 +71,9 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
 
   const link = useMutation({
     mutationFn: async () => {
+      if (hasUnsavedPlacementDetails) {
+        throw new Error('현재 입고 요청에는 정식 상품과 수량만 저장할 수 있습니다.')
+      }
       const quantity = Number(units)
       if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1_000_000) {
         throw new Error('수량을 1 이상의 정수로 입력하세요.')
@@ -128,19 +134,19 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
               if (value) { setCandidateId(''); setName('') }
             }} />
           </label>
-          {!item.placement_review && <label className="block space-y-1 text-sm">
+          <label className="block space-y-1 text-sm">
             <span>M번호 없는 물품명</span>
             <Input value={name} maxLength={300} onChange={(event) => {
               setName(event.target.value)
               if (event.target.value) { setCandidateId(''); setStyle(null) }
             }} />
             {nameIsSku && <span className="text-muted-foreground">M번호는 위의 정식 상품 검색에서 선택하세요.</span>}
-          </label>}
+          </label>
           {item.unplaced ? <>
-            {!item.placement_review && <label className="block space-y-1 text-sm">
+            <label className="block space-y-1 text-sm">
               <span>선적일</span>
               <Input type="date" value={labelDate} onChange={event => setLabelDate(event.target.value)} />
-            </label>}
+            </label>
             <label className="block space-y-1 text-sm">
               <span>박스당 수량</span>
               <Input type="number" min={1} max={1000000} value={units} onChange={event => setUnits(event.target.value)} />
@@ -156,8 +162,11 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
                 placeholder="수량 미확인" />
             </label>
           </>}
+          {hasUnsavedPlacementDetails && <p role="status" className="text-sm text-muted-foreground">
+            현재 입고 요청에는 정식 상품과 수량만 저장할 수 있습니다.
+          </p>}
           {link.isError && <p role="alert" className="text-sm text-destructive">{link.error.message}</p>}
-          <Button disabled={!hasProduct || !photo.data || link.isPending || !units}
+          <Button disabled={!hasProduct || !photo.data || link.isPending || !units || hasUnsavedPlacementDetails}
             onClick={() => link.mutate()}>
             {link.isPending ? '저장 중…' : '상품 연결'}
           </Button>
