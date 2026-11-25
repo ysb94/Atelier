@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { useRenderWatch } from '@/lib/diagnostics'
 
-const LOCAL='http://127.0.0.1:4320'
+const LOCAL='/__atelier-spin360'
 const DIRECTIONS=['앞','오른쪽','뒤','왼쪽']
 type Result={id:string;title:string;createdAt:string;status?:string;progress?:number;message?:string}
 const fileData=(file:File)=>new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(new Error('사진을 읽지 못했습니다.'));reader.readAsDataURL(file)})
@@ -49,7 +49,7 @@ export function Spin360Page(){
    {jobs.map(job=><div key={job.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-border p-3">
     <b>{job.title}</b><span className="text-sm">{job.status==='success'?'제작 완료':job.status==='error'?'연결 확인 필요':`${job.progress??0}% · ${job.status}`}</span>
     <Button size="sm" variant="outline" onClick={()=>setSelected(job)}>결과 보기</Button>
-    {job.status==='success'&&<a className="text-sm underline" href={`${LOCAL}/job/${job.id}/model.glb?download=1`} download="model.glb">model.glb 다운로드</a>}
+    {job.status==='success'&&<a className="text-sm underline" href={`${LOCAL}/job/${job.id}/model.glb?download=1`}>model.glb 다운로드</a>}
     {job.status==='error'&&<Button size="sm" variant="outline" onClick={()=>{void local(`/job/${job.id}/resume`,{}).then(()=>refresh()).catch(e=>setError(e.message))}}>기존 작업만 조회</Button>}
    </div>)}
   </Card>

@@ -103,7 +103,8 @@ export function createModelViewer(host: HTMLElement, src: string, callbacks: {
       if (!response.ok) throw new Error(`모델 조회 실패 (HTTP ${response.status})`)
       const data = await response.arrayBuffer()
       if (disposed) return
-      const gltf = await new GLTFLoader().parseAsync(data, new URL('.', src).href)
+      const modelUrl = response.url || new URL(src, document.baseURI).href
+      const gltf = await new GLTFLoader().parseAsync(data, new URL('.', modelUrl).href)
       if (disposed) { disposeObject(gltf.scene); return }
       const bounds = new THREE.Box3().setFromObject(gltf.scene)
       const size = bounds.getSize(new THREE.Vector3())
