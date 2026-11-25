@@ -88,7 +88,10 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
         const { error } = await getSupabase().rpc('review_warehouse_qr_audit', {
           p_brand_id: brandId,
           p_action: action,
-          p_request: item.placement_review ? request : {
+          p_request: item.placement_review ? {
+            ...request,
+            ...(labelDate && labelDate !== item.label_date ? { date: labelDate, previousDate: item.label_date ?? null } : {}),
+          } : {
             ...request, ...(item.unplaced ? { date: labelDate } : { candidateId, opened }),
           },
         })
@@ -151,10 +154,10 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
             {nameIsSku && <span className="text-muted-foreground">M번호는 위의 정식 상품 검색에서 선택하세요.</span>}
           </label>}
           {item.unplaced ? <>
-            {!item.placement_review && <label className="block space-y-1 text-sm">
+            <label className="block space-y-1 text-sm">
               <span>선적일</span>
               <Input type="date" value={labelDate} onChange={event => setLabelDate(event.target.value)} />
-            </label>}
+            </label>
             <label className="block space-y-1 text-sm">
               <span>박스당 수량</span>
               <Input type="number" min={1} max={1000000} value={units} onChange={event => setUnits(event.target.value)} />
