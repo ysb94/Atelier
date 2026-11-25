@@ -515,7 +515,7 @@ export function CompanyOutboundList() {
 }
 
 export function CompanyWarehouseList() {
-  const { selectedBrands, brandById, brands } = useCompanyBrandScope()
+  const { selectedBrands, brandById } = useCompanyBrandScope()
   const setQueries = useQueries({
     queries: selectedBrands.map((item) => ({
       queryKey: ['warehouse-inventory-set', item.id] as const,
@@ -548,30 +548,12 @@ export function CompanyWarehouseList() {
     <div>
       <PageHeader
         title="창고 관리"
-        description="전 브랜드 재고를 한 목록에서 봅니다. 행 작업은 그 행의 브랜드를 따르고, 새 XLSX 적재는 브랜드를 하나 고른 뒤 합니다."
-        actions={
-          <div className="flex flex-wrap gap-2">
-            {brands.map((item) => (
-              <Link
-                key={item.id}
-                to={withBrandsFilter(
-                  '/logistics/warehouses',
-                  [item.slug],
-                  brands.map((brand) => brand.slug),
-                )}
-              >
-                <Button type="button" size="sm" variant="outline">
-                  {item.name} 적재
-                </Button>
-              </Link>
-            ))}
-          </div>
-        }
+        description="전 브랜드 재고를 한 목록에서 봅니다."
       />
-      <div className="mb-3">
-        <CompanyBrandFilter />
-      </div>
       <Card className="overflow-hidden">
+        <div className="border-b border-border px-4 py-2">
+          <CompanyBrandFilter className="w-auto" />
+        </div>
         <table className="w-full text-left text-sm">
           <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
             <tr>
@@ -591,7 +573,7 @@ export function CompanyWarehouseList() {
             ) : rows.length === 0 ? (
               <tr>
                 <td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">
-                  재고가 없습니다. 브랜드를 하나 고르고 XLSX를 적재하세요.
+                  재고가 없습니다.
                 </td>
               </tr>
             ) : (
