@@ -1,8 +1,9 @@
 import { useState, useRef, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/input'
 import { useAuth } from '@/lib/supabase/auth'
+import { cn } from '@/lib/utils'
 import {
   buildSamplePackZip, getSamplePack, openSamplePack, SAMPLE_PACK_ACCEPT, samplePackId, samplePackPrefix, samplePackReference,
   samplePackServerMissing, saveSamplePack, uploadSamplePackFile, validateSelectedSampleFiles,
@@ -25,6 +26,7 @@ export function SampleWorkOrderPackField({ label, draftId, slot, side, readOnly,
   const { profile, session } = useAuth()
   const actor = profile?.id === session?.user.id ? profile?.id : undefined
   const busyRef = useRef(false)
+  const fileInput = useRef<HTMLInputElement>(null)
   const persistedDraft = useRef(draftId)
   const uploadedFiles = useRef(new Map<File, SamplePackFile>())
   const [createdDraftId, setCreatedDraftId] = useState<string | null>(null)
@@ -33,7 +35,7 @@ export function SampleWorkOrderPackField({ label, draftId, slot, side, readOnly,
   const [status, setStatus] = useState('')
   const [added, setAdded] = useState<File[]>([])
   const [removed, setRemoved] = useState<string[]>([])
-  const [editedNotes, setEditedNotes] = useState<string>()
+  const [dragging, setDragging] = useState(false)
   const [editing, setEditing] = useState(false)
   const previousId = samplePackId(savedFile?.url)
   const editingDraftId = draftId ?? createdDraftId
@@ -48,16 +50,16 @@ export function SampleWorkOrderPackField({ label, draftId, slot, side, readOnly,
   })
   const baseline = draftPack.data ?? previous.data
   const files = (baseline?.files ?? []).filter(file => !removed.includes(file.path))
-  const notes = editedNotes ?? baseline?.notes ?? ''
   const count = files.length + added.length
   const editable = Boolean(actor) && !readOnly && Boolean(onRegister)
   const showEditor = editable && (!savedFile || editing)
   const waiting = samplePackServerMissing(draftPack.error)
   const loading = draftPack.isFetching || (Boolean(previousId) && previous.isFetching)
-  const hasEdits = Boolean(added.length || removed.length || editedNotes !== undefined)
+  const uploadDisabled = busy || saving || loading || waiting
+  const hasEdits = Boolean(added.length || removed.length)
 
   function select(list: FileList | null) {
-    if (!list?.length || busy || saving || loading || waiting) return
+    if (!list?.length || uploadDisabled) return
     const next = [...added, ...Array.from(list)]
     try {
       validateSelectedSampleFiles(files, next)
@@ -92,11 +94,11 @@ export function SampleWorkOrderPackField({ label, draftId, slot, side, readOnly,
           }
           uploaded.push(item)
         }
-        pack = await saveSamplePack(pack, [...files, ...uploaded], notes)
+        pack = await saveSamplePack(pack, [...files, ...uploaded], baseline?.notes ?? '')
       }
       cache.setQueryData([...samplePackPrefix, actor, 'draft', id, slot], pack)
       uploadedFiles.current.clear()
-      setAdded([]); setRemoved([]); setEditedNotes(undefined)
+      setAdded([]); setRemoved([])
       if (register) {
         await buildSamplePackZip(pack)
         await onRegister?.(samplePackReference(pack, slot.startsWith('edit:') ? `${label} 수정본` : label))
@@ -115,9 +117,7 @@ export function SampleWorkOrderPackField({ label, draftId, slot, side, readOnly,
     }
   }
 
-  return <div className="mt-5 grid gap-3" aria-label={`${label} 작업지시서 첨부`}
-    onDragOver={event => { if (showEditor && event.dataTransfer.types.includes('Files')) event.preventDefault() }}
-    onDrop={event => { if (showEditor) { event.preventDefault(); select(event.dataTransfer.files) } }}>
+  return <div className="mt-5 grid min-w-0 gap-3" aria-label={`${label} 작업지시서 첨부`}>
     {side}
     {savedFile && <>
       {previousId ? <SampleWorkOrderPackDetails id={previousId} showBulk label={savedFile.name} />
@@ -126,26 +126,46 @@ export function SampleWorkOrderPackField({ label, draftId, slot, side, readOnly,
         onClick={() => setEditing(true)}>수정본 작성</Button>}
     </>}
     {showEditor && <>
-      <label className="grid gap-1 text-sm font-medium">{label} 작업지시서 파일
-        <input type="file" multiple accept={SAMPLE_PACK_ACCEPT} disabled={busy || saving || loading || waiting}
-          onChange={event => { select(event.currentTarget.files); event.currentTarget.value = '' }} />
-      </label>
-      <p className="text-xs text-muted-foreground">최대 10개 · 파일당 30MB · 전체 100MB</p>
-      <ul className="space-y-1 text-sm">
-        {files.map(file => <li key={file.path} className="flex items-center justify-between gap-2">
+      {count > 0 && <ul aria-label="첨부 파일 목록" className="min-w-0 divide-y divide-border rounded-xl border border-border text-sm">
+        {files.map(file => <li key={file.path} className="flex items-center justify-between gap-2 px-3 py-1">
           <span className="break-all">{file.name}</span>
           <Button type="button" variant="ghost" size="sm" disabled={busy || saving} aria-label={`${file.name} 빼기`}
             onClick={() => setRemoved(current => [...current, file.path])}>빼기</Button>
         </li>)}
-        {added.map((file, index) => <li key={index} className="flex items-center justify-between gap-2">
+        {added.map((file, index) => <li key={index} className="flex items-center justify-between gap-2 px-3 py-1">
           <span className="break-all">{file.name}</span>
           <Button type="button" variant="ghost" size="sm" disabled={busy || saving} aria-label={`${file.name} 선택 취소`}
             onClick={() => setAdded(current => current.filter((_, i) => i !== index))}>빼기</Button>
         </li>)}
-      </ul>
-      <label className="grid gap-1 text-sm font-medium">꼭 확인할 사항
-        <Textarea value={notes} maxLength={1000} disabled={busy || saving || waiting} onChange={event => setEditedNotes(event.currentTarget.value)} />
-      </label>
+      </ul>}
+      <div
+        onDragOver={event => {
+          if (!event.dataTransfer.types.includes('Files')) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = uploadDisabled ? 'none' : 'copy'
+          setDragging(!uploadDisabled)
+        }}
+        onDragLeave={event => {
+          if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setDragging(false)
+        }}
+        onDrop={event => {
+          if (!event.dataTransfer.types.includes('Files')) return
+          event.preventDefault()
+          setDragging(false)
+          select(event.dataTransfer.files)
+        }}
+      >
+        <input ref={fileInput} type="file" multiple accept={SAMPLE_PACK_ACCEPT} className="hidden"
+          aria-label={`${label} 작업지시서 파일`} disabled={uploadDisabled}
+          onChange={event => { select(event.currentTarget.files); event.currentTarget.value = '' }} />
+        <Button type="button" variant="ghost" disabled={uploadDisabled} aria-label={`${label} 작업지시서 파일 선택`}
+          className={cn('h-auto min-h-20 w-full flex-col gap-1 rounded-xl border border-dashed border-border px-4 py-3 font-normal text-muted-foreground',
+            dragging && 'border-primary bg-primary/5')}
+          onClick={() => fileInput.current?.click()}>
+          <span className="flex items-center gap-2"><Upload aria-hidden="true" className="size-4 shrink-0" />파일을 끌어다 놓거나 클릭하세요.</span>
+          <span className="text-xs">최대 10개 · 파일당 30MB · 전체 100MB</span>
+        </Button>
+      </div>
       {waiting && <p role="status" className="text-sm text-warning">작업지시서 묶음 서버 연결 대기</p>}
       {draftPack.isError && !waiting && <p role="alert" className="text-sm text-danger">임시저장을 불러오지 못했습니다. <Button type="button" size="sm" variant="ghost" onClick={() => void draftPack.refetch()}>다시 조회</Button></p>}
       {previous.isError && <p role="alert" className="text-sm text-danger">기존 파일을 확인하지 못했습니다. <Button type="button" size="sm" variant="ghost" onClick={() => void previous.refetch()}>다시 조회</Button></p>}
@@ -153,7 +173,7 @@ export function SampleWorkOrderPackField({ label, draftId, slot, side, readOnly,
       {(status || draftPack.data) && <p role="status" className="text-sm text-muted-foreground">{status || `임시저장 · 첨부 ${draftPack.data?.files.length ?? 0}개`}</p>}
       <div className="flex flex-wrap justify-end gap-2">
         {editing && <Button type="button" variant="ghost" disabled={busy || saving} onClick={() => {
-          setEditing(false); setAdded([]); setRemoved([]); setEditedNotes(undefined); setStatus(''); setError('')
+          setEditing(false); setAdded([]); setRemoved([]); setDragging(false); setStatus(''); setError('')
         }}>닫기</Button>}
         <Button type="button" variant="outline" disabled={busy || saving || loading || waiting || !hasEdits || draftPack.isError || previous.isError} onClick={() => void save(false)}>임시저장</Button>
         <Button type="button" disabled={busy || saving || loading || waiting || !count || (editing && !hasEdits && !draftPack.data) || draftPack.isError || previous.isError}
