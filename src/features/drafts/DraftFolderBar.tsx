@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Folder, FolderOpen, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
@@ -227,12 +227,25 @@ export function DraftFolderHeading({
   const [name, setName] = useState(folder.label)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const editor = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
+  const closeEditor = useCallback(() => {
     setEditing(false)
     setName(folder.label)
     setError('')
-  }, [folder.id, folder.label])
+  }, [folder.label])
+
+  useEffect(() => { closeEditor() }, [folder.id, closeEditor])
+
+  useEffect(() => {
+    if (!editing || !folder.editable || busy || !editor.current) return
+    const region = editor.current
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (event.target instanceof Node && !region.contains(event.target)) closeEditor()
+    }
+    region.ownerDocument.addEventListener('click', closeOnOutsideClick, true)
+    return () => region.ownerDocument.removeEventListener('click', closeOnOutsideClick, true)
+  }, [busy, closeEditor, editing, folder.editable])
 
   async function save() {
     const nextName = name.trim()
@@ -266,7 +279,7 @@ export function DraftFolderHeading({
   }
 
   return (
-    <div className="min-w-0">
+    <div ref={editor} className="min-w-0">
       {editing && folder.editable ? (
         <form
           className="flex flex-wrap items-center gap-1.5"
@@ -291,11 +304,7 @@ export function DraftFolderHeading({
             size="sm"
             className="h-7 px-2"
             disabled={busy}
-            onClick={() => {
-              setEditing(false)
-              setName(folder.label)
-              setError('')
-            }}
+            onClick={closeEditor}
           >
             취소
           </Button>

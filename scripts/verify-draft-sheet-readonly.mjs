@@ -99,6 +99,7 @@ async function verifyFolderCreatePlacement(page,origin){
  const lastFolder=folders.getByRole('button',{name:/^테스트 출시 폴더 12 0$/})
  const name=folders.getByRole('textbox',{name:'폴더 이름'})
  const order = () => folders.getByRole('button', { name: /^테스트 출시 폴더 [12] 0$/ }).allTextContents()
+ await firstFolder.waitFor()
  assert.deepEqual(await order(), ['테스트 출시 폴더 10', '테스트 출시 폴더 20'])
  const { width, height } = await secondFolder.boundingBox()
  await firstFolder.dragTo(secondFolder, { targetPosition: { x: width - 4, y: height / 2 } })
@@ -129,6 +130,19 @@ async function verifyFolderCreatePlacement(page,origin){
  await folders.getByRole('button',{name:'취소',exact:true}).click()
  await name.waitFor({state:'detached'})
  await page.setViewportSize({width:1800,height:950})
+ const title = page.getByRole('heading').getByRole('button',{name:'테스트 출시 폴더 1',exact:true})
+ const editName = page.getByRole('textbox',{name:'폴더 이름',exact:true})
+ await title.click()
+ await editName.fill('저장하지 않은 이름')
+ await editName.click()
+ assert.equal(await editName.inputValue(),'저장하지 않은 이름')
+ await folders.getByRole('button',{name:'전체 폴더',exact:true}).click()
+ await editName.waitFor({state:'detached'})
+ await title.click()
+ assert.equal(await editName.inputValue(),'테스트 출시 폴더 1')
+ await editName.fill('수정한 폴더')
+ await editName.press('Enter')
+ await page.getByRole('heading').getByRole('button',{name:'수정한 폴더',exact:true}).waitFor()
 }
 
 try{
@@ -177,7 +191,7 @@ try{
  if(folderOnly){
    await verifyFolderCreatePlacement(page,origin)
    assert.deepEqual(errors,[])
-   console.log('draft folders: mouse drag, keyboard reorder, pinned unassigned/add and mobile creation passed')
+   console.log('draft folders: mouse drag, keyboard reorder, fixed scope buttons, mobile creation and outside-click editing passed')
  }else if(stickyHeaderOnly){
    await verifyStickyHeader(page,origin)
    assert.deepEqual(errors,[])

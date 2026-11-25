@@ -243,6 +243,8 @@ function FolderBarFixture() {
       }} onCreate={async ({ brandId, name }) => {
         setFolders(current => [...current, { id: name, brandId, name, label: name, total: 0, editable: true }])
       }} />
+    <DraftFolderHeading folder={folders.find(folder => folder.id === '0')!} onDelete={async () => {}}
+      onUpdate={async (id, name) => setFolders(current => current.map(folder => folder.id === id ? { ...folder, label: name, name } : folder))} />
   </main>
 }
 
