@@ -17,7 +17,7 @@ const departmentFixtures = {
 } as const
 type Role = 'staff'|'approver'|'substitute'|'operations'|'logistics'|'logistics-approver'|'developer'|'owner'|'ceo'|keyof typeof departmentFixtures
 let currentRole = (new URLSearchParams(location.search).get('role') || 'staff') as Role
-export const releaseFixture = { get role(){ return currentRole }, approvalError:new URLSearchParams(location.search).has('approval-error'), reads:[] as string[], writes:[] as string[], setRole:(_role:Role)=>{}, refresh:()=>{} }
+export const releaseFixture = { get role(){ return currentRole }, approvalError:new URLSearchParams(location.search).has('approval-error'), reads:[] as string[], writes:[] as string[], workCommands:[] as string[], setRole:(_role:Role)=>{}, refresh:()=>{} }
 Object.assign(window,{__releaseFixture:releaseFixture})
 export function fixtureProfile(role = currentRole) {
   const index = ['developer','owner','ceo'].indexOf(role)
