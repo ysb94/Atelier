@@ -62,11 +62,15 @@ try {
     external.push(route.request().url()); return route.abort()
   })
   const page = await context.newPage()
-  await page.clock.install({ time: new Date('2030-01-08T00:29:00Z') })
+  page.setDefaultNavigationTimeout(120_000)
+  await page.clock.install({ time: new Date('2030-01-08T00:00:00Z') })
   const panel = page.getByRole('dialog', { name: '회의 시작 전 확인', exact: true })
   const waitHidden = async () => { await panel.waitFor({ state: 'hidden' }) }
   await page.goto(origin)
   await page.waitForFunction(() => window.fixture?.calls > 0)
+  // Set the 31-minute boundary after the dev server has loaded its modules.
+  await page.clock.pauseAt(new Date('2030-01-08T00:29:00Z'))
+  await page.clock.resume()
   assert.equal(await panel.count(), 0, '31분 전에는 안 뜸')
   await page.clock.fastForward(60_000)
   await panel.waitFor()
