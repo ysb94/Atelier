@@ -33,7 +33,7 @@ async function generate(inputFiles, outputDir=dir) {
     const tokens=[]
     for(const image of images){const form=new FormData();form.set('file',new Blob([image.bytes]),image.name);tokens.push((await api('/files',{method:'POST',body:form})).file_token)}
     if(tokens.some(t=>!t))throw Error('파일 업로드 토큰을 확인하지 못했습니다.')
-    const request={inputs:[{front:tokens[0]},{right:tokens[1]},{back:tokens[2]},{left:tokens[3]}],model:'v3.1-20260211',texture:true,pbr:true,texture_quality:'standard'}
+    const request={inputs:[{front:tokens[0]},{right:tokens[1]},{back:tokens[2]},{left:tokens[3]}],model:'v3.1-20260211',texture:true,pbr:true,texture_quality:'detailed'}
     await save({status:'submitting',createdAt:new Date().toISOString(),model:request.model})
     const task=await api('/generation/multiview-to-model',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)})
     if(!task.task_id)throw Error('작업 ID 응답 없음. 다시 생성하지 마세요.')
