@@ -1,9 +1,12 @@
-import { HolidayWorkPanel } from '@/features/operations-support/HolidayWorkPanel'
+import { HolidayWorkDetail } from '@/features/operations-support/HolidayWorkPanel'
+import { HolidayWorkInput, type HolidaySave } from '@/features/operations-support/HolidayWorkEditor'
+import { isHolidayCompensationPending, type HolidayWork } from '@/features/operations-support/holiday-work'
+import { useHolidayWork } from '@/features/operations-support/use-holiday-work'
 import { useSearchParams } from 'react-router-dom'
 import { OffsiteGroupHistory, OffsiteStartEditor } from './OffsiteGroupFields'
 import { useOffsiteGroups, refreshOffsiteQueries } from './offsite-group-state'
 import { registerOffsiteGroup } from '@/lib/supabase/offsite-groups'
-import { useReadMyHomeNotification } from './use-my-home-notifications'
+import { useMyHomeNotifications, useReadMyHomeNotification } from './use-my-home-notifications'
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bell, CalendarDays, ChevronLeft, ChevronRight, Clock3, Search, Send, Settings2, X } from 'lucide-react'
@@ -34,7 +37,7 @@ import { offsiteSubmission } from './offsite-form'
 import { useLeaveRequests } from '@/features/operations-support/use-leave-requests'
 import { useDepartmentApprovers } from '@/features/operations-support/use-department-approvers'
 import { useOpsDirectory } from '@/features/operations-support/ops-directory'
-import { koreanHolidayLabel, koreanHolidayNames } from '@/features/operations-support/korean-holidays'
+import { hasKoreanHolidayCalendar, koreanHolidayLabel, koreanHolidayNames } from '@/features/operations-support/korean-holidays'
 import { monthLabel, shiftMonth } from '@/features/operations-support/monthly-attendance'
 import { DEFAULT_REMINDER_BASIS, REQUEST_KINDS, approvalTypeOf, canCancelOwnRequest, dateLabel, isAllDayRequest, isFullLeave, isLeaveRequest, isDirectRegistration, requiresDepartmentApproval, isSelfApprovedRequest, requestStatusLabel, isLocationRequest, isOfficialLeave, isPartialLeave, reminderPreview, requestLabel, requestedLeaveDays, validateRequest, type PersonalRequest, type RequestForm, type RequestKind } from './personal-requests'
 import { uploadLeaveFile } from '@/lib/supabase/leave-requests'
@@ -82,8 +85,15 @@ function cancelEffect(item: PersonalRequest) {
 }
 type ScheduleDetail =
   | { type: 'request'; item: PersonalRequest; date: string }
-  | { type: 'holiday'; date: string; name: string }
+  | { type: 'day'; date: string }
+  | { type: 'work'; date: string }
   | { type: 'clock'; date: string; start: string; end: string; corrected: boolean; reported: boolean }
+
+function linksHolidaySchedule(item: PersonalRequest, work: HolidayWork | undefined) {
+  if (!work || work.state === 'cancelled') return false
+  const source = item.kind === 'offsite' ? work.source.offsites : item.kind === 'overtime' ? work.source.overtimes : undefined
+  return Boolean(source?.some(entry => entry.id === item.id))
+}
 function requestFacts(item: PersonalRequest) {
   const row = item as PersonalRequest & { decidedAt?: string | null; decidedByName?: string | null }
   const facts = [
@@ -141,6 +151,8 @@ export function MyAttendancePanel() {
     profile?.departmentId ?? null,
   )
   const [month, setMonth] = useState(() => today.slice(0, 7))
+  const holidayWork = useHolidayWork(month, 'mine')
+  const holidayByDate = useMemo(() => new Map(holidayWork.rows.map(row => [row.date, row])), [holidayWork.rows])
   const meetings = useMyScheduleMeetings(userId, profile?.companyId ?? undefined, allowed && profile?.id === userId, active, month)
   const [selected, setSelected] = useState(today)
   const [query, setQuery] = useState('')
@@ -169,9 +181,28 @@ export function MyAttendancePanel() {
   const detail = openedDetail?.type === 'request'
     ? { ...openedDetail, item: leave.requests.find(item => item.id === openedDetail.item.id) ?? openedDetail.item }
     : openedDetail
-  const [routeParams] = useSearchParams()
+  const [routeParams, setRouteParams] = useSearchParams()
   const openedRequest = useRef<string | null>(null)
   const routedRequest = routeParams.get('request')
+  const routedHoliday = routeParams.get('holidayWork')
+  const routedHolidayMonth = routeParams.get('holidayMonth')
+  const routedHolidayEvent = routeParams.get('holidayEvent')
+  const openedHoliday = useRef<string | null>(null)
+  useEffect(() => { openedHoliday.current = null; openedRequest.current = null; setDetail(null) }, [userId, profile?.companyId])
+  useEffect(() => {
+    if (!routedHoliday) { openedHoliday.current = null; return }
+    const visit = `${routedHoliday}:${routedHolidayEvent ?? ''}`
+    if (!allowed || !selfService || !active || openedHoliday.current === visit) return
+    if (routedHolidayMonth && validAttendanceMonth(routedHolidayMonth) && routedHolidayMonth !== month) {
+      setMonth(routedHolidayMonth)
+      return
+    }
+    const row = holidayWork.rows.find(item => item.id === routedHoliday)
+    if (!row || holidayWork.error) return
+    openedHoliday.current = visit
+    setSelected(row.date)
+    setDetail({ type: 'work', date: row.date })
+  }, [active, allowed, holidayWork.error, holidayWork.rows, month, routedHoliday, routedHolidayEvent, routedHolidayMonth, selfService])
   useEffect(() => {
     if (!selfService || !active || !routedRequest || leave.loading || leave.error || openedRequest.current === routedRequest) return
     const item = leave.requests.find(request => request.id === routedRequest)
@@ -193,7 +224,7 @@ export function MyAttendancePanel() {
   const todos = todoStore.data ?? legacyTodos
   const [reminders, setReminders] = useState({ arrival: true, departure: true, missing: true, decision: true })
   const addMenuRef = useRef<HTMLDivElement>(null)
-  useEffect(() => { if (!selfService) { setForm(null); setSettingsOpen(false); setDetail(current => current?.type === 'request' || current?.type === 'clock' ? null : current) } }, [selfService])
+  useEffect(() => { if (!selfService) { setForm(null); setSettingsOpen(false); setDetail(current => current?.type === 'day' ? current : null) } }, [selfService])
   const clocks = useQuery({
     queryKey: ['attendance-clock-ins', userId, 'month', month, allowed],
     ...sharedReadPolicy,
@@ -204,6 +235,7 @@ export function MyAttendancePanel() {
   const clockRows = allowed && selfService ? clocks.data ?? emptyList<AttendanceClock>() : emptyList<AttendanceClock>()
   const days = useMemo(() => buildMyAttendance(month, clockRows, leave.requests, today), [month, clockRows, leave.requests, today])
   const dayIndex = useMemo(() => new Map(days.map(day => [day.date, day])), [days])
+  const attendanceRequestsById = useMemo(() => new Map(leave.requests.map(item => [item.id, item])), [leave.requests])
   const cells = useMemo(() => calendarCells(month), [month])
   const clocksReady = allowed && !clocks.isPending && !clocks.error
   const recorded = days.filter(day => day.clockIn).length
@@ -215,6 +247,22 @@ export function MyAttendancePanel() {
     leave.requests.some(item => item.id === offsiteDetail.item.id && item.employeeId === userId) ? offsiteDetail : null
   const pendingCorrection = offsiteDetail && leave.requests.some(item => item.kind === 'correction' && item.from === offsiteDetail.date && item.status === 'pending')
   const canRequestCorrection = Boolean(offsiteDetail && offsiteDetail.date <= today && allowed && clocksReady && !leave.busy && !leave.loading && !leave.error && !pendingCorrection)
+  const detailWork = detail ? holidayByDate.get(detail.date) : undefined
+  const showHolidayWork = detail && selfService && holidayWork.enabled && (detail.type === 'day' || detail.type === 'work' ||
+    detail.type === 'request' && linksHolidaySchedule(detail.item, detailWork))
+  const canRegisterHoliday = Boolean(detail && detail.type === 'day' && hasKoreanHolidayCalendar(detail.date) &&
+    ([0, 6].includes(dayOfWeek(detail.date)) || koreanHolidayNames(detail.date).length))
+  const saveHoliday: HolidaySave = async (action, payload) => { await holidayWork.save.mutateAsync({ action, payload }) }
+  function scheduleRequests(date: string) {
+    const items = dayIndex.get(date)?.requests ?? emptyList<PersonalRequest>()
+    const work = holidayByDate.get(date)
+    if (!work || work.state === 'cancelled') return items
+    const overnight = [...work.source.offsites, ...(work.source.overtimes ?? [])].flatMap(({ id }) => {
+      const item = attendanceRequestsById.get(id)
+      return item && item.to < date && !items.some(entry => entry.id === id) ? [item] : []
+    })
+    return [...items, ...overnight]
+  }
 
   function shownRequest(item: PersonalRequest) {
     const text = query.trim().toLowerCase()
@@ -276,7 +324,16 @@ export function MyAttendancePanel() {
     setSelected(next === today.slice(0, 7) ? today : `${next}-01`)
   }
   function pickDate(date: string) { setSelected(date); setMonth(date.slice(0, 7)) }
-  function openAddMenu(date: string) { if (!allowed) return; pickDate(date); setAddOpen(true) }
+  function openDay(date: string) { pickDate(date); setDetail({ type: 'day', date }) }
+  function closeDetail() {
+    setDetail(null)
+    if (!active || !routedHoliday) return
+    setRouteParams(current => {
+      const next = new URLSearchParams(current)
+      for (const key of ['holidayWork', 'holidayMonth', 'holidayEvent']) next.delete(key)
+      return next
+    }, { replace: true })
+  }
   function record(action: 'in' | 'out' | 'undo') {
     if (action === 'out' && attendanceEntry) { attendanceEntry.requestCheckout(); return }
     void (action === 'in' ? clock.clockIn() : action === 'out' ? clock.clockOut() : clock.undoClockOut()).catch(error => {
@@ -369,10 +426,16 @@ export function MyAttendancePanel() {
     }
   }
   function requestBar(item: PersonalRequest, date: string) {
-    return <button key={item.id} type="button" className={`agenda-bar is-${requestLayer(item.kind)} is-${item.status}`} title={`${requestLabel(item.kind)} · ${requestTime(item)}`} onClick={event => { event.stopPropagation(); pickDate(date); setDetail({ type: 'request', item, date }) }}>{requestLabel(item.kind)}{item.advanceRequested ? ' · 선사용' : ''}{item.status === 'approved' ? '' : ` · ${STATUS_LABELS[item.status]}`}</button>
+    const work = holidayByDate.get(date)
+    const pending = work && linksHolidaySchedule(item, work) && isHolidayCompensationPending(work, today)
+    const label = `${requestLabel(item.kind)}${item.advanceRequested ? ' · 선사용' : ''}${item.status === 'approved' ? '' : ` · ${STATUS_LABELS[item.status]}`}`
+    return <button key={item.id} type="button" className={`agenda-bar is-${requestLayer(item.kind)} is-${item.status}${pending ? ' has-unsettled-work' : ''}`} title={`${label} · ${requestTime(item)}${pending ? ' · 보상 미완료' : ''}`} onClick={event => { event.stopPropagation(); pickDate(date); setDetail({ type: 'request', item, date }) }}>{label}{pending && <span className="agenda-work-pending">보상 미완료</span>}</button>
   }
 
   const span = form ? isAllDayRequest(form.kind) || (isLocationRequest(form.kind) && !form.endNextDay) : false
+  const detailHolidayName = detail?.type === 'day' ? koreanHolidayLabel(koreanHolidayNames(detail.date)) : ''
+  const detailTitle = detail?.type === 'request' ? `${requestLabel(detail.item.kind)}${detail.item.advanceRequested ? ' · 선사용' : ''}`
+    : detail?.type === 'clock' ? '출퇴근 기록' : detail?.type === 'work' ? '근무' : detailHolidayName || '일정'
   return <div className="personal-requests">
     {selfService && <OffsiteGroupHistory />}
     <div className="personal-request-draft-row">
@@ -438,26 +501,34 @@ export function MyAttendancePanel() {
             const holiday = koreanHolidayLabel(koreanHolidayNames(date))
             const time = dayClock(day)
             const timeText = layers.clock && clocksReady ? clockText(time.start, time.end) : ''
-            const items = day.requests.filter(item => shownRequest(item) && !(layers.clock && item.id === day.correction?.id))
+            const scheduled = scheduleRequests(date)
+            const items = scheduled.filter(item => shownRequest(item) && !(layers.clock && item.id === day.correction?.id))
             const text = query.trim().toLowerCase()
             const dayTodos = todos.filter(todo => todo.date === date && (!text || todo.title.toLowerCase().includes(text)))
             const slots = Math.max(1, 3 - (layers.holiday && holiday ? 1 : 0) - (timeText ? 1 : 0))
             const dayMeetings = meetings.events.filter(meeting => meeting.date === date && (!text || `${meeting.title} ${meeting.hostName} ${meetingKindLabel(meeting.kind)}`.toLowerCase().includes(text)))
             const visibleMeetings = dayMeetings.slice(0, slots)
             const remainingSlots = slots - visibleMeetings.length
-            const visibleItems = items.slice(0, dayTodos.length ? Math.max(0, remainingSlots - 1) : remainingSlots)
-            const visibleTodos = dayTodos.slice(0, Math.max(0, remainingSlots - visibleItems.length))
-            const hidden = items.length - visibleItems.length + dayTodos.length - visibleTodos.length + dayMeetings.length - visibleMeetings.length
+            const work = holidayByDate.get(date)
+            const standaloneWork = work && work.state !== 'cancelled' && (!text || `근무 ${work.reason}`.toLowerCase().includes(text)) &&
+              !scheduled.some(item => linksHolidaySchedule(item, work)) ? work : undefined
+            const visibleWork = standaloneWork && remainingSlots > 0 ? standaloneWork : undefined
+            const availableSlots = remainingSlots - Number(Boolean(visibleWork))
+            const visibleItems = items.slice(0, dayTodos.length ? Math.max(0, availableSlots - 1) : availableSlots)
+            const visibleTodos = dayTodos.slice(0, Math.max(0, availableSlots - visibleItems.length))
+            const hidden = items.length - visibleItems.length + dayTodos.length - visibleTodos.length + dayMeetings.length - visibleMeetings.length + Number(Boolean(standaloneWork && !visibleWork))
+            const pendingWork = visibleWork && isHolidayCompensationPending(visibleWork, today)
             const departmentItems = departmentSchedule.entries.get(date) ?? emptyList<DepartmentDayAbsence>()
-            return <div key={date} className={`agenda-day${holiday || dayOfWeek(date) === 0 || dayOfWeek(date) === 6 ? ' is-off' : ''}${date === today ? ' is-today' : ''}${selected === date ? ' is-selected' : ''}`} onClick={() => pickDate(date)} onDoubleClick={() => openAddMenu(date)}>
-              <button type="button" className="agenda-num" aria-pressed={selected === date} aria-label={`${dateLabel(date)} (${WEEKDAYS[dayOfWeek(date)]}) ${holiday ? `${holiday} ` : ''}출근 ${time.start || '없음'} 퇴근 ${time.end || '없음'}${time.corrected ? ' 정정' : ''} 신청 ${items.length}건 Todo ${dayTodos.length}건`} onClick={() => pickDate(date)}>{Number(date.slice(8))}</button>
-              {layers.holiday && holiday && <button type="button" className="agenda-bar is-holiday" onClick={event => { event.stopPropagation(); pickDate(date); setDetail({ type: 'holiday', date, name: holiday }) }}>{holiday}</button>}
+            return <div key={date} className={`agenda-day${holiday || dayOfWeek(date) === 0 || dayOfWeek(date) === 6 ? ' is-off' : ''}${date === today ? ' is-today' : ''}${selected === date ? ' is-selected' : ''}`} onClick={event => { if (event.target === event.currentTarget) openDay(date) }}>
+              <button type="button" className="agenda-num" aria-pressed={selected === date} aria-label={`${dateLabel(date)} (${WEEKDAYS[dayOfWeek(date)]}) ${holiday ? `${holiday} ` : ''}출근 ${time.start || '없음'} 퇴근 ${time.end || '없음'}${time.corrected ? ' 정정' : ''} 신청 ${items.length}건 Todo ${dayTodos.length}건`} onClick={() => openDay(date)}>{Number(date.slice(8))}</button>
+              {layers.holiday && holiday && <button type="button" className="agenda-bar is-holiday" onClick={() => openDay(date)}>{holiday}</button>}
               {timeText && <button type="button" className={`agenda-clock${time.corrected ? ' is-corrected' : ''}`} onClick={event => { event.stopPropagation(); pickDate(date); setDetail({ type: 'clock', date, start: time.start, end: time.end, corrected: time.corrected, reported: !time.corrected && Boolean(day.clockOutReportedAt) }) }}>{timeText}{time.corrected && <b className="agenda-fix-tag">정정</b>}{!time.corrected && day.clockOutReportedAt && <b className="agenda-fix-tag">본인 확인 입력</b>}</button>}
               {visibleMeetings.map(meeting => <MyScheduleMeetingLink key={meeting.id} meeting={meeting} compact />)}
+              {visibleWork && <button type="button" className={`agenda-bar is-work${pendingWork ? ' has-unsettled-work' : ''}`} onClick={() => { pickDate(date); setDetail({ type: 'work', date }) }}>근무{pendingWork && <span className="agenda-work-pending">보상 미완료</span>}</button>}
               {visibleItems.map(item => requestBar(item, date))}
               {visibleTodos.map(todo => <button key={todo.id} type="button" className={`agenda-bar is-todo${todo.important ? ' is-important' : ''}${todo.done ? ' is-done' : ''}`} title={`${todo.important ? '중요 · ' : ''}${scheduleTodoTime(todo)} · ${todo.title}`} onClick={event => { event.stopPropagation(); pickDate(date); openTodo(date,todo) }}>{todo.important ? '★ ' : ''}{todo.start ? todo.start+' ' : ''}{todo.title}</button>)}
-              {hidden > 0 && <button type="button" className="agenda-more" onClick={() => pickDate(date)}>+{hidden}개</button>}
-              {selfService && <DepartmentScheduleBars items={departmentItems} onSelect={() => pickDate(date)}/>}
+              {hidden > 0 && <button type="button" className="agenda-more" onClick={() => openDay(date)}>+{hidden}개</button>}
+              {selfService && <DepartmentScheduleBars items={departmentItems} onSelect={() => openDay(date)}/>}
             </div>
           })}
         </div>
@@ -467,16 +538,62 @@ export function MyAttendancePanel() {
       {meetings.loading && <p role="status" className="px-3 pb-3 text-xs text-muted-foreground">내 회의 일정을 불러오고 있습니다.</p>}
       {meetings.error && <p role="alert" className="px-3 pb-3 text-sm text-danger">회의 일정을 불러오지 못했습니다. <Button type="button" variant="outline" size="sm" onClick={() => void meetings.refresh()}>회의 다시 조회</Button></p>}
     </section>
-    {meetings.events.some(meeting => meeting.date === selected) && <section aria-label="선택 날짜의 회의 일정" className="mt-3 space-y-2 rounded-xl border border-border bg-card p-4"><h3 className="text-sm font-semibold">{dateLabel(selected)} 회의 일정</h3>{meetings.events.filter(meeting => meeting.date === selected).map(meeting => <MyScheduleMeetingLink key={meeting.id} meeting={meeting} />)}</section>}
-    {selfService && <DepartmentScheduleList items={departmentSchedule.entries.get(selected) ?? emptyList<DepartmentDayAbsence>()} dateLabel={dateLabel(selected)} department={departmentSchedule.department}/>}
-    {selfService && leave.requests.some(item => item.from <= selected && selected <= item.to) && <section aria-label="선택 날짜의 근태 일정" className="mt-3 space-y-2 rounded-xl border border-border bg-card p-4"><h3 className="text-sm font-semibold">{dateLabel(selected)} 근태 일정</h3>{leave.requests.filter(item => item.from <= selected && selected <= item.to).map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-3 text-sm"><div><p>{requestLabel(item.kind)}{item.advanceRequested ? ' · 선사용' : ''} · {requestTime(item)} · {requestStatusLabel(item)}{isSelfApprovedRequest(item) ? ' · 본인 승인' : ''}</p>{item.decidedByName && <p className="mt-1 text-xs text-muted-foreground">{item.decidedByName}{item.decidedAt ? ` · ${new Date(item.decidedAt).toLocaleString('ko-KR')}` : ''}</p>}{item.decisionNote && <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">{item.decisionNote}</p>}</div><Button variant="outline" size="sm" onClick={() => setDetail({ type: 'request', item, date: selected })}>보기</Button></div>)}</section>}
-    {todos.some(todo=>todo.date===selected) && <section aria-label="선택 날짜의 To-do" className="mt-3 space-y-2 rounded-xl border border-border bg-card p-4"><h3 className="text-sm font-semibold">{dateLabel(selected)} To-do</h3>{todos.filter(todo=>todo.date===selected).map(todo=><button key={todo.id} type="button" className="flex w-full items-center gap-2 rounded-md border border-border p-2 text-left text-sm" onClick={()=>openTodo(selected,todo)}><span>{todo.done ? '완료' : todo.important ? '★ 중요' : 'To-do'}</span><span className="tabular-nums text-muted-foreground">{scheduleTodoTime(todo)}</span><span className={todo.done ? 'line-through text-muted-foreground' : ''}>{todo.title}</span></button>)}</section>}
-    {selfService && <HolidayWorkPanel scope="mine" month={month} />}
-    {detail && (selfService || detail.type === 'holiday') && <WorkspaceTabOverlay><RequestDialog labelledBy="personal-detail-title" onClose={() => { if (!leave.busy) setDetail(null) }}><section className="personal-request-compose"><header><div><span>{detail.type === 'holiday' ? '공휴일' : detail.type === 'clock' ? '출퇴근' : '일정 내용'}</span><h2 id="personal-detail-title">{detail.type === 'request' ? `${requestLabel(detail.item.kind)}${detail.item.advanceRequested ? ' · 선사용' : ''}` : detail.type === 'holiday' ? detail.name : '출퇴근 기록'}</h2></div><button type="button" aria-label="일정 내용 닫기" disabled={leave.busy} onClick={() => setDetail(null)}><X size={19}/></button></header><div className="personal-request-compose-body"><dl className="personal-request-view">{detail.type === 'request' ? requestFacts(detail.item).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>) : detail.type === 'holiday' ? <><div><dt>날짜</dt><dd>{dateLabel(detail.date)} ({WEEKDAYS[dayOfWeek(detail.date)]})</dd></div><div><dt>이름</dt><dd>{detail.name}</dd></div></> : <><div><dt>날짜</dt><dd>{dateLabel(detail.date)} ({WEEKDAYS[dayOfWeek(detail.date)]})</dd></div><div><dt>출근</dt><dd>{detail.start || '미기록'}</dd></div><div><dt>퇴근</dt><dd>{detail.end || '미기록'}</dd></div><div><dt>표시</dt><dd>{detail.corrected ? '승인된 정정 시각' : detail.reported ? '본인 확인 입력' : '기록된 시각'}</dd></div></>}</dl>{ownOffsiteDetail && userId && <OffsiteDetailAttendance
-        key={`${userId}:${ownOffsiteDetail.item.id}:${ownOffsiteDetail.date}`}
-        request={ownOffsiteDetail.item} date={ownOffsiteDetail.date} userId={userId} requests={leave.requests}
-        canAct={!clock.exempt && (!attendanceEntry || attendanceEntry.phase === 'ready') && !leave.busy}
-      />}{detail.type === 'clock' && <p className="personal-request-helper">원래 출퇴근 기록은 보존하며 승인된 정정은 달력과 야근 집계에 반영합니다.</p>}{detail.type === 'request' && canCancelOwnRequest(detail.item) && <p className="personal-request-helper">{cancelEffect(detail.item)}</p>}{offsiteDetail && offsiteDetail.item.status === 'approved' && <OffsiteStartEditor key={offsiteDetail.item.id} request={offsiteDetail.item} requests={leave.requests} onSaved={() => { setDetail(null); void leave.refresh() }} />}{offsiteDetail && <OffsiteSettlementResult requestId={offsiteDetail.item.id} />}{offsiteDetail && <p className="personal-request-helper">{dateLabel(offsiteDetail.date)} 출퇴근 정정 · {offsiteDetail.date > today ? '미래 날짜는 정정할 수 없습니다.' : pendingCorrection ? '이 날짜에 승인 대기 중인 정정 신청이 있습니다.' : '실제 출퇴근 시각을 신청하면 담당자 승인 후 달력과 야근 집계에 반영됩니다.'}</p>}</div><footer><Button type="button" variant="outline" disabled={leave.busy} onClick={() => setDetail(null)}>닫기</Button>{offsiteDetail && <Button type="button" variant="outline" disabled={!canRequestCorrection} onClick={requestOffsiteCorrection}>정정 신청</Button>}{detail.type === 'request' && canCancelOwnRequest(detail.item) && <Button type="button" disabled={leave.busy} onClick={() => void confirmCancel()}>{leave.busy ? '취소 중…' : '취소'}</Button>}</footer></section></RequestDialog></WorkspaceTabOverlay>}
+    {detail && (selfService || detail.type === 'day') && <WorkspaceTabOverlay>
+      <RequestDialog labelledBy="personal-detail-title" onClose={() => { if (!leave.busy && !holidayWork.save.isPending) closeDetail() }}>
+        <section className="personal-request-compose">
+          <header>
+            <div><span>{dateLabel(detail.date)} ({WEEKDAYS[dayOfWeek(detail.date)]})</span><h2 id="personal-detail-title">{detailTitle}</h2></div>
+            <button type="button" aria-label="일정 내용 닫기" disabled={leave.busy || holidayWork.save.isPending} onClick={closeDetail}><X size={19}/></button>
+          </header>
+          <div className="personal-request-compose-body">
+            {detail.type === 'request' && <dl className="personal-request-view">{requestFacts(detail.item).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>}
+            {detail.type === 'clock' && <>
+              <dl className="personal-request-view">
+                <div><dt>출근</dt><dd>{detail.start || '미기록'}</dd></div>
+                <div><dt>퇴근</dt><dd>{detail.end || '미기록'}</dd></div>
+                <div><dt>표시</dt><dd>{detail.corrected ? '승인된 정정 시각' : detail.reported ? '본인 확인 입력' : '기록된 시각'}</dd></div>
+              </dl>
+              <p className="personal-request-helper">원래 출퇴근 기록은 보존하며 승인된 정정은 달력과 야근 집계에 반영합니다.</p>
+            </>}
+            {showHolidayWork && (detailWork || canRegisterHoliday || detail.type === 'work') && <ScheduleHolidayWork
+              key={`${userId}:${detail.date}`} date={detail.date} work={holidayWork} row={detailWork} canRegister={canRegisterHoliday} today={today}
+              save={saveHoliday} routedEvent={detail.type === 'work' && detailWork?.id === routedHoliday ? routedHolidayEvent : null}
+            />}
+            {ownOffsiteDetail && userId && <OffsiteDetailAttendance
+              key={`${userId}:${ownOffsiteDetail.item.id}:${ownOffsiteDetail.date}`}
+              request={ownOffsiteDetail.item} date={ownOffsiteDetail.date} userId={userId} requests={leave.requests}
+              canAct={!clock.exempt && (!attendanceEntry || attendanceEntry.phase === 'ready') && !leave.busy}
+            />}
+            {detail.type === 'request' && canCancelOwnRequest(detail.item) && <p className="personal-request-helper">{cancelEffect(detail.item)}</p>}
+            {offsiteDetail && offsiteDetail.item.status === 'approved' && <OffsiteStartEditor key={offsiteDetail.item.id} request={offsiteDetail.item} requests={leave.requests} onSaved={() => { setDetail(null); void leave.refresh() }} />}
+            {offsiteDetail && <OffsiteSettlementResult requestId={offsiteDetail.item.id} />}
+            {offsiteDetail && <p className="personal-request-helper">{dateLabel(offsiteDetail.date)} 출퇴근 정정 · {offsiteDetail.date > today ? '미래 날짜는 정정할 수 없습니다.' : pendingCorrection ? '이 날짜에 승인 대기 중인 정정 신청이 있습니다.' : '실제 출퇴근 시각을 신청하면 담당자 승인 후 달력과 야근 집계에 반영됩니다.'}</p>}
+            {detail.type === 'day' && <>
+              {meetings.events.filter(meeting => meeting.date === detail.date).map(meeting => <MyScheduleMeetingLink key={meeting.id} meeting={meeting} />)}
+              {selfService && <DepartmentScheduleList items={departmentSchedule.entries.get(detail.date) ?? emptyList<DepartmentDayAbsence>()} dateLabel={dateLabel(detail.date)} department={departmentSchedule.department}/>}
+              {selfService && scheduleRequests(detail.date).map(item => <button key={item.id} type="button"
+                className="flex w-full flex-wrap justify-between gap-2 rounded-md border border-border p-3 text-left text-sm"
+                onClick={() => setDetail({ type: 'request', item, date: detail.date })}>
+                <span>{requestLabel(item.kind)}{item.advanceRequested ? ' · 선사용' : ''} · {requestTime(item)}</span>
+                <span>{requestStatusLabel(item)}{linksHolidaySchedule(item, detailWork) && detailWork && isHolidayCompensationPending(detailWork, today) ? ' · 보상 미완료' : ''}</span>
+              </button>)}
+              {todos.filter(todo => todo.date === detail.date).map(todo => <button key={todo.id} type="button"
+                className="flex w-full items-center gap-2 rounded-md border border-border p-2 text-left text-sm"
+                onClick={() => { setDetail(null); openTodo(detail.date, todo) }}>
+                <span>{todo.done ? '완료' : todo.important ? '★ 중요' : 'To-do'}</span>
+                <span className="tabular-nums text-muted-foreground">{scheduleTodoTime(todo)}</span>
+                <span className={todo.done ? 'line-through text-muted-foreground' : ''}>{todo.title}</span>
+              </button>)}
+            </>}
+          </div>
+          <footer>
+            <Button type="button" variant="outline" disabled={leave.busy || holidayWork.save.isPending} onClick={closeDetail}>닫기</Button>
+            {offsiteDetail && <Button type="button" variant="outline" disabled={!canRequestCorrection} onClick={requestOffsiteCorrection}>정정 신청</Button>}
+            {detail.type === 'request' && canCancelOwnRequest(detail.item) && <Button type="button" disabled={leave.busy} onClick={() => void confirmCancel()}>{leave.busy ? '취소 중…' : '취소'}</Button>}
+          </footer>
+        </section>
+      </RequestDialog>
+    </WorkspaceTabOverlay>}
     {settingsOpen && <WorkspaceTabOverlay><RequestDialog className="is-settings" labelledBy="personal-reminder-title" onClose={() => setSettingsOpen(false)}><section className="personal-request-reminders personal-request-settings-card rounded-xl border border-border bg-card text-card-foreground shadow-sm" aria-label="My Schedule 알림 설정"><header><div><Bell size={16}/><h2 id="personal-reminder-title">My Schedule 알림</h2></div><button type="button" aria-label="알림 설정 닫기" onClick={() => setSettingsOpen(false)}><X size={17}/></button></header><p>등록된 휴가·외근과 승인된 야근 일정을 반영해 알려드립니다. 발송 연결 예정입니다.</p><div className="personal-request-reminder-list">{REMINDER_OPTIONS.map(item => <label key={item.key}><span><strong>{item.label}</strong><small>{item.detail}</small></span><input type="checkbox" checked={reminders[item.key]} onChange={event => setReminders(current => ({ ...current, [item.key]: event.target.checked }))}/></label>)}</div><div className="personal-request-reminder-time"><label htmlFor="personal-reminder-before">미리 알릴 시간</label><Select id="personal-reminder-before" value={basis.before} onChange={event => setBasis(current => ({ ...current, before: Number(event.target.value) }))}>{[5, 10, 15, 30].map(value => <option key={value} value={value}>{value}분 전</option>)}</Select></div></section></RequestDialog></WorkspaceTabOverlay>}
     {todoForm && <WorkspaceTabOverlay><RequestDialog labelledBy="personal-todo-title" onClose={() => { if(!todoStore.busy) setTodoForm(null) }}><section className="personal-request-compose"><header><div><span>개인 일정</span><h2 id="personal-todo-title">Todo</h2></div><button type="button" aria-label="Todo 작성 닫기" disabled={todoStore.busy} onClick={() => setTodoForm(null)}><X size={19}/></button></header><form onSubmit={event=>void submitTodo(event)}><fieldset disabled={todoStore.busy} className="min-w-0 border-0 p-0"><div className="personal-request-compose-body">
       <label>날짜<HireDateScrollField label="Todo 날짜" className="mt-[7px] w-full" value={todoForm.date} min="1950-01-01" max={`${Number(today.slice(0, 4)) + 5}-12-31`} clearable={false} onChange={value => { if (!value) return; setTodoForm(current => current ? { ...current, date: value } : null); setTodoError('') }}/></label>
@@ -530,6 +647,36 @@ export function MyAttendancePanel() {
       <footer><Button type="button" variant="outline" onClick={() => setForm(null)}>닫기</Button><Button type="submit" disabled={leave.busy || groupBusy || leave.loading || Boolean(leave.error) || Boolean(form.advanceRequested && advanceBlock)}><Send size={14}/>{leave.busy || groupBusy ? '저장 중…' : submitLabel}</Button></footer>
     </fieldset></form></section></RequestDialog></WorkspaceTabOverlay>}
   </div>
+}
+
+function ScheduleHolidayWork({ date, row, work, canRegister, today, save, routedEvent }: {
+  date: string; row?: HolidayWork; work: ReturnType<typeof useHolidayWork>; canRegister: boolean; today: string
+  save: HolidaySave; routedEvent: string | null
+}) {
+  const [editor, setEditor] = useState<'plan' | 'actual' | null>(null)
+  const notices = useMyHomeNotifications()
+  const events = notices.work.filter(event => event.entity_id === row?.id && event.event_type.startsWith('holiday-'))
+  const event = routedEvent ? events.find(item => item.event_key === routedEvent) : events.reduce<(typeof events)[number] | undefined>(
+    (latest, item) => !latest || item.created_at > latest.created_at ? item : latest, undefined)
+  const confirmationWorkflow = work.data?.confirmationWorkflow === true
+  const read = useReadMyHomeNotification('request', row?.id ?? undefined, event?.event_key,
+    Boolean(row && work.data?.ready && !work.error && !editor && event && event.event_type !== 'holiday-confirmation-request' &&
+      (!event.event_type.startsWith('holiday-confirmation-') || row.confirmation)))
+
+  if (work.error) return <p role="alert" className="text-sm text-danger">휴일근무 정보를 불러오지 못했습니다. <Button size="sm" variant="outline" onClick={() => void work.refetch()}>다시 조회</Button></p>
+  if (work.isPending) return <p role="status" className="text-sm text-muted-foreground">휴일근무 정보를 불러오는 중입니다.</p>
+  if (!work.data?.ready) return <p role="status" className="text-sm text-muted-foreground">휴일근무 정보를 조회할 수 없습니다.</p>
+  if (editor) return <HolidayWorkInput key={editor} row={row} planned={editor === 'plan'} month={date.slice(0, 7)} fixedDate={date} save={save} close={() => setEditor(null)} />
+
+  return <>
+    {row && row.state !== 'cancelled' ? <HolidayWorkDetail row={row} scope="mine" confirmationWorkflow={confirmationWorkflow}
+      event={event?.note} save={save} edit={() => setEditor('actual')} canEdit={date <= today} />
+      : canRegister && <div className="flex flex-wrap gap-2">
+        {date >= today && <Button type="button" onClick={() => setEditor('plan')}>근무 예정 등록</Button>}
+        {date <= today && <Button type="button" variant="outline" onClick={() => setEditor('actual')}>실제 시간 입력</Button>}
+      </div>}
+    {read.error && <p role="alert" className="text-sm text-danger">{read.error}<Button size="sm" variant="outline" onClick={read.retry}>읽음 저장 재시도</Button></p>}
+  </>
 }
 
 function LeaveRequestSummary({ remaining, requested, advanceDays, balanceRejected }: {

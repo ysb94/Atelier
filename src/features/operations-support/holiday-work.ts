@@ -21,7 +21,7 @@ export type HolidayWork = {
   jobGrade?: string | null
   confirmation?: HolidayWorkConfirmation
 }
-export type HolidayWorkList = { ready: boolean; rows: HolidayWork[]; isOperations: boolean; policy: { ref: string; date: string } | null; confirmationWorkflow?: boolean }
+export type HolidayWorkList = { ready: boolean; rows: HolidayWork[]; isOperations: boolean; policy: { ref: string; date: string } | null; confirmationWorkflow?: boolean; offlineCompensation?: boolean }
 export const HOLIDAY_STATES = { unreported: '실제 시간 미제출', planned: '예정', submitted: '부서 확인 대기', returned: '보완 요청', approved: '시간 확인 완료', cancelled: '취소' }
 export const HOLIDAY_LOCATIONS = { office: '사무실', offsite: '외근', mixed: '사무실·외근' }
 export function holidayClock(value: string): number | null {
@@ -52,9 +52,16 @@ export function holidayPhase(row: HolidayWork, confirmationWorkflow = false) {
     if (!row.confirmation) return '직원 확인 요청 필요'
     if (!row.confirmation.choice) return '직원 제출 대기'
     if (!row.confirmation.signedAt) return '운영지원 확인 대기'
+    return row.settlements.length ? '일부 정산 · 잔여 시간 보관' : '운영지원 정산 대기'
   }
   if (row.remainingUnits > 0) return row.settlements.length ? '일부 정산 · 잔여 시간 보관' : '정산 대기 · 시간 보관'
   return row.settlements.some(s => s.mode === 'cash' && !s.paidOn) ? '수당 지급 대기' : '처리 완료'
+}
+
+export function isHolidayCompensationPending(row: HolidayWork, today: string) {
+  if (row.legacySettled || row.state === 'cancelled') return false
+  if (row.state !== 'approved') return row.date <= today || row.state === 'submitted' || row.state === 'returned'
+  return row.remainingUnits > 0 || row.settlements.some(settlement => settlement.mode === 'cash' && !settlement.paidOn)
 }
 
 export function holidayConfirmedMethod(row: HolidayWork): HolidayCompensationChoice | null {

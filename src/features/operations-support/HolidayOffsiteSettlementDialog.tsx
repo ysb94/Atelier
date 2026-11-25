@@ -29,14 +29,14 @@ export function HolidayOffsiteCaseDialog({ request, month, close }: { request: L
   const work = useHolidayWork(month, 'operations', request.id)
   const error = work.error ?? (work.data?.ready === false ? new Error('외근 기록을 조회할 수 없습니다.') : null)
   return <HolidayOffsiteSettlementDialog request={request} rows={work.rows} active={work.enabled}
-    loading={work.isPending} error={error} refresh={work.refetch} policy={work.data?.policy ?? null}
+    loading={work.isPending} error={error} refresh={work.refetch} policy={work.data?.policy ?? null} offlineCompensation={work.data?.offlineCompensation === true}
     confirmationWorkflow={work.data?.confirmationWorkflow === true}
     save={async (action, payload) => { await work.save.mutateAsync({ action, payload }) }} close={close} />
 }
 
-function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error, refresh, policy, confirmationWorkflow, save, close }: {
+function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error, refresh, policy, confirmationWorkflow, offlineCompensation, save, close }: {
   request: LeaveRequest; rows: HolidayWork[]; active: boolean; loading: boolean
-  error: Error | null; refresh: () => Promise<unknown>; policy: HolidayWorkList['policy']
+  error: Error | null; refresh: () => Promise<unknown>; policy: HolidayWorkList['policy']; offlineCompensation: boolean
   confirmationWorkflow: boolean; save: HolidaySave; close: () => void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
@@ -167,9 +167,9 @@ function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error,
               {row.date} 확인서 {confirmationDay === row.id ? '닫기' : '열기'}
             </Button>
             {confirmationDay === row.id && <div className="mt-2 w-full space-y-2">
-              <HolidayWorkConfirmationPanel key={row.confirmation?.id ?? row.id} row={row} scope="operations" policy={policy} save={save} />
+              <HolidayWorkConfirmationPanel key={row.confirmation?.id ?? row.id} row={row} scope="operations" offlineCompensation={offlineCompensation} save={save} />
               {row.remainingUnits > 0 && compensationMethod && (settlementDay === row.id
-                ? <HolidaySettlementEditor rows={[row]} policyReady={policyReady} compensationMethod={compensationMethod}
+                ? <HolidaySettlementEditor rows={[row]} policyReady={compensationMethod === 'leave' || policyReady} compensationMethod={compensationMethod}
                   save={save} close={() => setSettlementDay(null)} />
                 : <Button type="button" onClick={() => setSettlementDay(row.id)}>정산 확정</Button>)}
             </div>}
@@ -187,7 +187,6 @@ function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error,
           variant={mode === item.value ? 'default' : 'outline'} aria-pressed={mode === item.value}
           disabled={item.value !== 'later' && (!ready || !hasSettlement || weekdayMissing || (item.value === 'leave' && !policyReady) || (weekdaySavedMode !== null && item.value !== weekdaySavedMode))}
           onClick={() => { setMode(item.value); setMessage('') }}>{item.label}</Button>)}</div>
-        {ready && hasSettlement && !policyReady && <p className="text-xs text-muted-foreground">휴가로 지급하려면 서면합의 기준을 등록해야 합니다.</p>}
         {mode === 'later' && <p className="text-sm text-muted-foreground">대기 목록에 남겨 두고 팝업을 닫습니다.</p>}
         {(mode === 'time' || mode === 'leave') && <>
           {weekdays.length > 0 && <div className="space-y-2">

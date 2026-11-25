@@ -17,8 +17,8 @@ export function HolidayIntervalFields({ values, onChange }: { values: { start: s
     <p className="text-xs text-muted-foreground">휴게시간을 뺀 구간을 입력하세요. 예: 09:00~12:00, 13:00~18:00. 자정을 넘으면 날짜별로 나누며, 당일 종료에는 24:00을 사용할 수 있습니다.</p>
   </div>
 }
-export function HolidayWorkInput({ row, planned, month, save, close }: { row?: HolidayWork; planned: boolean; month: string; save: HolidaySave; close: () => void }) {
-  const [date, setDate] = useState(row?.date ?? `${month}-01`), [location, setLocation] = useState<HolidayWork['location']>(row?.location ?? 'office')
+export function HolidayWorkInput({ row, planned, month, fixedDate, save, close }: { row?: HolidayWork; planned: boolean; month: string; fixedDate?: string; save: HolidaySave; close: () => void }) {
+  const [date, setDate] = useState(row?.date ?? fixedDate ?? `${month}-01`), [location, setLocation] = useState<HolidayWork['location']>(row?.location ?? 'office')
   const [note, setNote] = useState(row?.reason ?? ''), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null)
   const initial = planned ? row?.plannedIntervals : row?.state === 'returned' ? row.intervals : null
   const [values, setValues] = useState(initial?.length ? initial.map(i => ({ start: holidayTime(i.start), end: holidayTime(i.end) })) : [{ start: '', end: '' }])
@@ -32,10 +32,10 @@ export function HolidayWorkInput({ row, planned, month, save, close }: { row?: H
     catch (cause) { setError(cause instanceof Error ? cause.message : '저장하지 못했습니다. 입력은 유지됩니다.') }
     finally { setBusy(false) }
   }
-  return <Card className="space-y-3 p-4" role="dialog" aria-label={planned ? '주말·공휴일 근무 예정 등록' : '주말·공휴일 실제 근무 제출'}>
+  return <Card className="space-y-3 p-4" role={fixedDate ? 'region' : 'dialog'} aria-label={planned ? '주말·공휴일 근무 예정 등록' : '주말·공휴일 실제 근무 제출'}>
     <h3 className="font-semibold">{planned ? '주말·공휴일 근무 예정 등록' : '실제 근무시간 제출'}</h3>
     <fieldset disabled={busy} className="space-y-3">
-      <div className="flex flex-wrap gap-3"><label className="text-sm">근무 날짜<Input aria-label="휴일 근무 날짜" type="date" value={date} disabled={Boolean(row)} onChange={e => setDate(e.target.value)} /></label>
+      <div className="flex flex-wrap gap-3"><label className="text-sm">근무 날짜<Input aria-label="휴일 근무 날짜" type="date" value={date} disabled={Boolean(row || fixedDate)} onChange={e => setDate(e.target.value)} /></label>
         <label className="text-sm">근무 구분<Select aria-label="휴일 근무 장소 구분" value={location} onChange={e => setLocation(e.target.value as HolidayWork['location'])}>{Object.entries(HOLIDAY_LOCATIONS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</Select></label></div>
       <HolidayIntervalFields values={values} onChange={setValues} />
       {amount && <p className="text-sm">{planned ? '예정 근무' : '실제 근무'} {holidayCredit(amount.minutes * 2)}{!planned && ` · 가산 반영 예상 ${holidayCredit(amount.units)}`}</p>}
@@ -66,7 +66,7 @@ export function HolidaySettlementEditor({ rows, policyReady, compensationMethod,
     <p className="text-sm">선택한 미정산 보상 시간 {holidayCredit(units)} · 실제 근무시간과 구분한 값입니다.</p>
     <fieldset disabled={busy} className="space-y-3">
       {compensationMethod ? <p className="text-sm">직원이 선택한 보상방법 · <strong>{mode === 'cash' ? '가산임금 지급' : '보상휴가 부여'}</strong></p>
-        : <label className="block text-sm">보상 방식<Select aria-label="휴일 근무 보상 방식" value={mode} onChange={e => setChoice(e.target.value as HolidayCompensationChoice)}><option value="cash">수당 지급 예정 확정</option><option value="leave" disabled={!policyReady}>보상휴가 지급{!policyReady ? ' · 서면합의 기준 등록 필요' : ''}</option></Select></label>}
+        : <label className="block text-sm">보상 방식<Select aria-label="휴일 근무 보상 방식" value={mode} onChange={e => setChoice(e.target.value as HolidayCompensationChoice)}><option value="cash">수당 지급 예정 확정</option><option value="leave" disabled={!policyReady}>보상휴가 지급</option></Select></label>}
       {mode === 'cash' ? <><div className="grid gap-3 sm:grid-cols-2"><label className="text-sm">확인한 통상시급 · 원<Input aria-label="휴일 근무 통상시급" type="number" min="0.01" step="0.01" value={rate} onChange={e => setRate(e.target.value)} /></label><label className="text-sm">지급 예정 월<Input aria-label="휴일 수당 지급 예정 월" type="month" value={month} onChange={e => setMonth(e.target.value)} /></label></div><p className="text-sm">지급 예정 금액 {Number(rate) > 0 ? Math.ceil(units * Number(rate) / 120).toLocaleString('ko-KR') : '—'}원 · 원 미만 올림</p><p className="text-xs text-muted-foreground">통상시급을 별도로 확인해 입력하세요. 등록만으로 실제 급여가 이체되지 않습니다. 지급 완료는 실제 지급 후 별도로 기록합니다.</p></> : <><div className="flex gap-2">{[0.25, 0.5, 1].map(value => <Button key={value} type="button" variant="outline" size="sm" onClick={() => setDays(String(value))}>{value === 0.25 ? '반반차' : value === 0.5 ? '반차' : '연차'}</Button>)}</div><div className="grid gap-3 sm:grid-cols-2"><label className="text-sm">보상휴가 지급 일수<Input aria-label="보상휴가 지급 일수" type="number" min="0.25" step="0.25" value={days} onChange={e => setDays(e.target.value)} /></label><label className="text-sm">사용기한<Input aria-label="보상휴가 사용기한" type="date" value={expires} onChange={e => setExpires(e.target.value)} /></label></div><p className="text-sm">하루 8시간 기준 · 지급 후 잔여 {holidayCredit(Math.max(0, units - used))}. 남은 시간은 미정산으로 계속 보관합니다.</p></>}
       <label className="block text-sm">확정 사유 · 필수<Textarea aria-label="휴일 보상 확정 사유" maxLength={500} value={note} onChange={e => setNote(e.target.value)} /></label>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />근무 확인 내역·가산 기준·중복 지급 여부를 확인했습니다.</label>

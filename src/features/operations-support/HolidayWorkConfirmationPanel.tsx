@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Input, Textarea } from '@/components/ui/input'
+import { Input, Select, Textarea } from '@/components/ui/input'
 import { downloadHolidayConfirmationFile, uploadHolidayConfirmationFile } from '@/lib/supabase/holiday-work'
 import { useAuth } from '@/lib/supabase/auth'
 import type { HolidaySave } from './HolidayWorkEditor'
@@ -50,8 +50,8 @@ function PrintConfirmation({ confirmation }: { confirmation: HolidayWorkConfirma
   </div>
 }
 
-export function HolidayWorkConfirmationPanel({ row, scope, policy, save }: {
-  row: HolidayWork; scope: 'mine' | 'operations'; policy: { ref: string; date: string } | null; save: HolidaySave
+export function HolidayWorkConfirmationPanel({ row, scope, offlineCompensation, save }: {
+  row: HolidayWork; scope: 'mine' | 'operations'; offlineCompensation: boolean; save: HolidaySave
 }) {
   const { profile } = useAuth()
   const confirmation = row.confirmation
@@ -67,6 +67,8 @@ export function HolidayWorkConfirmationPanel({ row, scope, policy, save }: {
   const [error, setError] = useState('')
   const running = useRef(false)
   if (!row.id || row.legacySettled || (!confirmation && (!operations || !row.canSettle || row.remainingUnits <= 0))) return null
+  const canEnableLeave = operations && offlineCompensation && row.state === 'approved' && row.canSettle &&
+    Boolean(confirmation && !confirmation.choice && !confirmation.allowLeave) && row.settlements.length === 0
 
   async function run(action: () => Promise<void>) {
     if (running.current) return
@@ -82,14 +84,24 @@ export function HolidayWorkConfirmationPanel({ row, scope, policy, save }: {
     <h4 className="font-semibold">주말·휴일근로 보상방법 선택 및 확인서</h4>
     <WorkDetails work={work} />
     {!confirmation ? <fieldset disabled={busy} className="space-y-2">
-      <label className="flex items-start gap-2 text-sm">
-        <input type="checkbox" checked={allowLeave} disabled={!policy || policy.date > work.date} onChange={event => setAllowLeave(event.target.checked)} />
-        <span>이 근무 건에 적용되는 서면합의에서 직원의 보상휴가 선택을 허용하는 것을 확인했습니다.</span>
-      </label>
-      <p className="text-xs text-muted-foreground">{policy && policy.date <= work.date ? `서면합의 기준 ${policy.ref}` : '이 근무일에 적용되는 서면합의 기준이 없어 가산임금으로 요청합니다.'}</p>
-      <Button type="button" onClick={() => void run(() => save('confirmation-request', { workId: row.id, version: row.version, allowLeave }))}>직원에게 확인 요청</Button>
+      {offlineCompensation && <label className="block text-sm">직원에게 제공할 보상방법
+        <Select value={allowLeave ? 'both' : 'cash'} onChange={event => setAllowLeave(event.target.value === 'both')}>
+          <option value="cash">가산임금 지급</option><option value="both">가산임금 지급 또는 보상휴가 부여</option>
+        </Select>
+      </label>}
+      {allowLeave && offlineCompensation && <p className="text-xs text-muted-foreground">오프라인으로 확인한 기준이 이 근무일에 적용되는 경우에 선택해 주세요.</p>}
+      <Button type="button" onClick={() => void run(() => save('confirmation-request', { workId: row.id, version: row.version,
+        ...(offlineCompensation && allowLeave ? { leaveAuthorized: true } : {}) }))}>직원에게 확인 요청</Button>
     </fieldset> : row.state !== 'approved' ? <p role="status" className="whitespace-pre-wrap text-sm">{confirmation.correctionReason ?? row.reviewNote ?? '근무정보 정정 중'}</p>
-      : !confirmation.choice ? <p role="status" className="text-sm">{operations ? '직원 제출 대기' : 'My home 상단의 휴일근무 보상 확인서에서 보상방법을 제출해 주세요.'}</p>
+      : !confirmation.choice ? <>
+        <p role="status" className="text-sm">{operations ? '직원 제출 대기' : 'My home 상단의 휴일근무 보상 확인서에서 보상방법을 제출해 주세요.'}</p>
+        {canEnableLeave && <fieldset disabled={busy} className="space-y-2">
+          <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={allowLeave} onChange={event => setAllowLeave(event.target.checked)} />이 근무일에 보상휴가 선택을 허용합니다.</label>
+          <Button type="button" variant="outline" disabled={!allowLeave} onClick={() => void run(() => save('confirmation-request', {
+            workId: row.id, version: row.version, confirmationId: confirmation.id, leaveAuthorized: true,
+          }))}>선택 범위 변경</Button>
+        </fieldset>}
+      </>
       : confirmation.choice === 'correction' ? <p role="status" className="whitespace-pre-wrap text-sm">정정 요청 제출 · {confirmation.correctionReason}</p>
       : <>
         <p className="text-sm"><strong>{HOLIDAY_COMPENSATION_METHODS[confirmation.choice]}</strong> · {row.remainingUnits === 0 ? '정산 확정' : confirmation.signedAt ? '서명본 등록 완료' : '운영지원 확인 대기'}</p>

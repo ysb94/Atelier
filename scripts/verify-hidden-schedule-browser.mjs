@@ -45,33 +45,48 @@ export function HomeAttendanceSummary(){const clock=useMyClockIn();useLeaveReque
 export function ReleaseAccessProvider({children}){return children}
 export function useReleaseAccess(){const {profile}=useAuth();const approvals=useDepartmentApprovers();return{profile,scope:{unrestricted:false},approvals,departments:EMPTY,approver:false}}
 export const canAccessOperationsSupport=()=>false,capabilityLabel=value=>value,hasPermission=()=>false;
+export const isOperationsDepartmentMember=()=>false,inferCapabilityFromDepartment=()=>null;
 export const useRenderWatch=()=>{},useAttendanceEntry=()=>null,readImpersonationState=()=>null;
 export const PageHeader=({title})=><h1>{title}</h1>;
 export const LateArrivalHeaderButton=()=>null,LateStatementApprovalList=()=>null,LateStatementNoticeDialog=()=>null;
 export const LeaveApprovalPanel=()=>null,WorkRequestHubPage=()=>null,HomeNoticeBoard=()=>null,MyAttendanceStartPanel=()=>null,OvertimePanel=()=>null,RequiredInformationButton=()=>null;
 export const CompanyMeetingsPage=()=> <p>회의 화면</p>;
-export const MyHomeNotificationBadge=()=>null,MyHomeNotificationList=()=>null,MyHomeWorkNoticeDetail=()=>null;
+export const MyHomeNotificationBadge=()=>null,MyHomeNotificationList=()=>null,MyHomeWorkNoticeDetail=()=>null,PersonalWorkFeedbackNotificationList=()=>null,VisualWorkflowNotificationList=()=>null;
 export function OffsiteGroupHistory(){const directory=useOpsDirectory();return <output data-testid="directory">{JSON.stringify({members:directory.members.map(m=>m.id),departments:directory.departments.map(d=>d.id)})}</output>}
 export const OffsiteStartEditor=()=>null,OffsiteConnectionNotice=()=>null,OffsiteSettlementResult=()=>null,OffsiteWorkdayStartField=()=>null;
+export const OffsiteStatus=()=>null,canReturnFromOffsite=()=>false,useOffsiteReturn=()=>({enabled:false,query:{},returned:{},returning:false});
 export const MyLeaveAdvanceSummary=()=>{useLeaveAdvances();return null};
 export const useReadMyHomeNotification=()=>({error:null,retry:()=>{}});
 export const useMyHomeNotifications=()=>({work:EMPTY,items:EMPTY,ready:true,error:null});
-export const listHolidayWork=async()=>{hit('holiday-work');return{ready:true,rows:EMPTY,isOperations:false,policy:null}};
-export const changeHolidayWork=async()=>{throw Error('Unexpected holiday write')};
+export const useHolidayConfirmationRequests=()=>EMPTY;
+export const downloadHolidayConfirmationFile=async()=>{},uploadHolidayConfirmationFile=async()=>{};
+const holidayRow={id:'holiday-a',employeeId:'employee-a',employeeName:'일반 직원 A',date:'2026-11-01',state:'unreported',dayKind:'holiday',location:'offsite',version:0,
+  intervals:[],plannedIntervals:[],reason:'',remainingUnits:0,legacySettled:false,source:{offsites:[{id:'offsite-a'}],clocks:[]},canSubmit:true,settlements:[]};
+window.__holidayRows=[holidayRow];
+export const listHolidayWork=async month=>{hit('holiday-work');return{ready:true,rows:window.__employeeId==='employee-a'?window.__holidayRows.filter(row=>row.date.startsWith(month)).map(row=>({...row})):EMPTY,isOperations:false,policy:null}};
+export const changeHolidayWork=async(action,payload)=>{
+  if(action!=='plan')throw Error('Unexpected holiday write');
+  window.__writes.push({action,payload});
+  window.__holidayRows.push({...holidayRow,id:'planned-a',date:payload.date,location:payload.location,state:'planned',version:1,plannedIntervals:payload.intervals,reason:payload.note,source:{offsites:[],clocks:[]}});
+};
 export const getMyAttendanceExemption=async()=>{hit('exemption');return false};
 export const listMyAttendanceClocks=async(owner,month)=>{hit(month?'month-clocks':'global-clocks');if(month&&window.__failMonth)throw Error('검증용 월별 조회 실패');return [{date:'2026-11-04',clockIn:'09:00',clockOutAt:null}]};
 export const clockOutToday=async()=>{window.__writes.push('clock-out')},undoClockOutToday=async()=>{window.__writes.push('undo-clock-out')},recordAccessIp=async()=>{};
 export const getSupabase=()=>({rpc:async()=>{throw Error('Unexpected RPC')}});
 export const offsiteAction=async()=>{hit('overnight-offsite');return null};
+export const readMyOffsiteClockTimes=async()=>null;
 export const getMyWorkdayBasis=async()=>({configured:true,start:'09:00'});
 async function directoryIdentity(key){hit(key);const scope=window.__employeeId+':'+window.__companyId;if(window.__holdDirectory)await new Promise(resolve=>window.__heldDirectory.push(resolve));return scope}
 export const listDepartments=async()=>{const scope=await directoryIdentity('departments');return[{id:'department:'+scope,name:'기획팀'}]};
 export const listOrgChartMembers=async()=>{const scope=await directoryIdentity('members');if(window.__failMembers)throw Error('검증용 명부 조회 실패');return[{id:'member:'+scope,displayName:'범위 확인 직원',departmentId:'planning'}]};
+export const listBrandDirectory=async()=>EMPTY;
 export const listDepartmentApprovers=async()=>{hit('approvers');return EMPTY},saveDepartmentApprovers=async()=>{};
 export const listCompanyNotices=async()=>{hit('notices');return EMPTY};
+export const saveCompanyNotice=async()=>{};
 export const listOffsiteGroups=async()=>{hit('offsite-groups');return EMPTY},registerOffsiteGroup=async()=>{throw Error('Unexpected group write')};
 const leave={id:'leave-a',employeeId:'employee-a',kind:'annual',from:'2026-11-05',to:'2026-11-05',start:'09:00',end:'18:00',place:'',note:'검증용 연차',status:'approved',createdAt:'2026-11-04',decidedBy:null};
-export const listLeaveRequests=async(owner)=>{hit('leave');return owner==='employee-a'?[{...leave}]:EMPTY};
+const offsite={...leave,id:'offsite-a',kind:'offsite',from:'2026-11-01',to:'2026-11-01',start:'09:00',end:'12:00',place:'현장',note:'검증 외근'};
+export const listLeaveRequests=async(owner)=>{hit('leave');return owner==='employee-a'?[{...leave},offsite]:EMPTY};
 export const submitLeaveRequest=async()=>{throw Error('Unexpected create')};
 export const transitionLeaveRequest=async(id,status)=>{window.__writes.push({id,status});leave.status=status;return{...leave}};
 export const uploadLeaveFile=async()=>{throw Error('Unexpected upload')};
@@ -154,6 +169,40 @@ try{
   await page.getByRole('dialog').getByRole('button',{name:'취소',exact:true}).click()
   await page.getByRole('dialog').waitFor({state:'hidden'})
   assert.deepEqual(await page.evaluate(()=>window.__writes),[{id:'leave-a',status:'cancelled'}])
+  const calendar=page.getByRole('region',{name:'My Schedule',exact:true})
+  await calendar.getByRole('button',{name:/^외근.*보상 미완료$/}).click()
+  const holidayDetail=page.getByLabel('주말·공휴일 근무 상세')
+  await holidayDetail.getByText(/실제 시간 미제출/).waitFor()
+  await holidayDetail.getByRole('button',{name:'실제 시간 입력',exact:true}).click()
+  assert.equal(await page.getByLabel('휴일 근무 날짜').inputValue(),'2026-11-01')
+  await page.getByRole('region',{name:'주말·공휴일 실제 근무 제출'}).getByRole('button',{name:'닫기',exact:true}).click()
+  await page.getByRole('button',{name:'일정 내용 닫기'}).click()
+  await page.evaluate(()=>{
+    const row=window.__holidayRows[0]; Object.assign(row,{state:'approved',canSubmit:false,actualMinutes:80,creditUnits:240,settlements:[{id:'paid',mode:'cash',units:240,amountWon:50000,paymentMonth:'2026-11',paidOn:null}]});
+    return window.__cache.invalidateQueries({queryKey:['holiday-work']});
+  })
+  await calendar.getByRole('button',{name:/^외근.*보상 미완료$/}).click()
+  await holidayDetail.getByText(/수당 지급 대기/).waitFor()
+  await page.getByRole('button',{name:'일정 내용 닫기'}).click()
+  await page.evaluate(()=>{window.__holidayRows[0].settlements[0].paidOn='2026-11-04';return window.__cache.invalidateQueries({queryKey:['holiday-work']})})
+  await calendar.getByRole('button',{name:'외근',exact:true}).waitFor()
+  assert.equal(await calendar.getByText('보상 미완료',{exact:true}).count(),0)
+  assert.equal(await page.getByLabel('주말·공휴일 근무 목록').count(),0)
+  await page.setViewportSize({width:390,height:844})
+  await calendar.getByRole('button',{name:/11월 7일 \(토\)/}).click()
+  await page.getByRole('button',{name:'근무 예정 등록',exact:true}).click()
+  assert.equal(await page.getByLabel('휴일 근무 날짜').inputValue(),'2026-11-07')
+  await page.getByLabel('근무 구간 1 시작').fill('09:00')
+  await page.getByLabel('근무 구간 1 종료').fill('10:00')
+  await page.getByLabel('휴일 근무 업무 내용').fill('주말 사무실 근무')
+  await page.getByRole('button',{name:'예정 등록',exact:true}).click()
+  await holidayDetail.getByText('주말 사무실 근무',{exact:true}).waitFor()
+  assert.equal(await holidayDetail.getByRole('button',{name:'실제 시간 입력',exact:true}).count(),0)
+  await page.getByRole('button',{name:'일정 내용 닫기'}).click()
+  await calendar.getByRole('button',{name:'근무',exact:true}).click()
+  await holidayDetail.getByText(/예정 구간: 09:00~10:00/).waitFor()
+  await page.getByRole('button',{name:'일정 내용 닫기'}).click()
+  await page.setViewportSize({width:1440,height:1000})
   await page.getByLabel('신청 검색',{exact:true}).fill('이전 직원 입력')
   assert.match(await page.getByTestId('directory').innerText(),/employee-a:company/)
   const beforeAccountSwitch=await counts()
