@@ -1,4 +1,5 @@
 import { verifyMeetingRoundRoles } from './meeting-round-roles-db.mjs'
+import { verifyMeetingListReadOptimization } from './meeting-list-read-optimization-db.mjs'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import { PGlite } from '@electric-sql/pglite'
@@ -254,5 +255,6 @@ try{
  await verifyScheduleTodos(db,{company,foreign,host,member,outsider,alien,actor})
  await verifyMeetingManualConfirmation(db,{host,member,outsider,alien,actor})
  await verifyMeetingRoundRoles(db,{company,host,member,outsider,alien,actor})
+ await verifyMeetingListReadOptimization(db,{company,host,member,outsider,admin,alien,actor})
  console.log('meetings-db: 기존 저장 + 호스트 알림 중복/읽음/응답 전환·수신자 격리·일정 변경 + 휴가 요약 조회/사유 비노출/타사·비호스트 차단 통과')
 }catch(error){console.error('meetings-db:',{message:error.message,code:error.code,where:error.where});process.exitCode=1}finally{await db.close()}

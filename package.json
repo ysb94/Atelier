@@ -18,6 +18,7 @@
     "verify:supabase-request-policy": "node scripts/verify-supabase-request-policy.mjs",
     "verify:attendance-presence-retry": "node scripts/verify-attendance-presence-retry-browser.mjs",
     "verify:shared-read-load": "node scripts/verify-shared-read-load.mjs",
+    "verify:managed-work-read-optimization": "node scripts/verify-managed-work-read-optimization.mjs",
     "verify:hidden-schedule": "node scripts/verify-hidden-schedule-browser.mjs",
     "verify:leave-read-efficiency": "node scripts/verify-leave-balance-db.mjs --anniversary --additional --fefo --birthday --advance --load-guard --read-efficiency",
     "verify:leave-read-concurrency": "node scripts/verify-leave-read-concurrency.mjs",

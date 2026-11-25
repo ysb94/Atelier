@@ -21,7 +21,7 @@ function result(name){counts[name]=(counts[name]||0)+1;return Promise.resolve(fa
 export function emit(prefix){for(const [name,channel]of channels)if(name.startsWith(prefix))channel.handlers.forEach(fn=>fn())}
 export function getSupabase(){return {
 rpc:(name)=>result(name),
-from:(table)=>{const q={select:()=>q,eq:()=>q,order:()=>q,then:(ok,bad)=>result(table).then(ok,bad)};return q},
+from:(table)=>{const q={select:()=>q,eq:()=>q,order:()=>q,limit:()=>q,like:()=>q,abortSignal:()=>q,then:(ok,bad)=>result(table).then(ok,bad)};return q},
 channel:(name)=>{const channel={handlers:[],on(_type,_filter,fn){this.handlers.push(fn);return this},subscribe(fn){this.status=fn;return this}};channels.set(name,channel);return channel},
 removeChannel:async channel=>{for(const [name,value]of channels)if(value===channel)channels.delete(name)}
 }}
@@ -54,7 +54,8 @@ try {
   await page.locator('output').filter({ hasText: 'ready' }).waitFor()
   const count = () => page.evaluate(() => ({ ...window.probe.counts }))
   const initial = await count()
-  for (const name of ['list_my_home_work_notifications', 'list_my_late_statement_notices', 'list_my_extra_leave_notices', 'leave_usage_notices', 'list_my_meeting_invitations', 'list_company_meetings']) assert.equal(initial[name], 1, `${name}: shared initial read`)
+  assert.equal(initial.list_my_home_work_notifications ?? 0, 0, 'the current server uses the managed work endpoint')
+  for (const name of ['list_my_managed_work_notifications', 'list_my_managed_late_notices', 'list_my_extra_leave_notices', 'leave_usage_notices', 'list_my_meeting_invitations', 'list_company_meetings']) assert.equal(initial[name], 1, `${name}: shared initial read`)
   await page.evaluate(() => window.probe.setBadges(12))
   await page.clock.runFor(500)
   assert.deepEqual(await count(), initial, '12 ordinary-staff badges reuse fetched results')
@@ -62,11 +63,11 @@ try {
   await page.evaluate(() => { for (let i=0;i<10;i++) { window.probe.emit('my-home-work:'); window.probe.emit('extra-leave-notices:') } })
   await page.clock.runFor(500)
   const burst = await count()
-  assert.equal(burst.list_my_home_work_notifications, initial.list_my_home_work_notifications + 1, '20 work events coalesce to one fresh read')
+  assert.equal(burst.list_my_managed_work_notifications, initial.list_my_managed_work_notifications + 1, '20 work events coalesce to one fresh read')
   assert.equal(burst.list_my_extra_leave_notices, initial.list_my_extra_leave_notices + 1, '10 leave events coalesce to one fresh read')
   await page.clock.runFor(30_500)
   const healthy = await count()
-  assert.ok(healthy.list_my_home_work_notifications > burst.list_my_home_work_notifications, 'healthy 30s polling remains')
+  assert.ok(healthy.list_my_managed_work_notifications > burst.list_my_managed_work_notifications, 'healthy 30s polling remains')
 
   await page.evaluate(async () => { window.probe.setFailure(true); await window.probe.refresh() })
   await page.locator('output').filter({ hasText: 'error' }).waitFor()
@@ -76,19 +77,19 @@ try {
   assert.deepEqual(await count(), failed, 'no retry storm from failed reads, new consumers, or 30s tick')
   await page.clock.runFor(30_000)
   const retried = await count()
-  assert.equal(retried.list_my_home_work_notifications, failed.list_my_home_work_notifications + 1, 'one retry on 60s failed-read interval')
-  assert.equal(retried.list_my_late_statement_notices, failed.list_my_late_statement_notices + 1)
+  assert.equal(retried.list_my_managed_work_notifications, failed.list_my_managed_work_notifications + 1, 'one retry on 60s failed-read interval')
+  assert.equal(retried.list_my_managed_late_notices, failed.list_my_managed_late_notices + 1)
   await page.evaluate(async () => { window.probe.setFailure(false); await window.probe.refresh() })
   await page.locator('output').filter({ hasText: 'ready' }).waitFor()
   const recovered = await count()
   await page.clock.runFor(30_500)
-  assert.ok((await count()).list_my_home_work_notifications > recovered.list_my_home_work_notifications, 'recovery restores healthy polling')
+  assert.ok((await count()).list_my_managed_work_notifications > recovered.list_my_managed_work_notifications, 'recovery restores healthy polling')
 
   const beforeSwitch = await count()
   await page.evaluate(() => window.probe.switchEmployee('other-ordinary-staff'))
   await page.clock.runFor(500)
   await page.locator('output').filter({ hasText: 'ready' }).waitFor()
-  assert.equal((await count()).list_my_home_work_notifications, beforeSwitch.list_my_home_work_notifications + 1, 'new employee gets own query')
+  assert.equal((await count()).list_my_managed_work_notifications, beforeSwitch.list_my_managed_work_notifications + 1, 'new employee gets own query')
   assert.ok(await page.evaluate(() => window.probe.keys().some(key => key[0] === 'my-home-work-notices' && key[1] === 'other-ordinary-staff')))
   assert.deepEqual(errors, [])
   console.log(JSON.stringify({ result: 'PASS', account: 'ordinary employee (no admin or preview)', initialReadsPerSource: 1, additionalReadsFor11Consumers: 0, realtimeBurstReads: 1, healthyPollSeconds: 30, failedPollSeconds: 60, recoveredPolling: true, accountScoped: true }))
