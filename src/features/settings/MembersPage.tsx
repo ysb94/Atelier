@@ -1,13 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Navigate, Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Search, X } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { FilterBar } from '@/components/ui/filter-bar'
 import { FilterTabs } from '@/components/ui/filter-tabs'
 import { useAuth } from '@/lib/supabase/auth'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { formatNumber } from '@/lib/utils'
 import {
   saveMemberAccount,
   createDepartment,
@@ -227,6 +230,8 @@ export function MembersPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [departureId, setDepartureId] = useState<string | null>(null)
   const [departureMessage, setDepartureMessage] = useState('')
   const [filter, setFilter] = useState<'all' | 'active' | 'disabled' | 'departed'>('all')
+  const [employeeSearch, setEmployeeSearch] = useState('')
+  const employeeSearchInput = useRef<HTMLInputElement>(null)
   const [newDeptName, setNewDeptName] = useState('')
   const safeSession = Boolean(me?.id && me.id === session?.user.id && !isPreviewProfile(me))
   const canManageMembers = safeSession && canManagePersonnel(me)
@@ -279,11 +284,30 @@ export function MembersPage({ embedded = false }: { embedded?: boolean } = {}) {
     .filter((title) => title.kind === 'grade')
     .map((title) => title.name)
 
-  const visible = useMemo(() => {
-    return profiles.filter(p => p.id !== me?.id && p.companyId === me?.companyId
-      && (p.status === 'active' || p.status === 'disabled')
-      && (filter === 'all' || (filter === 'departed' ? departed.has(p.id) : p.status === filter && !departed.has(p.id))))
-  }, [profiles, me?.id, me?.companyId, filter, departed])
+  const groups = useMemo(() => {
+    const search = employeeSearch.normalize('NFKC').trim().toLocaleLowerCase('ko')
+    const terms = search ? search.split(/\s+/) : []
+    const departmentIndex = new Map(departments.map((department, order) => [department.id, { name: department.name, order }]))
+    const byDepartment = new Map<string | null, { name: string; order: number; members: Profile[] }>()
+
+    for (const member of profiles) {
+      if (member.id === me?.id || member.companyId !== me?.companyId || (member.status !== 'active' && member.status !== 'disabled')) continue
+      const isDeparted = departed.has(member.id)
+      if (filter !== 'all' && (filter === 'departed' ? !isDeparted : isDeparted || member.status !== filter)) continue
+
+      const department = member.departmentId ? departmentIndex.get(member.departmentId) : undefined
+      const name = member.departmentId ? department?.name || member.departmentName || '부서명 확인 필요' : '소속 미지정'
+      if (terms.length) {
+        const searchable = [member.displayName, member.email, name].join(' ').normalize('NFKC').toLocaleLowerCase('ko')
+        if (!terms.every(term => searchable.includes(term))) continue
+      }
+      const group = byDepartment.get(member.departmentId)
+      if (group) group.members.push(member)
+      else byDepartment.set(member.departmentId, { name, order: department?.order ?? (member.departmentId ? departments.length : Number.MAX_SAFE_INTEGER), members: [member] })
+    }
+
+    return [...byDepartment.entries()].sort(([, a], [, b]) => a.order - b.order || a.name.localeCompare(b.name, 'ko'))
+  }, [profiles, me?.id, me?.companyId, filter, departed, departments, employeeSearch])
   const departingEmployee = canProcessDeparture ? profiles.find(person => person.id === departureId) : undefined
 
   const invalidate = async () => {
@@ -334,112 +358,128 @@ export function MembersPage({ embedded = false }: { embedded?: boolean } = {}) {
       {!canManageMembers && <p className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">조회 전용 · 계정 정보 변경과 정지는 기존 직원 관리 권한을 따릅니다.</p>}
       {departureMessage && <p role="status" className="mb-4 text-sm text-success">{departureMessage}</p>}
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <FilterTabs<'all'|'active'|'disabled'|'departed'> ariaLabel="계정 상태" value={filter} onChange={setFilter} tabs={[{value:'all',label:'전체'},{value:'active',label:STATUS_LABEL.active},{value:'disabled',label:STATUS_LABEL.disabled},...(canManageMembers ? [{value:'departed' as const,label:'퇴사'}] : [])]}/>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          onClick={() => { void profilesQuery.refetch(); if (canManageMembers) void departuresQuery.refetch() }}
-        >
-          새로고침
-        </Button>
-      </div>
+      <FilterBar>
+        <div className="flex flex-wrap items-center gap-2">
+          <FilterTabs<'all'|'active'|'disabled'|'departed'> ariaLabel="계정 상태" value={filter} onChange={setFilter} tabs={[{value:'all',label:'전체'},{value:'active',label:STATUS_LABEL.active},{value:'disabled',label:STATUS_LABEL.disabled},...(canManageMembers ? [{value:'departed' as const,label:'퇴사'}] : [])]}/>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => { void profilesQuery.refetch(); if (canManageMembers) void departuresQuery.refetch() }}
+          >
+            새로고침
+          </Button>
+        </div>
+        <div className="flex w-full items-center gap-1 sm:ml-auto sm:w-72">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <Input ref={employeeSearchInput} aria-label="직원 검색" placeholder="이름, 이메일 또는 부서명" inputMode="search" className="pl-9"
+              value={employeeSearch} onChange={event => setEmployeeSearch(event.currentTarget.value)} />
+          </div>
+          {employeeSearch && <Button type="button" variant="ghost" size="icon" className="shrink-0" aria-label="직원 검색 지우기"
+            onClick={() => { setEmployeeSearch(''); employeeSearchInput.current?.focus() }}><X className="size-4" aria-hidden="true" /></Button>}
+        </div>
+      </FilterBar>
 
       {profilesQuery.isLoading ? (
         <p className="text-sm text-muted-foreground">불러오는 중...</p>
-      ) : visible.length === 0 ? (
+      ) : groups.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border p-8 text-sm text-muted-foreground">
-          관리할 기존 계정이 없습니다.
+          {employeeSearch.trim() ? '검색 조건에 맞는 직원이 없습니다.' : '관리할 기존 계정이 없습니다.'}
         </div>
       ) : (
-        <div className="space-y-3">
-          {visible.map((member) => (
-            <div
-              key={member.id}
-              className="rounded-xl border border-border bg-card p-4 shadow-sm"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-medium">
-                      {member.displayName || member.email}
-                    </p>
-                    <Badge
-                      variant={
-                        member.status === 'active'
-                          ? 'outline'
+        <div className="space-y-6">
+          {groups.map(([id, group]) => <section key={id ?? 'unassigned'} aria-label={group.name}>
+            <header className="mb-2 flex flex-wrap items-center gap-2 px-1">
+              <h2 className="text-sm font-semibold">{group.name}</h2>
+              <Badge variant="muted">{formatNumber(group.members.length)}명</Badge>
+            </header>
+            <div className="space-y-2">
+              {group.members.map((member) => (
+                <div
+                  key={member.id}
+                  className="rounded-xl border border-border bg-card p-4 shadow-sm"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium">
+                          {member.displayName || member.email}
+                        </p>
+                        <Badge
+                          variant={
+                            member.status === 'active'
+                              ? 'outline'
+                              : member.status === 'pending'
+                                ? 'muted'
+                                : 'danger'
+                          }
+                        >
+                          {departed.has(member.id) ? `퇴사 · ${departed.get(member.id)}` : STATUS_LABEL[member.status]}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {member.email}
+                        {member.position
+                          ? ` · ${member.position}`
                           : member.status === 'pending'
-                            ? 'muted'
-                            : 'danger'
-                      }
-                    >
-                      {departed.has(member.id) ? `퇴사 · ${departed.get(member.id)}` : STATUS_LABEL[member.status]}
-                    </Badge>
+                            ? ' · 직책 미정'
+                            : ''}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        이전 등록 정보(권한 아님):{' '}
+                        {member.capabilities.length === 0
+                          ? '-'
+                          : member.capabilities.map(capabilityLabel).join(', ')}
+                        {member.memberships.some((m) => m.isLead)
+                          ? ` · 책임자 ${member.memberships
+                              .filter((m) => m.isLead)
+                              .map((m) => brandName(m.brandId))
+                              .join(', ')}`
+                          : ''}
+                      </p>
+                      {member.requestNote ? (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          남긴 말: {member.requestNote}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={!canManageMembers || departed.has(member.id)}
+                        onClick={() => setEditingId(prev => prev === member.id ? null : member.id)}
+                      >
+                        {editingId === member.id ? '닫기' : '관리'}
+                      </Button>
+                      {canProcessDeparture && <Button type="button" size="sm" variant="outline"
+                        className={departed.has(member.id) ? undefined : 'text-danger'}
+                        onClick={() => { setDepartureMessage(''); setDepartureId(member.id) }}>
+                        {departed.has(member.id) ? '인계 관리' : '퇴사 처리'}
+                      </Button>}
+                    </div>
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {member.email}
-                    {member.departmentName
-                      ? ` · ${member.departmentName}`
-                      : ''}
-                    {member.position
-                      ? ` · ${member.position}`
-                      : member.status === 'pending'
-                        ? ' · 직책 미정'
-                        : ''}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    이전 등록 정보(권한 아님):{' '}
-                    {member.capabilities.length === 0
-                      ? '-'
-                      : member.capabilities.map(capabilityLabel).join(', ')}
-                    {member.memberships.some((m) => m.isLead)
-                      ? ` · 책임자 ${member.memberships
-                          .filter((m) => m.isLead)
-                          .map((m) => brandName(m.brandId))
-                          .join(', ')}`
-                      : ''}
-                  </p>
-                  {member.requestNote ? (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      남긴 말: {member.requestNote}
-                    </p>
+
+                  {editingId === member.id && canManageMembers ? (
+                    <MemberEditor
+                      profile={member}
+                      departments={departments.filter((d) => d.isActive || d.id === member.departmentId)}
+                      brands={brands}
+                      duties={duties}
+                      grades={grades}
+                      canEditAssignment={canEditAssignment}
+                      onDone={async () => {
+                        setEditingId(null)
+                        await invalidate()
+                      }}
+                    />
                   ) : null}
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={!canManageMembers || departed.has(member.id)}
-                    onClick={() => setEditingId(prev => prev === member.id ? null : member.id)}
-                  >
-                    {editingId === member.id ? '닫기' : '관리'}
-                  </Button>
-                  {canProcessDeparture && <Button type="button" size="sm" variant="outline"
-                    className={departed.has(member.id) ? undefined : 'text-danger'}
-                    onClick={() => { setDepartureMessage(''); setDepartureId(member.id) }}>
-                    {departed.has(member.id) ? '인계 관리' : '퇴사 처리'}
-                  </Button>}
-                </div>
-              </div>
-
-              {editingId === member.id && canManageMembers ? (
-                <MemberEditor
-                  profile={member}
-                  departments={departments.filter((d) => d.isActive || d.id === member.departmentId)}
-                  brands={brands}
-                  duties={duties}
-                  grades={grades}
-                  canEditAssignment={canEditAssignment}
-                  onDone={async () => {
-                    setEditingId(null)
-                    await invalidate()
-                  }}
-                />
-              ) : null}
+              ))}
             </div>
-          ))}
+          </section>)}
         </div>
       )}
       {departingEmployee && <EmployeeDepartureDialog key={departingEmployee.id} employee={departingEmployee} staff={profiles}

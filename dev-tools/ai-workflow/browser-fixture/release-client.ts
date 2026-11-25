@@ -77,6 +77,15 @@ export function getSupabase(){
     const query={select(){return query},eq(){return query},order(){return query},gte(){return query},lte(){return query},limit(){return query},then(resolve:(result:unknown)=>unknown){return Promise.resolve({data:[{work_date:day,clock_in:'09:00:00',clock_out_at:null}],error:null}).then(resolve)}}
     return query
   }
+  if(table==='departments'&&releaseFixture.role==='operations'){
+    const profile=fixtureProfile()
+    const rows=[{id:RELEASE_VISUAL_ID,name:'비주얼팀'},{id:profile.departmentId,name:'운영지원팀'}]
+      .map((department,index)=>({...department,company_id:profile.companyId,sort_order:index,is_active:true,personnel_scope:'none'}))
+    const query={select(){return query},eq(){return query},order(){return query},then(resolve:(value:unknown)=>unknown){
+      return Promise.resolve({data:rows,error:null}).then(resolve)
+    }}
+    return query
+  }
   if(table==='profiles'){
     const profile=fixtureProfile()
     let single=false
@@ -84,7 +93,8 @@ export function getSupabase(){
     const query={select(){return query},eq(){return query},in(){return query},order(){return query},maybeSingle(){single=true;return query},then(resolve:(result:unknown)=>unknown){
       const rows=releaseFixture.role==='operations'?[value,
         {...value,id:departureEmployee,display_name:'퇴사 검증 직원',email:'departing@example.invalid',status:departure?'disabled':'active'},
-        {...value,id:departureSuccessor,display_name:'인계 검증 직원',department_id:RELEASE_VISUAL_ID,email:'successor@example.invalid'}]:[value]
+        {...value,id:departureSuccessor,display_name:'인계 검증 직원',department_id:RELEASE_VISUAL_ID,email:'successor@example.invalid'},
+        {...value,id:'fixture-unassigned-employee',display_name:'소속 없는 검증 직원',department_id:null,email:'unassigned@example.invalid'}]:[value]
       return Promise.resolve({data:single?value:rows,error:null}).then(resolve)
     }}
     return query
