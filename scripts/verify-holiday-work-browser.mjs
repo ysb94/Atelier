@@ -59,9 +59,9 @@ export const getSupabase=()=>({storage:{from:()=>({upload:async(path,file,option
 `)
 await fs.writeFile(path.join(dir,'entry.tsx'),`
 import React,{useState}from'react';import{createRoot}from'react-dom/client';import{QueryClient,QueryClientProvider}from'@tanstack/react-query';import{BrowserRouter,useNavigate,useSearchParams}from'react-router-dom';
-import{HolidayWorkPanel}from'../../src/features/operations-support/HolidayWorkPanel';import{OffsiteSettlementEditor}from'../../src/features/operations-support/OffsiteSettlementEditor';import{MyHomeNotificationList,MyHomeNotificationBadge}from'../../src/features/settings/MyHomeNotificationList';import{WorkspaceTabActivityContext}from'../../src/components/layout/workspace-tab-activity';import{FixtureAuth,useAuth}from'./fixture';
+import{HolidayWorkPanel}from'../../src/features/operations-support/HolidayWorkPanel';import{OffsiteSettlementEditor}from'../../src/features/operations-support/OffsiteSettlementEditor';import{MyHomeNotificationList,MyHomeNotificationBadge}from'../../src/features/settings/MyHomeNotificationList';import{HolidayWorkConfirmationHeaderButton}from'../../src/features/settings/HolidayWorkConfirmationHeaderButton';import{WorkspaceTabActivityContext}from'../../src/components/layout/workspace-tab-activity';import{FixtureAuth,useAuth}from'./fixture';
 const cache=new QueryClient({defaultOptions:{queries:{retry:false,refetchOnWindowFocus:false}}});window.__refresh=()=>cache.invalidateQueries();
-function App(){const{profile}=useAuth();const[params]=useSearchParams();const[active,setActive]=useState(true);window.__active=setActive;window.__navigate=useNavigate();const scope=profile.id==='ops'?'operations':profile.id==='approver'?'review':'mine';const tab=profile.id==='ops'?'holiday-work':profile.id==='approver'?'approvals':'my-attendance';return <WorkspaceTabActivityContext.Provider value={active}><div><MyHomeNotificationBadge tab={tab}/></div>{scope!=='operations'&&<MyHomeNotificationList tab={tab}/>}{params.has('oldOffsite')?<OffsiteSettlementEditor request={window.__offsites[0]} onClose={()=>{}}/>:<HolidayWorkPanel key={profile.id} scope={scope}/>}</WorkspaceTabActivityContext.Provider>}
+function App(){const{profile}=useAuth();const[params]=useSearchParams();const[active,setActive]=useState(true);window.__active=setActive;window.__navigate=useNavigate();const scope=profile.id==='ops'?'operations':profile.id==='approver'?'review':'mine';const tab=profile.id==='ops'?'holiday-work':profile.id==='approver'?'approvals':'my-attendance';return <WorkspaceTabActivityContext.Provider value={active}><div><HolidayWorkConfirmationHeaderButton key={profile.id}/><MyHomeNotificationBadge tab={tab}/></div>{scope!=='operations'&&<MyHomeNotificationList tab={tab}/>}{params.has('oldOffsite')?<OffsiteSettlementEditor request={window.__offsites[0]} onClose={()=>{}}/>:<HolidayWorkPanel key={profile.id} scope={scope}/>}</WorkspaceTabActivityContext.Provider>}
 createRoot(document.getElementById('root')).render(<QueryClientProvider client={cache}><FixtureAuth><BrowserRouter><App/></BrowserRouter></FixtureAuth></QueryClientProvider>);
 `)
 const mocked=['lib/supabase/auth','lib/supabase/client','lib/company/page-preview-context','features/meetings/use-meeting-notices','lib/supabase/meetings','lib/supabase/leave-usage-notices','lib/supabase/late-arrival-statements','features/home/LateStatementReview','features/operations-support/leave-usage-notices','lib/diagnostics','features/operations-support/use-monthly-work-requests','lib/supabase/offsite-settlements']
@@ -163,14 +163,37 @@ try{
  await certificate.getByRole('status').getByText('직원 제출 대기').waitFor()
  await modal.getByRole('button',{name:'닫기',exact:true}).click()
  await page.evaluate(()=>{window.__setRole('staff');window.__navigate('/settings/profile?part=my-attendance')})
- await page.getByRole('button',{name:/보상방법 선택 요청/}).click()
- await certificate.getByRole('radio',{name:'가산임금 지급'}).waitFor()
- assert.equal(await certificate.getByRole('radio',{name:'보상휴가 부여'}).isDisabled(),true)
+ const confirmationButton=page.getByRole('button',{name:'휴일근무 보상 확인서 작성',exact:true})
+ await confirmationButton.waitFor()
+ assert.equal(await page.getByRole('button',{name:/보상방법 선택 요청/}).count(),0,'employees get the red action button in place of the regular notice')
+ assert.equal(await page.getByLabel('처리 필요 1건').count(),0)
+ assert.equal(await page.evaluate(()=>window.__reads.filter(key=>key.includes('confirmation-request')).length),0)
+ await page.setViewportSize({width:390,height:844})
+ await confirmationButton.click()
+ const employeeModal=page.getByRole('dialog',{name:'주말·휴일근로 보상방법 선택 및 확인서',exact:true})
+ const employeeForm=employeeModal.getByRole('form',{name:'주말·휴일근로 보상방법 확인서',exact:true})
+ await employeeForm.getByText('실제 촬영 지원',{exact:true}).waitFor()
+ assert.ok((await employeeModal.boundingBox()).width<=390,'the single sheet fits a mobile screen')
+ assert.ok(await employeeModal.evaluate(dialog=>dialog.scrollWidth<=dialog.clientWidth+1),'the mobile form does not require horizontal scrolling')
+ assert.equal(await employeeForm.getByRole('radio',{name:'보상휴가 부여'}).isDisabled(),true)
+ assert.equal(await employeeForm.getByRole('button',{name:'제출',exact:true}).isDisabled(),true)
  await page.waitForFunction(()=>window.__reads.some(key=>key.includes('confirmation-request')))
- assert.equal(await page.getByLabel('처리 필요 1건').count(),1,'reading does not submit compensation selection')
- await certificate.getByRole('radio',{name:'가산임금 지급'}).check()
- await certificate.getByRole('button',{name:'제출',exact:true}).click()
- await certificate.getByText(/운영지원 확인 대기/).waitFor()
+ await employeeModal.getByRole('button',{name:'닫기',exact:true}).click()
+ await confirmationButton.waitFor()
+ await page.setViewportSize({width:1450,height:1100})
+ await confirmationButton.click()
+ await employeeForm.getByRole('radio',{name:'가산임금 지급'}).check()
+ assert.equal(Math.round((await employeeModal.boundingBox()).width),794)
+ await employeeModal.screenshot({path:path.join(dir,'employee-holiday-confirmation.png')})
+ await page.evaluate(()=>window.__failAction='confirmation-respond')
+ await employeeForm.getByRole('button',{name:'제출',exact:true}).click()
+ await employeeForm.getByRole('alert').waitFor()
+ assert.equal(await employeeForm.getByRole('radio',{name:'가산임금 지급'}).isChecked(),true)
+ await page.evaluate(()=>window.__failAction=null)
+ await employeeForm.getByRole('button',{name:'제출',exact:true}).click()
+ await page.getByText('휴일근무 보상 확인서를 제출했습니다.',{exact:true}).waitFor()
+ assert.equal(await employeeModal.count(),0)
+ assert.equal(await confirmationButton.count(),0)
  await page.evaluate(async()=>{window.__setRole('ops');window.__navigate('/operations-support?part=attendance&attendanceView=holiday&holidayMonth=2026-11');await window.__refresh()})
  await page.getByRole('button',{name:/보상 확인서 제출/}).click()
  await certificate.getByRole('button',{name:'확인서 출력'}).click()

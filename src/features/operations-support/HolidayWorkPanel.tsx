@@ -53,7 +53,8 @@ export function HolidayWorkPanel({ scope, month: monthProp }: { scope: 'mine' | 
   const detailEvent = requestedKey ? detailEvents.find(event => event.event_key === requestedKey) : [...detailEvents].sort((a,b) => b.created_at.localeCompare(a.created_at))[0]
   const showsConfirmation = work.data?.ready === true && confirmationWorkflow && Boolean(row?.confirmation) && scope !== 'review'
   const read = useReadMyHomeNotification('request', row?.id ?? undefined, detailEvent?.event_key,
-    active && Boolean(row) && (!detailEvent?.event_type.startsWith('holiday-confirmation-') || showsConfirmation))
+    active && Boolean(row) && detailEvent?.event_type !== 'holiday-confirmation-request'
+      && (!detailEvent?.event_type.startsWith('holiday-confirmation-') || showsConfirmation))
   useEffect(() => { setSelected(null); setEditing(null); setBasket([]); setSettling(false) }, [profile?.id,profile?.companyId,caseId])
   useEffect(() => { const id = params.get('holidayWork'); if (active && id && work.rows.some(r => r.id === id)) setSelected(id) }, [active, params, work.rows])
   const detailDisplayed = Boolean(row)
@@ -154,7 +155,7 @@ export function HolidayWorkPanel({ scope, month: monthProp }: { scope: 'mine' | 
                   title={`${trip.from} ${trip.start} ~ ${trip.to} ${trip.end}${trip.place ? ` · ${trip.place}` : ''}`}
                   onClick={() => selectOffsite(trip.id)}>{trips.length === 1 ? '진행' : `외근 ${index + 1} 진행`}</Button>)}
                 <Button type="button" size="sm" variant="outline" onClick={() => setSelected(item.id ?? `${item.employeeId}:${item.date}`)}>
-                  {confirmationWorkflow && trips.length === 0 && item.canSettle && item.remainingUnits > 0 ? '진행' : item.confirmation && scope === 'mine' && !item.confirmation.choice ? '확인서 보기' : '상세'}
+                  {confirmationWorkflow && trips.length === 0 && item.canSettle && item.remainingUnits > 0 ? '진행' : '상세'}
                 </Button>
                 {item.canSubmit && !item.legacySettled && <Button type="button" size="sm" variant="outline" onClick={() => setEditing(item)}>실제 시간 입력</Button>}
                 {canSelect && <label className="flex items-center gap-1"><input type="checkbox" aria-label={`${item.employeeName} ${item.date} 정산 선택`}
