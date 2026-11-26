@@ -332,9 +332,9 @@
   {
     "id": "meetings",
     "label": "회의 회차, 참석자, 공유 결과, 회의 채팅",
-    "origin": "회의의 유효 회차와 역할·초대·일정 버전이 참석·응답 조회의 기준이다. 결과 초안과 공개 결과의 수신 범위가 구분된다.",
-    "write": "호스트가 회차 명단·일정을 변경하고 결과 초안을 저장하거나 공개한다. 참석자의 응답은 해당 회차·버전에 연결된다.",
-    "propagation": "회의 상세와 캘린더는 회의 목록을 사용한다. 종합 알림과 회의 시작 안내는 같은 회차에서 알림에 필요한 항목을 30초 주기로 조회하고, 실시간 변경도 반영한다. 단체채팅은 가장 최근 공개한 회차의 참석자로 맞춘다.",
+    "origin": "회의의 유효 회차와 역할·초대·일정 버전이 참석·응답 조회의 기준이다. 결과 초안과 공개 결과의 수신 범위가 구분된다. 1회성 회의 자동 완료는 미삭제·공개·진행 중인 one_off의 확정 회차 starts_at과 해당 회차 duration_minutes를 합한 종료 시각에서 24시간 경과를 기준으로 한다.",
+    "write": "호스트가 회차 명단·일정을 변경하고 결과 초안을 저장하거나 공개한다. 참석자의 응답은 해당 회차·버전에 연결된다. 자동 완료 마이그레이션 적용 후 DB 전용 app.complete_expired_one_off_meetings가 매분 회사별 일정 잠금 안에서 대상의 status=done, revision+1, updated_at만 갱신한다. 일정 미정·미확정·24시간 미경과 유효 회차가 있으면 보류한다.",
+    "propagation": "회의 상세와 캘린더는 회의 목록을 사용한다. 자동 완료는 기존 누적 대상도 포함하며 My home 회의의 진행중/완료 분류에 기존 활성 목록 재조회(15초)로 반영된다. 종합 알림과 회의 시작 안내는 같은 회차에서 알림에 필요한 항목을 30초 주기로 조회하고, 실시간 변경도 반영한다. 단체채팅은 가장 최근 공개한 회차의 참석자로 맞춘다. 자동 완료의 공유 DB 적용은 별도 승인·확인이 필요하다.",
     "copies": "후속 회차에 명단을 승계하고, 공개 결과는 버전·수신자와 함께 보관한다.",
     "reason": "과거 회차와 이미 공유받은 내용에 이후 명단·초안 변경이 소급되지 않게 한다.",
     "resources": [
@@ -344,7 +344,8 @@
       "table:app.meeting_result_versions",
       "rpc:public.list_company_meetings",
       "rpc:public.list_my_meeting_notice_context",
-      "rpc:app.meeting_notice_context"
+      "rpc:app.meeting_notice_context",
+      "rpc:app.complete_expired_one_off_meetings"
     ],
     "evidence": [
       "docs/architecture/MEETING_ROUND_PEOPLE.md",
@@ -355,7 +356,9 @@
       "src/features/meetings/use-meeting-notices.ts",
       "src/features/meetings/use-meeting-realtime.ts",
       "src/features/meetings/use-read-meeting-round-notices.ts",
-      "supabase/migrations/20261126062000_meeting_notice_context.sql"
+      "supabase/migrations/20261126062000_meeting_notice_context.sql",
+      "supabase/migrations/20261126113556_auto_complete_one_off_meetings.sql",
+      "scripts/meeting-auto-completion-db.mjs"
     ]
   },
   {
