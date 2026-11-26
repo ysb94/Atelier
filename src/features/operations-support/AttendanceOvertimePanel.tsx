@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
@@ -21,6 +22,7 @@ import { useMonthlyWorkRequests } from './use-monthly-work-requests'
 import { registeredOvertime } from './overtime-actuals'
 import { workDurationLabel } from './overtime-hours'
 import { WorkManagementFilters } from './WorkManagementFilters'
+import { canViewPeopleOrg, overtimeRosterHref } from './operations-support-sections'
 import type { useOpsDirectory } from './ops-directory'
 import type { useAttendanceStartSettings } from './use-attendance-start-settings'
 import { monthLabel } from './monthly-attendance'
@@ -44,6 +46,7 @@ export function AttendanceOvertimePanel({ directory, schedules }: { directory: R
   useRenderWatch('AttendanceOvertimePanel')
   const active = useWorkspaceTabActivity()
   const { profile, session } = useAuth()
+  const canOpenRoster = canViewPeopleOrg(profile)
   const today = koreaDateKey(new Date())
   const [month, setMonth] = useState(today.slice(0, 7))
   const [department, setDepartment] = useState('all')
@@ -126,7 +129,14 @@ export function AttendanceOvertimePanel({ directory, schedules }: { directory: R
         const hours = allowances.isError ? null : allowances.data?.find(item => item.profile_id === row.employeeId)?.inclusive_overtime_hours
         const threshold = hours == null ? null : Math.round(hours * 60)
         const open = selected === row.employeeId
-        return <Fragment key={row.employeeId}><tr className={`border-t border-border ${open ? 'bg-muted/40' : ''}`}><td className="px-3 py-2"><MemberCell name={row.name} /></td><td className="px-3 py-2">{row.team}</td><td className="px-3 py-2">{row.count}건</td><td className="px-3 py-2">{workDurationLabel(row.approved)}</td><td className="px-3 py-2 font-semibold">{workDurationLabel(row.minutes)}</td><td className="px-3 py-2 font-semibold">{unrequestedBusy ? '조회 중…' : unrequested ? workDurationLabel(row.unrequestedMinutes) : '—'}</td><td className="px-3 py-2">{allowances.isPending ? '조회 중…' : threshold == null ? '미등록·확인 필요' : <>{workDurationLabel(threshold)}<AllowanceBar minutes={row.minutes} threshold={threshold} /></>}</td><td className="px-3 py-2">{threshold == null ? '—' : workDurationLabel(Math.max(0, row.minutes - threshold))}</td><td className="px-3 py-2"><Button size="sm" variant="outline" aria-expanded={open} onClick={() => setSelected(open ? null : row.employeeId)}>{open ? '입력 내역 닫기' : '입력 내역'}</Button></td></tr>
+        let allowanceCell = <span>미등록·확인 필요</span>
+        if (allowances.isPending) allowanceCell = <span>조회 중…</span>
+        else if (allowances.isError) allowanceCell = <span>조회 실패</span>
+        else if (threshold != null) allowanceCell = <>{workDurationLabel(threshold)}<AllowanceBar minutes={row.minutes} threshold={threshold} /></>
+        else if (canOpenRoster) allowanceCell = <Link to={overtimeRosterHref(row.employeeId)} className="font-medium text-primary underline underline-offset-2" title={`${row.name} 약정 연장근로시간 입력으로 이동`}>미등록·확인 필요</Link>
+        return <Fragment key={row.employeeId}><tr className={`border-t border-border ${open ? 'bg-muted/40' : ''}`}><td className="px-3 py-2"><MemberCell name={row.name} /></td><td className="px-3 py-2">{row.team}</td><td className="px-3 py-2">{row.count}건</td><td className="px-3 py-2">{workDurationLabel(row.approved)}</td><td className="px-3 py-2 font-semibold">{workDurationLabel(row.minutes)}</td><td className="px-3 py-2 font-semibold">{unrequestedBusy ? '조회 중…' : unrequested ? workDurationLabel(row.unrequestedMinutes) : '—'}</td>
+          <td className="px-3 py-2">{allowanceCell}</td>
+          <td className="px-3 py-2">{threshold == null ? '—' : workDurationLabel(Math.max(0, row.minutes - threshold))}</td><td className="px-3 py-2"><Button size="sm" variant="outline" aria-expanded={open} onClick={() => setSelected(open ? null : row.employeeId)}>{open ? '입력 내역 닫기' : '입력 내역'}</Button></td></tr>
         {open && <tr className="bg-muted/40"><td colSpan={9} className="space-y-3 px-6 pb-4 pt-1">
           {(selectedRows.length > 0 || selectedHolidayRows.length > 0) && <OvertimeEntries rows={selectedRows} holidays={selectedHolidayRows} month={month} />}
           {selectedUnrequestedRows && <UnrequestedOvertimeEntries rows={selectedUnrequestedRows} />}
