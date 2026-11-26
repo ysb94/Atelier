@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { CircleCheck, CircleDashed, CircleDot, GripVertical, MessageSquare, Plus, Settings2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -7,11 +8,14 @@ import { chatKeys } from '@/features/chat/use-chat'
 import { readPollInterval, sharedReadPolicy } from '@/lib/query/shared-read-policy'
 import { listPersonalWorkCards, personalWorkAction, personalWorkErrorMessage, personalWorkOwner, personalWorkUnavailable,
   type PersonalWorkCard, type PersonalWorkInput, type PersonalWorkStatus } from '@/lib/supabase/personal-work'
-import { cn } from '@/lib/utils'
+import { cn, emptyList } from '@/lib/utils'
+import type { RelatedWorkItem } from '@/lib/supabase/my-home-related-work'
+import { MyHomeRelatedWork } from './MyHomeRelatedWork'
 import { MyWorkCardDrawer } from './MyWorkCardDrawer'
 import { MyWorkFeedbackDialog } from './MyWorkFeedbackDialog'
 import {
-  personalWorkCardsKey, personalWorkFeedbackKey, usePersonalWorkFeedbackNoticeDetail, useReadPersonalWorkFeedbackNotice,
+  PERSONAL_WORK_FEEDBACK_PARAM, personalWorkCardsKey, personalWorkFeedbackKey, usePersonalWorkFeedbackNotices,
+  usePersonalWorkFeedbackNoticeDetail, useReadPersonalWorkFeedbackNotice,
 } from './use-personal-work-feedback-notices'
 
 const columns = [
@@ -52,12 +56,14 @@ export function MyWorkBoard({ feedbackActorId: actorId, active = true, noticeId,
   feedbackActorId?: string; active?: boolean; noticeId?: string; onCloseNotice: () => void
 }) {
   const cache = useQueryClient()
+  const [, setSearchParams] = useSearchParams()
+  const feedbackNotices = usePersonalWorkFeedbackNotices()
   const key = personalWorkCardsKey(actorId)
   const query = useQuery({ ...sharedReadPolicy, queryKey: key, queryFn: listPersonalWorkCards,
     enabled: active && Boolean(actorId), retry: false,
     refetchInterval: readPollInterval(15_000, active && Boolean(actorId)),
   })
-  const cards = query.data ?? []
+  const cards = query.data ?? emptyList<PersonalWorkCard>()
   const [draggedId, setDraggedId] = useState<string | null>(null)
   const [target, setTarget] = useState<{ status: PersonalWorkStatus; beforeId?: string } | null>(null)
   const [order, setOrder] = useState<string[]>([])
@@ -68,6 +74,8 @@ export function MyWorkBoard({ feedbackActorId: actorId, active = true, noticeId,
   const moveAttempt = useRef<{ key: string; command: string }>(null)
   const [creating, setCreating] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const relatedOpenAttempt = useRef(0)
+  useEffect(() => () => { relatedOpenAttempt.current++ }, [active, actorId])
   const [recipientIds, setRecipientIds] = useState(() => loadFeedbackRecipients(actorId))
   const [feedbackDrop, setFeedbackDrop] = useState<{ cardId: string; revision: number } | null>(null)
   const [feedbackSettings, setFeedbackSettings] = useState(false)
@@ -83,8 +91,6 @@ export function MyWorkBoard({ feedbackActorId: actorId, active = true, noticeId,
   }, [active, actorId, cache, noticeId])
   const feedbackCard = cards.find(card => card.id === feedbackDrop?.cardId)
   const ownCards = cards.filter(card => card.assignee_id === actorId).sort((first, second) => order.indexOf(first.id) - order.indexOf(second.id))
-  const reviewCards = cards.filter(card => card.reviewer_id === actorId && card.status === 'feedback')
-  const assignedCards = cards.filter(card => personalWorkOwner(card) === actorId && card.assignee_id !== actorId && card.status !== 'feedback')
   const ready = Boolean(actorId) && query.isSuccess
 
   async function save(input: PersonalWorkInput) {
@@ -149,20 +155,34 @@ export function MyWorkBoard({ feedbackActorId: actorId, active = true, noticeId,
     setFeedbackSettings(false)
   }
 
-  function renderRelated(label: string, items: PersonalWorkCard[]) {
-    if (!items.length) return null
-    return <section aria-label={label} className="mt-5 rounded-xl border border-border bg-card p-4">
-      <h2 className="mb-2 text-sm font-semibold">{label} <span className="text-muted-foreground">{items.length}</span></h2>
-      <ul className="divide-y divide-border">
-        {items.map(card => <li key={card.id}>
-          <button type="button" aria-haspopup="dialog" onClick={() => setSelectedId(card.id)}
-            className="flex w-full flex-wrap items-baseline justify-between gap-2 rounded px-2 py-2 text-left text-sm hover:bg-muted">
-            <span className="min-w-0 wrap-anywhere font-medium">{card.title}</span>
-            <span className="text-xs text-muted-foreground">{card.assignee_name} · {statusLabel(card.status)} · {card.round}차</span>
-          </button>
-        </li>)}
-      </ul>
-    </section>
+  async function openRelatedPersonal(item: RelatedWorkItem) {
+    if (!active || !actorId) return
+    const attempt = ++relatedOpenAttempt.current
+    setError('')
+    const feedbackId = item.noticeId ?? feedbackNotices.rows?.find(notice => notice.card_id === item.id
+      && notice.round === item.round && !notice.resolved_at)?.id
+    if (feedbackId) {
+      setSelectedId(null)
+      setSearchParams(previous => {
+        const next = new URLSearchParams(previous)
+        next.set(PERSONAL_WORK_FEEDBACK_PARAM, feedbackId)
+        return next
+      }, { replace: true })
+      return
+    }
+    setSearchParams(previous => {
+      if (!previous.has(PERSONAL_WORK_FEEDBACK_PARAM)) return previous
+      const next = new URLSearchParams(previous)
+      next.delete(PERSONAL_WORK_FEEDBACK_PARAM)
+      return next
+    }, { replace: true })
+    const latest = await query.refetch()
+    if (attempt !== relatedOpenAttempt.current) return
+    if (latest.isError || !latest.data?.some(card => card.id === item.id)) {
+      setError('업무 상세를 불러오지 못했습니다. 최신 목록을 다시 확인해 주세요.')
+      return
+    }
+    setSelectedId(item.id)
   }
 
   return <section aria-label="내 업무 보드">
@@ -252,8 +272,8 @@ export function MyWorkBoard({ feedbackActorId: actorId, active = true, noticeId,
         </section>
       })}
     </div>
-    {renderRelated('검토 요청', reviewCards)}
-    {renderRelated('내가 배정한 업무', assignedCards)}
+    <MyHomeRelatedWork actorId={actorId} active={active} cards={cards} cardsReady={query.isSuccess}
+      cardsError={query.isError} onOpenPersonal={item => void openRelatedPersonal(item)} />
     {(feedbackSettings || feedbackCard) && <MyWorkFeedbackDialog actorId={actorId} settings={feedbackSettings}
       cardTitle={feedbackCard?.title} recipientIds={recipientIds}
       fixedReviewer={feedbackCard && personalWorkOwner(feedbackCard) !== feedbackCard.assignee_id

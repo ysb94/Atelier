@@ -293,18 +293,27 @@
     "label": "부서 업무 요청, 자체 업무, 배정, 댓글, 처리 시간",
     "origin": "work_requests가 요청/자체 업무와 진행 상태의 기준이다. 댓글·첨부·타이머는 같은 업무 ID에 연결된다.",
     "write": "부서/내 업무의 저장·배정·확인·취소 RPC를 사용한다. 자체 업무는 초기 배정 흐름이 다르다.",
-    "propagation": "부서 목록, 담당자 내 업무와 상세는 공동 상태를 조회한다. Visual 분류 담당과 해당 분류의 내역은 기존 업무에 연결된다.",
+    "propagation": "부서 목록, 담당자 내 업무와 상세는 공동 상태를 조회한다. Visual 분류 담당과 해당 분류의 내역은 기존 업무에 연결된다. My home 내 업무 하단은 list_my_home_related_work로 개인 카드와 4개 부서의 현재 검토·결과 확인 대기 및 본인이 요청·배정한 업무를 업무 ID별로 모은다. 지시한 업무는 완료·취소·반려도 포함하며 본인만 수행하는 개인 할 일과 초안·삭제는 제외한다. 활성 화면의 30초 조회와 기존 업무·알림 캐시 변경으로 갱신하고, 최근 활동 시각과 출처별 ID 커서로 20건씩 조회한다. 새 RPC의 공유 DB 적용은 별도 승인 전이다.",
     "copies": "댓글·첨부·작업 시간과 상태/분류 진행 이력을 업무와 연결해 저장한다.",
     "reason": "한 요청에 여러 사람과 분류가 참여하며 진행과 과거 처리 내용의 조회 권한을 유지하기 위해서다.",
     "resources": [
       "table:public.work_requests",
       "table:public.work_request_messages",
       "table:public.work_request_files",
-      "table:public.work_request_time_entries"
+      "table:public.work_request_time_entries",
+      "table:app.personal_work_cards",
+      "table:app.visual_workflow_entries",
+      "rpc:app.visual_workflow_targets",
+      "rpc:public.list_my_home_related_work"
     ],
     "evidence": [
       "docs/architecture/DEPARTMENT_WORK.md",
-      "docs/architecture/VISUAL_WORK_DETAIL.md"
+      "docs/architecture/VISUAL_WORK_DETAIL.md",
+      "docs/architecture/MY_HOME_RELATED_WORK.md",
+      "src/lib/supabase/my-home-related-work.ts",
+      "src/features/settings/MyHomeRelatedWork.tsx",
+      "src/features/settings/MyWorkBoard.tsx",
+      "supabase/migrations/20261126115127_my_home_related_work.sql"
     ]
   },
   {
@@ -312,7 +321,7 @@
     "label": "종합 알림, 읽음, 처리 대기, PC 알림",
     "origin": "서버 업무 이벤트와 본인 읽음 기록이 기준이다. 내 업무 피드백은 수신자별 최근 목록에서 표시할 값만 읽고, 본문과 회차 확인에 쓸 버전은 상세에서 조회한다. 읽음과 실제 승인·참석 응답·확인 처리는 독립 상태다.",
     "write": "권한 확인 후 상세 표시가 끝나면 정확한 이벤트 버전을 읽음 저장한다. 실제 처리는 각 업무 API를 사용한다.",
-    "propagation": "종합 알림과 각 탭은 같은 이벤트·읽음 상태를 공유한다. 주말근무 알림은 한 번의 조회 안에서 같은 직원·수신 역할의 권한 판정을 재사용하며 다음 조회 때 다시 확인한다. 회의 초대와 시작 안내는 본인 계정의 공통 조회 결과를 사용한다. 브라우저 PC 알림은 같은 조회의 현재 미확인 이벤트를 사용한다.",
+    "propagation": "종합 알림과 각 탭은 같은 이벤트·읽음 상태를 공유한다. 주말근무 알림은 한 번의 조회 안에서 같은 직원·수신 역할의 권한 판정을 재사용하며 다음 조회 때 다시 확인한다. 회의 초대와 시작 안내는 본인 계정의 공통 조회 결과를 사용한다. 브라우저 PC 알림은 같은 조회의 현재 미확인 이벤트를 사용한다. 내 업무 하단의 피드백 목록은 현재 카드·검토 단계에서 처리 대기를 판정하며 읽음으로 제거하지 않는다. 개인 카드 상세는 현재 revision에 대응하는 기존 피드백 알림 ID를 열고, Visual 분류는 기존 상세와 읽음 API를 사용한다. 요약 조회로 읽음·업무 상태를 수정하지 않는다.",
     "copies": "서버에는 결과 이벤트의 당시 내용과 읽음을 남긴다. 브라우저는 전달 중복을 막는 식별자와 시각을 IndexedDB에 보관한다.",
     "reason": "업무 진행과 열람을 구분하고 여러 탭의 동일 시스템 알림을 한 번만 표시한다.",
     "resources": [
