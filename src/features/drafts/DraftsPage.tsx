@@ -293,10 +293,8 @@ export function CompanyDraftsPage() {
     [brandIdBySlug, brandScope, ownerAllDrafts],
   )
 
-  const scopedBrand =
-    brandScope !== 'all' && brandScope !== UNASSIGNED_DRAFT_BRAND
-      ? brands.find((item) => item.slug === brandScope)
-      : undefined
+  const targetBrandSlug = brandScope !== 'all' && brandScope !== UNASSIGNED_DRAFT_BRAND ? brandScope : undefined
+  const scopedBrand = targetBrandSlug ? brands.find(item => item.slug === targetBrandSlug) : undefined
   const folderOrder = useDraftFolderOrder(scopedBrand?.id,
     profile?.status === 'active' && profile.id === session?.user.id ? profile.id : undefined, companyId)
   const canReorderFolders = Boolean(scopedBrand &&
@@ -443,11 +441,15 @@ export function CompanyDraftsPage() {
   const loading =
     draftsQuery.isLoading || seasonQueries.loading
 
-  const scopedFolderPending = (brandsLoading || seasonQueries.loading) && brandScope !== 'all' && brandScope !== UNASSIGNED_DRAFT_BRAND
+  const scopedFolderPending = (brandsLoading || seasonQueries.loading) && Boolean(targetBrandSlug)
     && (!scopedBrand || (folderFilter !== 'all' && folderFilter !== 'unassigned' && !activeFolder))
   function newDraftHref(entry: string | null = null) {
-    return draftNewPath(scopedBrand?.slug, {
-      season: scopedBrand ? activeFolder?.id ?? (folderFilter === 'unassigned' ? 'none' : null) : null,
+    // Keep an explicit selection even when its lookup fails. The editor checks the target before allowing a save.
+    const season = !targetBrandSlug || folderFilter === 'all'
+      ? null
+      : folderFilter === 'unassigned' ? 'none' : activeFolder?.id ?? folderFilter
+    return draftNewPath(targetBrandSlug, {
+      season,
       scope: brandScope === UNASSIGNED_DRAFT_BRAND ? UNASSIGNED_DRAFT_BRAND : null,
       entry,
     })
