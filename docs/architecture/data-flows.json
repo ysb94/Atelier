@@ -563,7 +563,7 @@
     "id": "draft-folder-row-order",
     "label": "출시 폴더 안 기획안 공용 순번",
     "origin": "폴더와 브랜드가 일치하는 기획안의 product_drafts.season_id가 구성원 기준이다. 폴더 순서는 draft_folder_row_orders의 season_id별 draft_ids 배열과 revision을 사용한다.",
-    "write": "기획 또는 브랜드 수정 권한이 있는 사용자가 순번을 선택하면 save_draft_folder_row_order에서 회사·브랜드·현재 폴더 구성·기존 버전을 검증하고 순서만 저장한다.",
+    "write": "기획 또는 브랜드 수정 권한이 있는 사용자가 No. 숫자를 끌어 기획안 행을 옮기면 save_draft_folder_row_order에서 회사·브랜드·현재 폴더 구성·기존 버전을 검증하고 순서만 저장한다.",
     "propagation": "폴더의 표와 카드가 같은 순서를 적용하고 Realtime 변경 및 주기 재조회로 다른 열린 화면을 갱신한다. 작성자 필터가 있어도 전체 폴더 순번을 표시한다.",
     "copies": "폴더당 기획안 UUID 순서와 저장 버전 한 건을 별도 보관한다. 빠진 UUID는 화면에서 건너뛰고 저장 이후 추가된 기획안은 뒤에 표시한다.",
     "reason": "여러 사용자가 같은 순서를 사용하면서 기존 기획안 본문, 작성자 권한, 발주 상태와 수정 시각을 유지한다.",

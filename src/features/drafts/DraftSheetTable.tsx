@@ -14,7 +14,7 @@ type HeaderDrag = {
 
 const DRAG_DISTANCE = 5
 const SCROLL_EDGE = 42
-const ROW_ORDER_WIDTH = 72
+const ROW_ORDER_WIDTH = 48
 
 export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, showRowOrder, onMoveColumn, children }: {
   layout?: DraftSheetLayout
@@ -167,7 +167,7 @@ export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, 
     <colgroup>{showRowOrder && <col style={{ width: ROW_ORDER_WIDTH }} />}{columns.map(({ id }) => <col key={id} className={`draft-column-${id}`}
       style={{ width: DRAFT_SHEET_COLUMNS[id].width }} />)}</colgroup>
     <thead ref={header}>
-      <tr>{showRowOrder && <th scope="col" className="draft-row-position-heading">순번</th>}
+      <tr>{showRowOrder && <th scope="col" className="draft-row-position-heading">No.</th>}
       {columns.map(({ id }, index) => <th key={id} scope="col" className={`draft-column-${id}`}
         data-column={id} data-dragging={dragging === id || undefined}
         data-drop={drop?.id === id ? (drop.after ? 'after' : 'before') : undefined}

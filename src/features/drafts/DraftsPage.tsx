@@ -5,7 +5,6 @@ import { Plus } from 'lucide-react'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { Button } from '@/components/ui/button'
 import { FilterTabs, type FilterTab } from '@/components/ui/filter-tabs'
-import { Select } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { startWorkflow, tracedInput, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 import { createSeason, deleteSeason, getCompanyProductDrafts, getSeasonsByBrand, updateProductDraft, updateSeason } from '@/lib/api'
@@ -379,16 +378,15 @@ export function CompanyDraftsPage() {
     return [...saved, ...remaining]
   }, [drafts, rowFolderId, rowFolderBrand, rowOrder.ids])
   const rowRanks = useMemo(() => new Map(folderRowIds.map((id, index) => [id, index + 1])), [folderRowIds])
-  const rowPositionOptions = useMemo(() => Array.from({ length: folderRowIds.length }, (_, index) =>
-    <option key={index + 1} value={index + 1}>{index + 1}</option>), [folderRowIds.length])
+  const canDragRows = canReorderRows && rowOrder.ready && !rowOrder.isPending && !draftsQuery.isFetching && folderRowIds.length > 1
 
-  async function moveDraftPosition(draftId: string, target: number) {
-    const current = rowRanks.get(draftId)
-    if (!rowFolderId || !canReorderRows || !rowOrder.ready || rowOrder.isPending ||
-      current == null || target < 1 || target > folderRowIds.length || current === target) return
-    const next = [...folderRowIds]
-    next.splice(current - 1, 1)
-    next.splice(target - 1, 0, draftId)
+  async function moveDraftPosition(draftId: string, targetId: string, after: boolean) {
+    if (!rowFolderId || !canDragRows || !rowRanks.has(draftId) || draftId === targetId) return
+    const next = folderRowIds.filter(id => id !== draftId)
+    const target = next.indexOf(targetId)
+    if (target === -1) return
+    next.splice(target + Number(after), 0, draftId)
+    if (next.every((id, index) => id === folderRowIds[index])) return
     setRowOrderFailure(null)
     try {
       await rowOrder.reorder(next)
@@ -606,6 +604,7 @@ export function CompanyDraftsPage() {
         accountId={profileId}
         layout={sheetLayout}
         showRowOrder={Boolean(rowFolderId)}
+        onMoveRow={canDragRows ? (id, target, after) => { void moveDraftPosition(id, target, after) } : undefined}
         label={showingCompleted ? '완료된 기획안 목록' : '기획안 목록'}
         emptyMessage={showingCompleted ? '이 폴더에 완료된 기획안이 없습니다.'
           : loading ? '불러오는 중...'
@@ -679,13 +678,18 @@ export function CompanyDraftsPage() {
                     layout={sheetLayout}
                     draft={draft}
                     rowPosition={rowFolderId && (canReorderRows && position && folderRowIds.length > 1
-                      ? <Select aria-label={`${draft.draftNo} 순번`} value={position}
-                          className="mx-auto h-7 w-full max-w-14 px-1 text-center text-xs tabular-nums text-foreground"
-                          disabled={!rowOrder.ready || rowOrder.isPending || draftsQuery.isFetching}
-                          onChange={event => void moveDraftPosition(draft.id, Number(event.currentTarget.value))}>
-                          {rowPositionOptions}
-                        </Select>
-                      : <span className="tabular-nums" aria-label={`${draft.draftNo} 순번`}>{position ?? '–'}</span>)}
+                      ? <button type="button" className="draft-row-position-handle" draggable={canDragRows} data-draft-order-handle
+                          aria-disabled={!canDragRows}
+                          aria-label={`${draft.draftNo} 순번 ${position}`} aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+                          title="끌어서 순서 변경 · Alt + 위/아래 방향키"
+                          onKeyDown={event => {
+                            const after = event.key === 'ArrowDown'
+                            if (!event.altKey || (!after && event.key !== 'ArrowUp')) return
+                            event.preventDefault()
+                            const target = folderRowIds[position - 1 + (after ? 1 : -1)]
+                            if (target) void moveDraftPosition(draft.id, target, after)
+                          }}>{position}</button>
+                      : <span className="tabular-nums" aria-label={`${draft.draftNo} 순번 ${position ?? ''}`}>{position}</span>)}
                     teamWork={teamWork.forDraft(draft.id)}
                     visualBoard={visualBoard.forDraft(draft.id)}
                     readOnly={!canWriteDraft(workAccess.access,draft)}

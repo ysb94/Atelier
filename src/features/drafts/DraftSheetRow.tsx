@@ -1010,7 +1010,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
     </>
 
   if (mode === 'card') {
-    return <article className="draft-board-card" aria-label={`${draft.draftNo} ${name}`}>
+    return <article className="draft-board-card" aria-label={`${draft.draftNo} ${name}`} data-draft-order-row={rowPosition ? draft.id : undefined}>
       <header className="draft-board-card-grid bg-primary text-primary-foreground">
         <span className="flex items-center gap-2">{rowPosition}BRAND</span><span>SAMPLE</span>
       </header>
@@ -1140,7 +1140,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
     ect: <td hidden={hidden.has('ect')} />,
   }
 
-  return <><tr className="draft-sheet-row">
+  return <><tr className="draft-sheet-row" data-draft-order-row={rowPosition ? draft.id : undefined}>
       {rowPosition && <td className="draft-row-position-cell">{rowPosition}</td>}
       {layout.map(({ id }) => {
         const cell = cells[id]
