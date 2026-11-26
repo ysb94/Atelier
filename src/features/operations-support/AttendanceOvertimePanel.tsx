@@ -1,6 +1,7 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { ArrowUpDown, ChevronDown, ChevronUp } from 'lucide-react'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -41,6 +42,18 @@ async function listAllowances() {
   }
 }
 type OvertimeSummary = { employeeId: string; departmentId: string | null; name: string; team: string; minutes: number; count: number; approved: number; unrequestedMinutes: number }
+const overtimeColumns = [
+  { key: 'name', label: '직원' },
+  { key: 'team', label: '부서' },
+  { key: 'count', label: '실제 기록' },
+  { key: 'approved', label: '승인·확정 시간' },
+  { key: 'minutes', label: '신청된 연장근무' },
+  { key: 'unrequestedMinutes', label: '미신청 연장근무' },
+  { key: 'requestedAllowance', label: '약정 연장근로시간(신청)' },
+  { key: 'combinedMinutes', label: '약정 연장근로시간(신청+미신청)' },
+  { key: 'excessMinutes', label: '약정 초과' },
+] as const
+type OvertimeSort = { key: (typeof overtimeColumns)[number]['key']; direction: 'asc' | 'desc' }
 
 export function AttendanceOvertimePanel({ directory, schedules }: { directory: ReturnType<typeof useOpsDirectory>; schedules: ReturnType<typeof useAttendanceStartSettings> }) {
   useRenderWatch('AttendanceOvertimePanel')
@@ -53,6 +66,7 @@ export function AttendanceOvertimePanel({ directory, schedules }: { directory: R
   const [search, setSearch] = useState('')
   const [limit, setLimit] = useState(50)
   const [selected, setSelected] = useState<string | null>(null)
+  const [sort, setSort] = useState<OvertimeSort>({ key: 'minutes', direction: 'desc' })
   const actuals = useOvertimeActuals()
   const holidayOvertime = useHolidayOvertimeCredits(month, 'operations')
   const requests = useMonthlyWorkRequests(month)
@@ -68,6 +82,9 @@ export function AttendanceOvertimePanel({ directory, schedules }: { directory: R
     : null, [enabled, unrequestedBusy, unrequestedError, requests.isSuccess, lunch.data, clockRows, directory.members, requests.rows, schedules.index, month])
   const allowances = useQuery({ queryKey: ['employee-roster-overtime', profile?.id], queryFn: listAllowances, enabled: profile?.status === 'active', refetchInterval: active ? 30_000 : false })
   useEffect(() => { if (allowances.error) console.warn('[attendance-work] 포괄임금 기준 조회 실패', allowances.error) }, [allowances.error])
+  const allowanceRows = allowances.isError ? undefined : allowances.data
+  const allowanceByEmployee = useMemo(() => new Map(allowanceRows?.map(row => [row.profile_id, row.inclusive_overtime_hours])), [allowanceRows])
+  const allowanceStatus = allowances.isPending ? '조회 중…' : allowances.isError ? '조회 실패' : '미등록'
   const entries = useMemo(() => registeredOvertime(requests.rows, actuals.rows, month, today), [requests.rows, actuals.rows, month, today])
   const holidayEntries = useMemo(() => holidayOvertime.rows.filter(row => row.date <= today), [holidayOvertime.rows, today])
   // 부서 카드 건수를 위해 부서 조건 없이 먼저 모으고, 아래에서 부서 범위로 거른다.
@@ -99,9 +116,28 @@ export function AttendanceOvertimePanel({ directory, schedules }: { directory: R
         employeeId: member.id, departmentId: member.departmentId, name, team, minutes: 0, count: 0, approved: 0, unrequestedMinutes,
       })
     }
-    return [...grouped.values()].sort((a, b) => b.minutes - a.minutes || b.unrequestedMinutes - a.unrequestedMinutes || a.name.localeCompare(b.name, 'ko'))
+    return [...grouped.values()]
   }, [entries, holidayEntries, requests.rows, search, unrequested, directory.members, directory.departmentName])
-  const rows = useMemo(() => searchedRows.filter(row => inDepartmentScope(department, row.departmentId)), [searchedRows, department])
+  const hasUnrequested = unrequested !== null
+  const rows = useMemo(() => {
+    const key = sort.key === 'requestedAllowance' ? 'minutes' : sort.key
+    const direction = sort.direction === 'asc' ? 1 : -1
+    return searchedRows.filter(row => inDepartmentScope(department, row.departmentId)).map(row => {
+      const hours = allowanceByEmployee.get(row.employeeId)
+      const threshold = hours == null ? null : Math.round(hours * 60)
+      return {
+        ...row,
+        threshold,
+        combinedMinutes: hasUnrequested ? row.minutes + row.unrequestedMinutes : null,
+        excessMinutes: threshold == null ? null : Math.max(0, row.minutes - threshold),
+      }
+    }).sort((left, right) => {
+      const a = left[key], b = right[key]
+      if ((a === null) !== (b === null)) return a === null ? 1 : -1
+      const comparison = typeof a === 'string' && typeof b === 'string' ? a.localeCompare(b, 'ko') : Number(a) - Number(b)
+      return direction * comparison || right.minutes - left.minutes || right.unrequestedMinutes - left.unrequestedMinutes || left.name.localeCompare(right.name, 'ko')
+    })
+  }, [searchedRows, department, sort, allowanceByEmployee, hasUnrequested])
   const awaiting = requests.rows.filter(row => row.kind === 'overtime' && row.status === 'approved' && row.from <= today && !actuals.rows.some(actual => actual.requestId === row.id)).length
   const loading = actuals.isPending || requests.isPending || holidayOvertime.isPending
   const failed = actuals.isError || requests.isError || holidayOvertime.isError
@@ -116,7 +152,7 @@ export function AttendanceOvertimePanel({ directory, schedules }: { directory: R
   return <section className="space-y-4" aria-label="야근 관리">
     <h2 className="sr-only">야근</h2>
     <InfoNote label="연장근무 집계 기준"><p>승인된 야근은 신청 시작부터 실제 퇴근 시각까지 누적됩니다. 외근과 주말·공휴일 근무에서 확정한 시간도 근무일 기준으로 합산합니다.</p>
-      <p>미신청 연장근무는 평일에 예정 퇴근을 넘긴 기록입니다. 야근 신청 이력이나 승인 외근이 있는 날은 제외합니다. 약정 초과는 신청된 연장근무를 기준으로 계산합니다.</p></InfoNote>
+      <p>미신청 연장근무는 평일에 예정 퇴근을 넘긴 기록입니다. 야근 신청 이력이나 승인 외근이 있는 날은 제외합니다. 두 약정 비교 열은 왼쪽 근무시간을 기준으로 정렬합니다. 약정 초과는 신청된 연장근무를 기준으로 계산합니다.</p></InfoNote>
     <WorkManagementFilters label="야근 관리" month={month} setMonth={value => { setMonth(value); setLimit(50); setSelected(null) }} department={department} setDepartment={value => { setDepartment(value); setLimit(50); setSelected(null) }} search={search} setSearch={value => { setSearch(value); setLimit(50); setSelected(null) }} directory={directory} cards={deptCards} />
     <p role="status" className="text-sm text-muted-foreground">{ready ? <>{monthLabel(month)} 실제 야근 기록 <strong className="text-foreground">{rows.filter(row => row.count > 0).length}명</strong> · 누적 반영 <strong className="text-foreground">{workDurationLabel(rows.reduce((sum, row) => sum + row.minutes, 0))}</strong>{unrequested && <> · 미신청 연장근무 <strong className="text-foreground">{workDurationLabel(rows.reduce((sum, row) => sum + row.unrequestedMinutes, 0))}</strong></>} · 퇴근 기록 대기 <strong className={awaiting ? 'text-primary' : 'text-foreground'}>{awaiting}건</strong> <span className="text-xs">(대기는 해당 월 전체 승인 건 · 누적 제외)</span></> : '야근 기록을 확인하고 있습니다.'}</p>
     {failed && <p role="alert" className="text-danger">야근 기록 조회 실패 <Button size="sm" variant="outline" onClick={() => { void actuals.refetch(); void requests.refetch(); void holidayOvertime.refetch() }}>다시 불러오기</Button></p>}
@@ -124,20 +160,27 @@ export function AttendanceOvertimePanel({ directory, schedules }: { directory: R
     {actuals.ready && actuals.checkoutReady === false && <p role="status" className="text-warning">퇴근 자동 연결 서버 적용 대기입니다. 기존 야근 내역을 표시합니다.</p>}
     {allowances.isError && <p role="alert" className="text-warning">약정 연장근로시간 조회 실패 · 실제 야근은 표시하고 초과 시간은 계산하지 않습니다. <Button size="sm" variant="outline" onClick={() => void allowances.refetch()}>다시 불러오기</Button></p>}
     {unrequestedError && <p role="alert" className="text-warning">미신청 연장근무 조회 실패 <Button size="sm" variant="outline" onClick={() => { void spans.refetch(); void lunch.refetch(); directory.refetch(); void schedules.refresh() }}>다시 불러오기</Button></p>}
-    <Card className="overflow-x-auto"><table className="w-full min-w-[970px] text-left text-sm"><caption className="sr-only">{monthLabel(month)} 연장근무 현황</caption><thead className="bg-primary text-primary-foreground"><tr>{['직원', '부서', '실제 기록', '승인·확정 시간', '신청된 연장근무', '미신청 연장근무', '약정 연장근로시간(포괄임금)', '약정 초과', '상세'].map(label => <th key={label} className="px-3 py-2">{label}</th>)}</tr></thead><tbody>
-      {!ready || !rows.length ? <tr><td colSpan={9} className="p-8 text-center">{loading || (ready && unrequestedBusy) ? '불러오는 중…' : failed ? '조회 실패' : !actuals.ready ? '실제 시간 연결 대기' : unrequestedError ? '표시할 승인 야근이 없습니다.' : '표시할 야근·연장근무 기록이 없습니다.'}</td></tr> : rows.slice(0, limit).map(row => {
-        const hours = allowances.isError ? null : allowances.data?.find(item => item.profile_id === row.employeeId)?.inclusive_overtime_hours
-        const threshold = hours == null ? null : Math.round(hours * 60)
+    <Card className="overflow-x-auto"><table className="w-full min-w-[1200px] text-left text-sm"><caption className="sr-only">{monthLabel(month)} 연장근무 현황</caption>
+      <thead className="bg-primary text-primary-foreground"><tr>{overtimeColumns.map(({ key, label }) => {
+        const isSorted = sort.key === key
+        const next = isSorted && sort.direction === 'asc' ? 'desc' : 'asc'
+        const Icon = isSorted ? (sort.direction === 'asc' ? ChevronUp : ChevronDown) : ArrowUpDown
+        return <th key={key} scope="col" aria-sort={isSorted ? (sort.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="p-0">
+          <button type="button" title={`${label} ${next === 'asc' ? '오름차순' : '내림차순'}`} className="flex w-full items-center gap-1.5 whitespace-nowrap px-3 py-2 text-left hover:bg-primary-foreground/10 focus-visible:outline-2 focus-visible:-outline-offset-2" onClick={() => setSort({ key, direction: next })}>
+            {label}<Icon className="size-3.5 shrink-0" aria-hidden />
+          </button>
+        </th>
+      })}<th scope="col" className="px-3 py-2">상세</th></tr></thead><tbody>
+      {!ready || !rows.length ? <tr><td colSpan={overtimeColumns.length + 1} className="p-8 text-center">{loading || (ready && unrequestedBusy) ? '불러오는 중…' : failed ? '조회 실패' : !actuals.ready ? '실제 시간 연결 대기' : unrequestedError ? '표시할 승인 야근이 없습니다.' : '표시할 야근·연장근무 기록이 없습니다.'}</td></tr> : rows.slice(0, limit).map(row => {
         const open = selected === row.employeeId
-        let allowanceCell = <span>미등록·확인 필요</span>
-        if (allowances.isPending) allowanceCell = <span>조회 중…</span>
-        else if (allowances.isError) allowanceCell = <span>조회 실패</span>
-        else if (threshold != null) allowanceCell = <>{workDurationLabel(threshold)}<AllowanceBar minutes={row.minutes} threshold={threshold} /></>
-        else if (canOpenRoster) allowanceCell = <Link to={overtimeRosterHref(row.employeeId)} className="font-medium text-primary underline underline-offset-2" title={`${row.name} 약정 연장근로시간 입력으로 이동`}>미등록·확인 필요</Link>
+        const allowanceLink = row.threshold == null && allowanceStatus === '미등록' && canOpenRoster
+          ? <Link to={overtimeRosterHref(row.employeeId)} className="font-medium text-primary underline underline-offset-2" title={`${row.name} 약정 연장근로시간 입력으로 이동`}>미등록·확인 필요</Link>
+          : allowanceStatus
         return <Fragment key={row.employeeId}><tr className={`border-t border-border ${open ? 'bg-muted/40' : ''}`}><td className="px-3 py-2"><MemberCell name={row.name} /></td><td className="px-3 py-2">{row.team}</td><td className="px-3 py-2">{row.count}건</td><td className="px-3 py-2">{workDurationLabel(row.approved)}</td><td className="px-3 py-2 font-semibold">{workDurationLabel(row.minutes)}</td><td className="px-3 py-2 font-semibold">{unrequestedBusy ? '조회 중…' : unrequested ? workDurationLabel(row.unrequestedMinutes) : '—'}</td>
-          <td className="px-3 py-2">{allowanceCell}</td>
-          <td className="px-3 py-2">{threshold == null ? '—' : workDurationLabel(Math.max(0, row.minutes - threshold))}</td><td className="px-3 py-2"><Button size="sm" variant="outline" aria-expanded={open} onClick={() => setSelected(open ? null : row.employeeId)}>{open ? '입력 내역 닫기' : '입력 내역'}</Button></td></tr>
-        {open && <tr className="bg-muted/40"><td colSpan={9} className="space-y-3 px-6 pb-4 pt-1">
+          <td className="px-3 py-2"><AllowanceComparison minutes={row.minutes} threshold={row.threshold} allowancePlaceholder={allowanceLink} /></td>
+          <td className="px-3 py-2"><AllowanceComparison minutes={row.combinedMinutes} threshold={row.threshold} allowancePlaceholder={allowanceStatus} workPlaceholder={unrequestedBusy ? '조회 중…' : '—'} /></td>
+          <td className="px-3 py-2">{row.excessMinutes == null ? '—' : workDurationLabel(row.excessMinutes)}</td><td className="px-3 py-2"><Button size="sm" variant="outline" aria-expanded={open} onClick={() => setSelected(open ? null : row.employeeId)}>{open ? '입력 내역 닫기' : '입력 내역'}</Button></td></tr>
+        {open && <tr className="bg-muted/40"><td colSpan={overtimeColumns.length + 1} className="space-y-3 px-6 pb-4 pt-1">
           {(selectedRows.length > 0 || selectedHolidayRows.length > 0) && <OvertimeEntries rows={selectedRows} holidays={selectedHolidayRows} month={month} />}
           {selectedUnrequestedRows && <UnrequestedOvertimeEntries rows={selectedUnrequestedRows} />}
         </td></tr>}</Fragment>
@@ -163,6 +206,17 @@ function OvertimeEntries({ rows, holidays, month }: { rows: ReturnType<typeof re
       {holidays.map(item => <tr key={item.id} className="border-t border-border"><td className="px-2 py-1.5">{item.date}</td><td className="px-2 py-1.5">주말·공휴일 근무</td><td className="px-2 py-1.5">{workDurationLabel(item.minutes)}</td><td className="px-2 py-1.5">—</td><td className="px-2 py-1.5 font-medium">{workDurationLabel(item.minutes)}</td></tr>)}
     </tbody>
   </table>
+}
+
+function AllowanceComparison({ minutes, threshold, allowancePlaceholder, workPlaceholder = '—' }: {
+  minutes: number | null; threshold: number | null; allowancePlaceholder: ReactNode; workPlaceholder?: string
+}) {
+  return <>
+    <div className="whitespace-nowrap tabular-nums"><strong>{minutes == null ? workPlaceholder : workDurationLabel(minutes)}</strong>
+      <span className="text-muted-foreground"> / </span>{threshold == null ? allowancePlaceholder : workDurationLabel(threshold)}
+    </div>
+    {minutes != null && threshold != null && <AllowanceBar minutes={minutes} threshold={threshold} />}
+  </>
 }
 
 /** 약정 연장근로시간 대비 누적 막대. 넘으면 레드로 보인다. */

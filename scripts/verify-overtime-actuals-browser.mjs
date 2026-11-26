@@ -11,13 +11,16 @@ export const request={id:'approved',employeeId:'a',employeeName:'실제 입력 �
 export const requests=[request,{...request,id:'missing',employeeId:'b',employeeName:'미입력 직원'},{...request,id:'pending',employeeId:'c',employeeName:'미승인 직원',status:'pending'},{...request,id:'offsite',employeeId:'d',employeeName:'외근 직원',kind:'offsite',start:'10:00',end:'21:00',place:'거래처',note:'매장 방문'},{...request,id:'offsite-ten',employeeId:'ten',employeeName:'10시 기준 직원',kind:'offsite',end:'21:30'},{...request,id:'offsite-unset',employeeId:'unset',employeeName:'미설정 외근 직원',departmentId:null,kind:'offsite'},{...request,id:'offsite-night',employeeId:'night',employeeName:'새벽 외근 직원',kind:'offsite',end:'03:00',endNextDay:true},{...request,id:'offsite-cancelled',employeeId:'cancelled',employeeName:'취소 외근 직원',kind:'offsite',status:'cancelled'}];
 requests.push({...request,id:'offsite-shifted',employeeId:'shifted',employeeName:'당일 변경 외근 직원',kind:'offsite',start:'16:00',end:'20:00',offsiteWorkStart:'10:00'});
 export const schedules={index:new Map([['2026-11:department:d',{start:'09:00'}],['2026-11:employee:ten',{start:'10:00'}]]),settings:[],loading:false,error:null,refresh(){}};
-export const directory={members:[{id:'late',displayName:'미신청 직원',departmentId:'d',hireDate:'2025-01-01'}],departments:[{id:'d',name:'디자인'}],departmentName:()=> '디자인',loading:false,error:null,refetch(){}};
+export const directory={members:[{id:'a',displayName:'실제 입력 직원',departmentId:'d',hireDate:'2025-01-01'},{id:'late',displayName:'미신청 직원',departmentId:'d',hireDate:'2025-01-01'}],departments:[{id:'d',name:'디자인'}],departmentName:()=> '디자인',loading:false,error:null,refetch(){}};
 const C=createContext(null);export function Provider({children}){const [rows,setRows]=useState([]);const [fail,setFail]=useState(false);return <C.Provider value={{rows,setRows,fail}}><button onClick={()=>setRows([{requestId:'approved',startAt:'2026-11-02T18:00:00+09:00',endAt:'2026-11-02T23:00:00+09:00',checkoutAt:'2026-11-02T23:00:00+09:00',clockLinked:true,breakMinutes:0,revision:0,savedAt:'2026-11-03'}])}>테스트 퇴근</button><button onClick={()=>setRows([{requestId:'approved',startAt:'2026-11-02T18:00:00+09:00',endAt:'2026-11-02T19:00:00+09:00',clockLinked:true,breakMinutes:0,revision:0,savedAt:'2026-11-03'}])}>테스트 짧은 퇴근</button><button onClick={()=>setRows([])}>테스트 퇴근 무르기</button><button onClick={()=>setFail(!fail)}>저장 오류 전환</button>{children}</C.Provider>};export const useData=()=>useContext(C);
 `)
 await writeFile(path.join(dir,'stubs.tsx'),`import {useData,requests,directory} from './data';
 export const useAuth=()=>({session:{user:{id:'a'}},profile:{id:'a',status:'active',companyId:'company',departmentId:'d',permissionGrants:[{permission:'attendance.manage',scopeKind:'company',scopeId:'company'},...(window.__rosterReadOnly?[]:[{permission:'org.manage',scopeKind:'company',scopeId:'company'}])]}});
 export const useMonthlyWorkRequests=()=>({rows:requests,isPending:false,isError:false,isSuccess:true,refetch(){}});
-export const listCompanyAttendanceSpans=async()=>window.__unrequested?[{employeeId:'late',date:'2026-11-02',clockIn:'09:00',clockOutAt:'2026-11-02T20:25:00+09:00',clockOutSource:'manual'}]:[];
+export const listCompanyAttendanceSpans=async()=>window.__unrequested?[
+  {employeeId:'late',date:'2026-11-02',clockIn:'09:00',clockOutAt:'2026-11-02T20:25:00+09:00',clockOutSource:'manual'},
+  {employeeId:'a',date:'2026-11-03',clockIn:'09:00',clockOutAt:'2026-11-03T18:40:00+09:00',clockOutSource:'manual'},
+]:[];
 export const useLeaveRequests=()=>({requests,userId:'a',busy:false,loading:false,error:null,refresh(){},create:{},transition:{}});
 export const useOpsDirectory=()=>directory;export const useDepartmentApprovers=()=>({loading:false,error:null,settings:[]});export const useMyClockIn=()=>({rows:[]});export const useMyHomeNotifications=()=>({items:[]});
 export const listOffsiteSettlements=async()=>({ready:true,rows:[]});export const offsiteSettlementPreview=async()=>({dates:[],settlement:null});export const saveOffsiteSettlement=async()=>{};export const useWorkspaceTabActivity=()=>true;
@@ -61,13 +64,13 @@ await page.getByRole('button',{name:'테스트 짧은 퇴근',exact:true}).click
 await page.getByRole('button',{name:'테스트 퇴근 무르기',exact:true}).click();await page.getByRole('cell',{name:'퇴근 기록 대기',exact:true}).first().waitFor()
 await page.getByRole('button',{name:'테스트 퇴근',exact:true}).click()
 await page.getByRole('button',{name:'관리 야근',exact:true}).click();await page.getByRole('cell',{name:'실제 입력 직원',exact:true}).waitFor();assert.equal(await page.getByRole('cell',{name:'미입력 직원',exact:true}).count(),0);assert.equal(await page.getByRole('cell',{name:'미승인 직원',exact:true}).count(),0);assert.equal(await page.getByRole('cell',{name:'외근 직원',exact:true}).count(),0)
-const row=page.getByRole('row').filter({has:page.getByRole('cell',{name:'실제 입력 직원',exact:true})});assert.deepEqual(await row.getByRole('cell').allTextContents(),['실제 입력 직원','디자인','1건','4시간','5시간','0분','1시간','4시간','입력 내역'])
+const row=page.getByRole('row').filter({has:page.getByRole('cell',{name:'실제 입력 직원',exact:true})});assert.deepEqual(await row.getByRole('cell').allTextContents(),['실제 입력 직원','디자인','1건','4시간','5시간','0분','5시간 / 1시간','5시간 / 1시간','4시간','입력 내역'])
 await page.getByRole('button',{name:'입력 내역',exact:true}).click();await page.getByRole('cell',{name:'18:00–23:00',exact:true}).waitFor();await page.screenshot({path:path.join(dir,'overtime.png'),fullPage:true})
 await page.getByRole('button',{name:'관리 외근',exact:true}).click();await page.getByRole('cell',{name:'외근 직원',exact:true}).waitFor();await page.getByRole('cell',{name:'거래처',exact:true}).waitFor();
 await page.evaluate(()=>window.__holidayCredits=true)
 await page.getByRole('button',{name:'관리 야근',exact:true}).click()
 await row.getByRole('cell',{name:'7시간 15분',exact:true}).waitFor()
-assert.deepEqual(await row.getByRole('cell').allTextContents(),['실제 입력 직원','디자인','2건','6시간 15분','7시간 15분','0분','1시간','6시간 15분','입력 내역'])
+assert.deepEqual(await row.getByRole('cell').allTextContents(),['실제 입력 직원','디자인','2건','6시간 15분','7시간 15분','0분','7시간 15분 / 1시간','7시간 15분 / 1시간','6시간 15분','입력 내역'])
 await row.getByRole('button',{name:'입력 내역',exact:true}).click()
 await page.getByRole('cell',{name:'주말·공휴일 근무',exact:true}).waitFor()
 await page.getByRole('button',{name:'관리 외근',exact:true}).click()
@@ -83,10 +86,24 @@ await page.getByLabel('외근 진행 구분').selectOption('cancelled');await of
 await page.screenshot({path:path.join(dir,'offsite.png'),fullPage:true});assert.deepEqual(errors,[])
 await page.addInitScript(()=>{window.__unrequested=true})
 await page.reload()
+await page.getByRole('button',{name:'테스트 퇴근',exact:true}).click()
 await page.getByRole('button',{name:'관리 야근',exact:true}).click()
 const unrequested=page.getByRole('row').filter({has:page.getByRole('cell',{name:'미신청 직원',exact:true})})
 await unrequested.getByRole('cell',{name:'2시간 25분',exact:true}).waitFor()
 assert.deepEqual((await unrequested.getByRole('cell').allTextContents()).slice(2,6),['0건','0분','0분','2시간 25분'])
+assert.deepEqual((await row.getByRole('cell').allTextContents()).slice(4,9),['5시간','40분','5시간 / 1시간','5시간 40분 / 1시간','4시간'])
+const mainTable=page.getByRole('table',{name:'2026년 11월 연장근무 현황'})
+assert.equal(await mainTable.getByRole('columnheader').getByRole('button').count(),9)
+const firstEmployee=()=>mainTable.locator('tbody > tr').first().getByRole('cell').first().textContent()
+const verifySort=async(label,ascendingEmployee,descendingEmployee)=>{
+  const header=mainTable.getByRole('columnheader',{name:label,exact:true})
+  const button=header.getByRole('button',{name:label,exact:true})
+  await button.click();assert.equal(await header.getAttribute('aria-sort'),'ascending');assert.equal(await firstEmployee(),ascendingEmployee)
+  await button.click();assert.equal(await header.getAttribute('aria-sort'),'descending');assert.equal(await firstEmployee(),descendingEmployee)
+}
+await verifySort('약정 연장근로시간(신청)','미신청 직원','실제 입력 직원')
+await verifySort('약정 연장근로시간(신청+미신청)','미신청 직원','실제 입력 직원')
+await verifySort('미신청 연장근무','실제 입력 직원','미신청 직원')
 const rosterLink=unrequested.getByRole('link',{name:'미등록·확인 필요',exact:true})
 assert.equal(await rosterLink.getAttribute('href'),'/operations-support/people?peopleView=org&orgView=members&overtimeEmployee=late')
 await unrequested.getByRole('button',{name:'입력 내역',exact:true}).click()
@@ -114,7 +131,7 @@ await page.getByRole('button',{name:'전체 직원 보기',exact:true}).click()
 await page.getByRole('textbox',{name:'직원·부서 검색'}).waitFor()
 assert.equal(await overtimeInput.count(),0,'직접 입력을 닫으면 기존 헤더 숨김 설정 복원')
 await page.getByRole('link',{name:'야근으로 돌아가기',exact:true}).click()
-await unrequested.getByText('16시간 18분',{exact:true}).waitFor()
+await unrequested.getByRole('cell').filter({hasText:'2시간 25분 / 16시간 18분'}).waitFor()
 assert.equal(await rosterLink.count(),0)
 assert.deepEqual(errors,[])
 console.info('Browser: personal and operations overtime, roster link access/focus/save/refresh, and offsite filters passed; no external requests')
