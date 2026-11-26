@@ -59,15 +59,22 @@ const exportRequests = []
 offlinePage.on('request', req => { if (/^https?:/.test(req.url())) exportRequests.push(req.url()) })
 await offlinePage.context().setOffline(true)
 await offlinePage.goto(pathToFileURL(htmlFile).href)
-await offlinePage.locator('canvas[data-ready="true"]').waitFor({ timeout: 60000 })
-await offlinePage.getByRole('slider', { name: '3D 회전 각도' }).fill('90')
+const exportCanvas = offlinePage.locator('canvas[data-ready="true"]')
+await exportCanvas.waitFor({ timeout: 60000 })
+await offlinePage.getByText('360°', { exact: true }).waitFor()
+assert.equal(await offlinePage.getByRole('slider').count(), 0)
+assert.equal(await offlinePage.getByRole('button', { name: '자동 회전' }).count(), 0)
+assert.deepEqual(await exportCanvas.boundingBox(), { x: 0, y: 0, width: 390, height: 420 })
+const exportStage = offlinePage.getByRole('group', { name: '방향키로 제품 회전' })
+for (let step = 0; step < 6; step++) await exportStage.press('ArrowRight')
 await offlinePage.locator('canvas[data-angle="90.000"]').waitFor()
+await exportStage.evaluate(element => element.blur())
 if (!process.env.TRIPO_VERIFY_REAL_MODEL) {
   // Measure rendered pixels so a larger canvas with an unchanged model fails the assertion.
-  const canvas = offlinePage.locator('canvas')
+  const hideMark = await offlinePage.addStyleTag({ content: '.rotation-mark { visibility: hidden }' })
   async function measure(viewport) {
     await offlinePage.setViewportSize(viewport)
-    const snapshot = await canvas.screenshot({ scale: 'css' })
+    const snapshot = await exportCanvas.screenshot({ scale: 'css' })
     return offlinePage.evaluate(async encoded => {
       const image = new Image()
       image.src = 'data:image/png;base64,' + encoded
@@ -82,7 +89,6 @@ if (!process.env.TRIPO_VERIFY_REAL_MODEL) {
       let left = width, right = -1, top = height, bottom = -1
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
-          if ((x < 8 || x >= width - 8) && (y < 8 || y >= height - 8)) continue
           const index = (y * width + x) * 4
           if (data[index] >= 235 && data[index + 1] >= 235 && data[index + 2] >= 235) continue
           left = Math.min(left, x)
@@ -96,11 +102,18 @@ if (!process.env.TRIPO_VERIFY_REAL_MODEL) {
   }
   const small = await measure({ width: 520, height: 410 })
   const large = await measure({ width: 1020, height: 765 })
-  for (const frame of [small, large]) assert.ok(frame.height >= .74 && frame.height <= .81, JSON.stringify(frame))
+  for (const frame of [small, large]) assert.ok(frame.height >= .85 && frame.height <= .92, JSON.stringify(frame))
   assert.ok(Math.abs(small.height - large.height) < .02 && large.pixels > small.pixels * 1.8)
   const narrow = await measure({ width: 175, height: 460 })
   assert.ok(narrow.width >= .85 && narrow.width <= .92 && narrow.height < small.height, JSON.stringify(narrow))
+  await hideMark.evaluate(style => style.remove())
 }
+const exportBox = await exportCanvas.boundingBox()
+await offlinePage.mouse.move(exportBox.width * .25, exportBox.height * .5)
+await offlinePage.mouse.down()
+await offlinePage.mouse.move(exportBox.width * .5, exportBox.height * .5, { steps: 6 })
+await offlinePage.mouse.up()
+await offlinePage.waitForFunction(() => Math.abs(Number(document.querySelector('canvas').dataset.angle) - 180) < 3)
 assert.deepEqual(exportRequests, [], 'HTML file must work using only embedded model and renderer')
 await offlinePage.close()
 assert.equal(await page.getByRole('button',{name:'사이트에 저장',exact:true}).count(),0);

@@ -16,25 +16,19 @@ const viewerHeader = `<!doctype html>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; color: #171717; background: #fff; font: 14px system-ui, sans-serif; }
-    main { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 8px; height: 100dvh; padding: 8px; }
-    .stage-frame { position: relative; min-height: 0; overflow: hidden; border: 1px solid #ddd; border-radius: 8px; }
+    main { position: relative; height: 100vh; height: 100dvh; overflow: hidden; }
     #stage { width: 100%; height: 100%; }
+    #stage:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }
+    .rotation-mark { position: absolute; top: 10px; right: 12px; font-weight: 600; pointer-events: none; }
     #status { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 12px; text-align: center; pointer-events: none; }
     #status:empty { display: none; }
-    .controls { display: flex; align-items: center; gap: 10px; }
-    input { flex: 1; min-width: 0; }
-    button { padding: 6px 12px; border: 1px solid #aaa; border-radius: 5px; background: #fff; color: inherit; font: inherit; }
   </style>
 </head>
 <body>
   <main aria-label="상품 360도 보기">
-    <div class="stage-frame">
-      <div id="stage"></div><p id="status" role="status">360 모델을 불러오는 중입니다.</p>
-    </div>
-    <div class="controls">
-      <input id="angle" type="range" min="0" max="360" step="0.1" value="0" aria-label="3D 회전 각도" disabled>
-      <button id="play" type="button" disabled>자동 회전</button>
-    </div>
+    <div id="stage" role="group" aria-label="방향키로 제품 회전" aria-keyshortcuts="ArrowLeft ArrowRight"></div>
+    <span class="rotation-mark" aria-hidden="true">360°</span>
+    <p id="status" role="status">360 모델을 불러오는 중입니다.</p>
   </main>
   <div id="model" hidden>`
 

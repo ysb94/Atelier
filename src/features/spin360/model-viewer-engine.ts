@@ -18,7 +18,7 @@ function disposeObject(object: THREE.Object3D) {
 }
 
 export function createModelViewer(host: HTMLElement, src: string | ArrayBuffer, callbacks: {
-  ready: () => void; error: (message: string) => void; angle: (degrees: number) => void
+  ready: () => void; error: (message: string) => void; angle?: (degrees: number) => void
 }, { stageHeightFill }: { stageHeightFill?: number } = {}) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5))
@@ -60,7 +60,7 @@ export function createModelViewer(host: HTMLElement, src: string | ArrayBuffer, 
     renderer.render(scene, camera)
     const normalized = ((angle % 360) + 360) % 360
     canvas.dataset.angle = normalized.toFixed(3)
-    callbacks.angle(normalized)
+    callbacks.angle?.(normalized)
     if (playing || Math.abs(target - angle) > .001) schedule()
     else lastTime = 0
   }
@@ -164,6 +164,7 @@ export function createModelViewer(host: HTMLElement, src: string | ArrayBuffer, 
   })()
   return {
     rotate(degrees: number) { target = degrees; schedule() },
+    rotateBy(degrees: number) { target += degrees; schedule() },
     play(value: boolean) { playing = value; schedule() },
     setActive(value: boolean) { active = value; if (active) schedule(); else pauseFrame() },
     dispose() {
