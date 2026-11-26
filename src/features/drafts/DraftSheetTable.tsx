@@ -14,10 +14,12 @@ type HeaderDrag = {
 
 const DRAG_DISTANCE = 5
 const SCROLL_EDGE = 42
+const ROW_ORDER_WIDTH = 72
 
-export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, onMoveColumn, children }: {
+export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, showRowOrder, onMoveColumn, children }: {
   layout?: DraftSheetLayout
   caption?: string
+  showRowOrder?: boolean
   onMoveColumn?: (from: DraftSheetColumnId, target: DraftSheetColumnId, after: boolean) => void
   children: ReactNode
 }) {
@@ -29,7 +31,7 @@ export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, 
   const columns = layout.filter(column => column.visible)
   const canMove = Boolean(onMoveColumn && columns.length > 1)
   const hasSample = columns.some(column => column.id === 'sample')
-  const width = columns.reduce((total, { id }) => total + DRAFT_SHEET_COLUMNS[id].width, 0)
+  const width = columns.reduce((total, { id }) => total + DRAFT_SHEET_COLUMNS[id].width, showRowOrder ? ROW_ORDER_WIDTH : 0)
 
   useEffect(() => () => {
     cancelAnimationFrame(scrollFrame.current)
@@ -162,10 +164,11 @@ export function DraftSheetTable({ layout = DEFAULT_DRAFT_SHEET_LAYOUT, caption, 
 
   return <table className="draft-board-table" style={{ width: hasSample ? 'max-content' : width, minWidth: width, '--draft-sheet-width': `${width}px` } as CSSProperties}>
     {caption && <caption className="sr-only">{caption}</caption>}
-    <colgroup>{columns.map(({ id }) => <col key={id} className={`draft-column-${id}`}
+    <colgroup>{showRowOrder && <col style={{ width: ROW_ORDER_WIDTH }} />}{columns.map(({ id }) => <col key={id} className={`draft-column-${id}`}
       style={{ width: DRAFT_SHEET_COLUMNS[id].width }} />)}</colgroup>
     <thead ref={header}>
-      <tr>{columns.map(({ id }, index) => <th key={id} scope="col" className={`draft-column-${id}`}
+      <tr>{showRowOrder && <th scope="col" className="draft-row-position-heading">순번</th>}
+      {columns.map(({ id }, index) => <th key={id} scope="col" className={`draft-column-${id}`}
         data-column={id} data-dragging={dragging === id || undefined}
         data-drop={drop?.id === id ? (drop.after ? 'after' : 'before') : undefined}
         data-reorderable={canMove || undefined} tabIndex={canMove ? 0 : undefined}

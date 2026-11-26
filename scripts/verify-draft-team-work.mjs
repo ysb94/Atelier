@@ -287,6 +287,54 @@ try {
   console.log('Draft order confirmation: name, colors, price, brand, folder, opening date and permissions passed')
   console.log('Brand SKU issuance: prefix settings, atomic registration, stale previews and repeat confirmation passed')
   console.log('Draft folder order: shared read, scoped writes, stale revisions, folder validation, Realtime publication and original data preservation passed')
+
+  await db.exec(await readFile('supabase/migrations/20261126075355_draft_folder_row_order.sql', 'utf8'))
+  await asUser(author)
+  const createFolderDraft = async (brandId, folderId, name) => {
+    const { rows } = await db.query("select public.save_product_draft($1,$2,null,$3,'[]','[]') as id",
+      [company, brandId, { nameKo: name }])
+    await db.query('update public.product_drafts set season_id=$2 where id=$1', [rows[0].id, folderId])
+    return rows[0].id
+  }
+  const first = await createFolderDraft(brand, folder, '첫 번째')
+  const last = await createFolderDraft(brand, folder, '두 번째')
+  const separate = await createFolderDraft(differentBrand, otherFolder, '다른 폴더')
+  const draftSnapshot = (await db.query('select * from public.product_drafts order by id')).rows
+  const saveRows = async (ids, revision = null, folderId = folder) => (await db.query(
+    'select public.save_draft_folder_row_order($1,$2::uuid[],$3) as result', [folderId, ids, revision],
+  )).rows[0].result
+  const listRowOrders = async () => (await db.query('select * from public.draft_folder_row_orders')).rows
+  await assert.rejects(saveRows([first, first]), { code: '40001' })
+  await assert.rejects(saveRows([first, separate]), { code: '40001' })
+  await assert.rejects(saveRows([first, last], null, unassigned), { code: '42501' })
+  const initialRows = await saveRows([last, first])
+  assert.deepEqual(initialRows.draft_ids, [last, first])
+  await asUser(reviewer)
+  assert.deepEqual(await listRowOrders(), [initialRows])
+  await assert.rejects(saveRows([first, last]), { code: '40001' })
+  const movedRows = await saveRows([first, last], initialRows.revision)
+  assert.deepEqual(movedRows.draft_ids, [first, last])
+  await assert.rejects(saveRows([last, first], initialRows.revision), { code: '40001' })
+  assert.deepEqual((await db.query('select * from public.product_drafts order by id')).rows, draftSnapshot)
+  await asUser(viewer)
+  assert.deepEqual(await listRowOrders(), [movedRows])
+  await assert.rejects(saveRows([last, first], movedRows.revision), { code: '42501' })
+  await assert.rejects(db.query('update public.draft_folder_row_orders set draft_ids=$1 where season_id=$2', [[last, first], folder]), { code: '42501' })
+  await asUser(outsider)
+  assert.deepEqual(await listRowOrders(), [])
+  await assert.rejects(saveRows([last, first], movedRows.revision), { code: '42501' })
+  await asUser('', 'anon')
+  await assert.rejects(listRowOrders(), { code: '42501' })
+  await assert.rejects(saveRows([last, first], movedRows.revision), { code: '42501' })
+  await asUser(author)
+  const added = await createFolderDraft(brand, folder, '나중에 추가')
+  await assert.rejects(saveRows([last, first], movedRows.revision), { code: '40001' })
+  const withAdded = await saveRows([last, first, added], movedRows.revision)
+  await db.query('update public.product_drafts set season_id=null where id=$1', [last])
+  await assert.rejects(saveRows([last, first, added], withAdded.revision), { code: '40001' })
+  assert.deepEqual((await saveRows([added, first], withAdded.revision)).draft_ids, [added, first])
+  assert.equal((await db.query("select count(*)::int as count from pg_publication_tables where pubname='supabase_realtime' and tablename='draft_folder_row_orders'")).rows[0].count, 1)
+  console.log('Draft folder row order: shared reads, scoped writes, stale views, changed membership and preserved draft content passed')
 } finally {
   await db.close()
 }

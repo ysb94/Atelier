@@ -12,18 +12,19 @@ const viewTabs: FilterTab<DraftBoardMode>[] = [
   { value: 'card', label: '카드 보기' },
 ]
 
-export function DraftBoardView({ layout, accountId, label, emptyMessage, folderControls, tableNotice, renderRows }: {
+export function DraftBoardView({ layout, accountId, label, emptyMessage, folderControls, tableNotice, showRowOrder, renderRows }: {
   layout: DraftSheetLayout
   accountId?: string
   label: string
   emptyMessage?: string
   folderControls?: ReactNode
   tableNotice?: ReactNode
+  showRowOrder?: boolean
   renderRows: (mode: DraftBoardMode) => ReactNode
 }) {
   const [mode, setMode] = useState<DraftBoardMode>('table')
   const [layoutError, setLayoutError] = useState(false)
-  const visibleColumns = layout.filter(column => column.visible).length
+  const visibleColumns = layout.filter(column => column.visible).length + Number(Boolean(showRowOrder))
 
   function moveColumn(from: DraftSheetColumnId, target: DraftSheetColumnId, after: boolean) {
     if (!accountId) return
@@ -43,7 +44,7 @@ export function DraftBoardView({ layout, accountId, label, emptyMessage, folderC
     {mode === 'table' && layoutError && <p role="alert" className="mb-2 text-right text-xs text-danger">브라우저에 열 순서를 저장하지 못했습니다.</p>}
     <Activity mode={mode === 'table' ? 'visible' : 'hidden'}>
       <div className="draft-board-scroll" role="region" aria-label={label} tabIndex={0}>
-        <DraftSheetTable layout={layout} onMoveColumn={accountId ? moveColumn : undefined}
+        <DraftSheetTable layout={layout} showRowOrder={showRowOrder} onMoveColumn={accountId ? moveColumn : undefined}
           caption="기획안별 샘플, 상품 정보 및 팀별 진행 현황">
           <DraftMdOptionsProvider><tbody>
             {emptyMessage ? <tr>

@@ -5,6 +5,7 @@ import { Plus } from 'lucide-react'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { Button } from '@/components/ui/button'
 import { FilterTabs, type FilterTab } from '@/components/ui/filter-tabs'
+import { Select } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { startWorkflow, tracedInput, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 import { createSeason, deleteSeason, getCompanyProductDrafts, getSeasonsByBrand, updateProductDraft, updateSeason } from '@/lib/api'
@@ -46,6 +47,7 @@ import { DraftBrandScopeBar, countScheduleRows } from './DraftBrandScopeBar'
 import { DraftFolderBar, DraftFolderHeading } from './DraftFolderBar'
 import { DraftFolderOpeningDate } from './DraftFolderOpeningDate'
 import { useDraftFolderOrder } from './use-draft-folder-order'
+import { useDraftFolderRowOrder } from './use-draft-folder-row-order'
 import { matchesDraftFolder, UNASSIGNED_DRAFT_FOLDER_LABEL } from './draft-folder-filter'
 import { DraftSheetRow, type DraftConfirmFlag } from './DraftSheetRow'
 import { DraftBoardView } from './DraftBoardView'
@@ -113,6 +115,7 @@ export function CompanyDraftsPage() {
   const [boardFilter, setBoardFilter] = useState<BoardFilter>('all')
   const [myOnly, setMyOnly] = useState(false)
   const [completedFolderId, setCompletedFolderId] = useState<string | null>(null)
+  const [rowOrderFailure, setRowOrderFailure] = useState<{ folderId: string; message: string } | null>(null)
   const folderParam = searchParams.get('folder')
   const requestedFolder = folderParam ?? searchParams.get('season') ?? 'all'
   const brandScope = (searchParams.get('scope') ?? 'all') as DraftBrandScope
@@ -364,6 +367,38 @@ export function CompanyDraftsPage() {
     ? null
     : folderItems.find((folder) => selectedFolderIds.includes(folder.id)) ?? null
   const showingCompleted = activeFolder !== null && activeFolder.id === completedFolderId
+  const rowFolder = !showingCompleted && selectedFolderIds.length === 1 ? activeFolder : null
+  const rowFolderId = rowFolder?.id
+  const rowFolderBrand = rowFolder?.brandId
+  const rowOrder = useDraftFolderRowOrder(rowFolderId,
+    profile?.status === 'active' && profile.id === session?.user.id ? profile.id : undefined, companyId)
+  const canReorderRows = Boolean(rowFolderBrand &&
+    (workAccess.access?.legacyEdit || workAccess.access?.operator || canWriteDraft(workAccess.access, null, rowFolderBrand)))
+  const folderRowIds = useMemo(() => {
+    if (!rowFolderId) return []
+    const remaining = new Set(drafts.filter(draft => draft.seasonId === rowFolderId && draft.brandId === rowFolderBrand).map(draft => draft.id))
+    const saved = (rowOrder.ids ?? []).filter(id => remaining.delete(id))
+    return [...saved, ...remaining]
+  }, [drafts, rowFolderId, rowFolderBrand, rowOrder.ids])
+  const rowRanks = useMemo(() => new Map(folderRowIds.map((id, index) => [id, index + 1])), [folderRowIds])
+  const rowPositionOptions = useMemo(() => Array.from({ length: folderRowIds.length }, (_, index) =>
+    <option key={index + 1} value={index + 1}>{index + 1}</option>), [folderRowIds.length])
+
+  async function moveDraftPosition(draftId: string, target: number) {
+    const current = rowRanks.get(draftId)
+    if (!rowFolderId || !canReorderRows || !rowOrder.ready || rowOrder.isPending ||
+      current == null || target < 1 || target > folderRowIds.length || current === target) return
+    const next = [...folderRowIds]
+    next.splice(current - 1, 1)
+    next.splice(target - 1, 0, draftId)
+    setRowOrderFailure(null)
+    try {
+      await rowOrder.reorder(next)
+    } catch (cause) {
+      setRowOrderFailure({ folderId: rowFolderId, message: cause instanceof Error ? cause.message : '순번을 저장하지 못했습니다.' })
+    }
+  }
+
   const unassignedFolderCount = ownerDrafts.filter(draft =>
     matchesDraftFolder(scheduleByDraft.get(draft.id)?.group?.id, 'unassigned'),
   ).length
@@ -390,13 +425,15 @@ export function CompanyDraftsPage() {
   }, [folderDrafts, scheduleByDraft])
 
   const visible = useMemo(() => {
-    return folderDrafts.filter((draft) => {
+    const filtered = folderDrafts.filter((draft) => {
       const scheduled = Boolean(scheduleByDraft.get(draft.id)?.group)
       if (boardFilter === 'unassigned' && scheduled) return false
       if (boardFilter === 'scheduled' && !scheduled) return false
       return true
     })
-  }, [boardFilter, folderDrafts, scheduleByDraft])
+    const unranked = rowRanks.size + 1
+    return rowRanks.size ? filtered.sort((a, b) => (rowRanks.get(a.id) ?? unranked) - (rowRanks.get(b.id) ?? unranked)) : filtered
+  }, [boardFilter, folderDrafts, rowRanks, scheduleByDraft])
   const teamWork = useDraftTeamWork(profileId, visible, !showingCompleted)
   const visualBoard = useDraftVisualBoard(profileId, visible, !showingCompleted)
   const editableVisible = useMemo(() => showingCompleted ? [] : visible.filter(draft => canWriteDraft(workAccess.access, draft)),
@@ -558,11 +595,15 @@ export function CompanyDraftsPage() {
       {draftsQuery.isError ? (
         <p className="mb-3 text-sm text-danger">기획안을 불러오지 못했습니다.</p>
       ) : null}
+      {rowFolderId && rowOrder.error && <p role="status" className="mb-2 text-xs text-muted-foreground">{rowOrder.error}</p>}
+      {rowFolderId && rowOrderFailure?.folderId === rowFolderId &&
+        <p role="alert" className="mb-2 text-xs text-danger">{rowOrderFailure.message}</p>}
 
       <DraftBoardView
         key={profileId}
         accountId={profileId}
         layout={sheetLayout}
+        showRowOrder={Boolean(rowFolderId)}
         label={showingCompleted ? '완료된 기획안 목록' : '기획안 목록'}
         emptyMessage={showingCompleted ? '이 폴더에 완료된 기획안이 없습니다.'
           : loading ? '불러오는 중...'
@@ -628,12 +669,21 @@ export function CompanyDraftsPage() {
         renderRows={mode => visible.map(draft => {
                 const brand = draft.brandId ? brandById.get(draft.brandId) : undefined
                 const price = priceByDraft.get(draft.id)
+                const position = rowRanks.get(draft.id)
                 return (
                   <DraftSheetRow
                     key={draft.id}
                     mode={mode}
                     layout={sheetLayout}
                     draft={draft}
+                    rowPosition={rowFolderId && (canReorderRows && position && folderRowIds.length > 1
+                      ? <Select aria-label={`${draft.draftNo} 순번`} value={position}
+                          className="mx-auto h-7 w-full max-w-14 px-1 text-center text-xs tabular-nums text-foreground"
+                          disabled={!rowOrder.ready || rowOrder.isPending || draftsQuery.isFetching}
+                          onChange={event => void moveDraftPosition(draft.id, Number(event.currentTarget.value))}>
+                          {rowPositionOptions}
+                        </Select>
+                      : <span className="tabular-nums" aria-label={`${draft.draftNo} 순번`}>{position ?? '–'}</span>)}
                     teamWork={teamWork.forDraft(draft.id)}
                     visualBoard={visualBoard.forDraft(draft.id)}
                     readOnly={!canWriteDraft(workAccess.access,draft)}

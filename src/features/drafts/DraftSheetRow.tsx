@@ -796,11 +796,12 @@ function DraftReleaseFolderSelect({ draft, folders, readOnly, onChange }: {
   </>
 }
 
-export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout = DEFAULT_DRAFT_SHEET_LAYOUT, brand, releaseFolders, onChangeReleaseFolder, price, teamWork, visualBoard, informationEditorId, informationTemporaryStore, specDocumentTemporarySource, onOpen, onNextSample, onSaveColors, onSharedPhotoChange, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onReopenInformation, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout = DEFAULT_DRAFT_SHEET_LAYOUT, brand, rowPosition, releaseFolders, onChangeReleaseFolder, price, teamWork, visualBoard, informationEditorId, informationTemporaryStore, specDocumentTemporarySource, onOpen, onNextSample, onSaveColors, onSharedPhotoChange, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onReopenInformation, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
   readOnly?: boolean
   mode?: DraftBoardMode
   layout?: DraftSheetLayout
   draft: ProductDraft; brand: Brand | undefined
+  rowPosition?: ReactNode
   releaseFolders: Pick<Season, 'id' | 'name' | 'releaseTiming' | 'opening' | 'brandId'>[]
   onChangeReleaseFolder: (seasonId: string | null) => Promise<void>
   price?: DraftPriceControls
@@ -1011,7 +1012,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   if (mode === 'card') {
     return <article className="draft-board-card" aria-label={`${draft.draftNo} ${name}`}>
       <header className="draft-board-card-grid bg-primary text-primary-foreground">
-        <span>BRAND</span><span>SAMPLE</span>
+        <span className="flex items-center gap-2">{rowPosition}BRAND</span><span>SAMPLE</span>
       </header>
       <div className="draft-board-card-grid">
         <div className="draft-board-card-brand">{brandContent}</div>
@@ -1140,6 +1141,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   }
 
   return <><tr className="draft-sheet-row">
+      {rowPosition && <td className="draft-row-position-cell">{rowPosition}</td>}
       {layout.map(({ id }) => {
         const cell = cells[id]
         return <Fragment key={id}>{id === lastVisibleColumn ? cloneElement(cell, {}, cell.props.children,
