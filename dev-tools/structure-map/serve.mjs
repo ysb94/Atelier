@@ -3,12 +3,12 @@ import path from 'node:path'
 import http from 'node:http'
 import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { build, root, toolDir, indexFile } from './build.mjs'
+import { build, root, indexFile, dataIndexFile, structureInputs } from './build.mjs'
 import { sourceFiles } from './analyze.mjs'
 
 export function inputFingerprint() {
   const hash = crypto.createHash('sha256')
-  const files = [...sourceFiles(root), ...['domains.json', 'analyze.mjs', 'labels.mjs', 'build.mjs'].map(f => path.relative(root, path.join(toolDir, f)))].sort()
+  const files = [...sourceFiles(root), ...structureInputs()].sort()
   for (const file of files) hash.update(file).update(fs.readFileSync(path.join(root, file)))
   return hash.digest('hex')
 }
@@ -26,7 +26,8 @@ export function startServer(port = 4318, watch = true) {
     console.warn('[structure-map] 첫 분석 실패; 기존 AI 목차 유지 후 코드 수정 감시', error)
     try {
       const aiIndex = fs.readFileSync(indexFile, 'utf8')
-      current = { fingerprint: 'cached', aiIndex }
+      const dataIndex = fs.existsSync(dataIndexFile) ? fs.readFileSync(dataIndexFile, 'utf8') : undefined
+      current = { fingerprint: 'cached', aiIndex, dataIndex }
     } catch {
       current = { fingerprint: 'unavailable', aiIndex: `# Atelier AI Code Index (unavailable)\n\n${refreshError}\n` }
     }
@@ -63,6 +64,9 @@ export function startServer(port = 4318, watch = true) {
     } else if (request.method === 'GET' && (address === '/' || address === '/ai-index.md')) {
       response.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8' })
       response.end(current.aiIndex)
+    } else if (request.method === 'GET' && address === '/data-index.md') {
+      response.writeHead(current.dataIndex ? 200 : 503, { 'Content-Type': 'text/markdown; charset=utf-8' })
+      response.end(current.dataIndex ?? '데이터 연결 목록을 아직 생성하지 못했습니다.')
     } else if (request.method === 'POST' && address === '/rebuild') {
       const ok = regenerate()
       response.writeHead(ok ? 200 : 500, { 'Content-Type': 'application/json' })

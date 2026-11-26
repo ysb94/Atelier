@@ -1,4 +1,4 @@
-import { listMeetingInvitations } from '@/lib/supabase/meetings'
+import { useCachedMeetingInvitations } from '@/features/meetings/use-meeting-notice-context'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/lib/supabase/auth'
@@ -174,13 +174,13 @@ export function useReadMyHomeNotification(source: 'meeting'|'request'|'checkout'
   const preview = usePagePreview()
   const active = useNotificationDetailVisibility()
   const cache = useQueryClient()
-  const meetingEvents=useQuery({queryKey:['meeting-invitations',profile?.id],queryFn:listMeetingInvitations,enabled:false})
+  const meetingEvents=useCachedMeetingInvitations()
   const completed = useRef<string|null>(null)
   const [error,setError] = useState<string|null>(null)
   const [retry,setRetry] = useState(0)
   useEffect(() => {
     if (!displayed || !active || preview?.active || !entityId || !version || !profile?.id) return
-    if(source==='meeting'&&!meetingEvents.data)return
+    if(source==='meeting'&&!meetingEvents)return
     const key = `${profile.id}:${source}:${entityId}:${version}`
     if (completed.current === key) return
     let cancelled = false
@@ -191,7 +191,7 @@ export function useReadMyHomeNotification(source: 'meeting'|'request'|'checkout'
       try {
         if (source === 'meeting') {
           // Match the exact event shown by the drawer, including host notices.
-          const data=meetingEvents.data ?? []
+          const data=meetingEvents ?? []
           for (const item of (data ?? []) as InboxNotification[]) {
             const url = new URL(item.href,'https://atelier.local')
             if (item.kind !== 'meeting_invitation' || url.searchParams.get('round') !== entityId || item.readAt || item.meeting?.scheduleVersion && String(item.meeting.scheduleVersion) !== version) continue
@@ -215,6 +215,6 @@ export function useReadMyHomeNotification(source: 'meeting'|'request'|'checkout'
     }
     void read()
     return () => { cancelled=true }
-  }, [active,cache,displayed,entityId,preview?.active,profile?.id,retry,source,version,meetingEvents.data])
+  }, [active,cache,displayed,entityId,preview?.active,profile?.id,retry,source,version,meetingEvents])
   return { error, retry: () => {completed.current=null;setRetry(value=>value+1)} }
 }

@@ -1,7 +1,28 @@
 import type { InboxNotification, MeetingNotice } from '@/lib/inbox/types'
 import type { MeetingSeries } from './meeting-schedule'
+import { meetingStartSchedule, type MeetingStartSchedule } from './meeting-start-reminders'
 
-function roundFromHref(href: string, series: readonly MeetingSeries[]) {
+type NoticeSeries = Pick<MeetingSeries, 'id' | 'status'> & {
+  rounds: { id: string; scheduleVersion: number; response: MeetingNotice['status']; finalized: boolean }[]
+}
+
+export type MeetingNoticeContext = { invitations: InboxNotification[]; series: NoticeSeries[]; starts: MeetingStartSchedule[] }
+
+/** Same projection for servers still serving the previous RPCs. */
+export function legacyMeetingNoticeContext(invitations: InboxNotification[], rows: MeetingSeries[], personId: string): MeetingNoticeContext {
+  return {
+    invitations, starts: meetingStartSchedule(rows, personId),
+    series: rows.map(s => ({
+      id: s.id, status: s.status, rounds: s.rounds.map(r => ({
+        id: r.id, scheduleVersion: r.scheduleVersion ?? 1,
+        response: r.responses?.find(p => p.profileId === personId)?.status ?? 'pending',
+        finalized: Boolean(r.manualConfirmation),
+      })),
+    })),
+  }
+}
+
+function roundFromHref(href: string, series: readonly NoticeSeries[]) {
   const url = new URL(href, 'https://atelier.local')
   const meetingId = url.searchParams.get('meeting')
   const roundId = url.searchParams.get('round')
@@ -12,25 +33,22 @@ function roundFromHref(href: string, series: readonly MeetingSeries[]) {
   return { item, round }
 }
 
-function memberNotice(item: InboxNotification, series: readonly MeetingSeries[], profileId: string): MeetingNotice | null {
+function memberNotice(item: InboxNotification, series: readonly NoticeSeries[]): MeetingNotice | null {
   if (item.kind !== 'meeting_invitation' || item.meeting?.role === 'host') return null
   const found = roundFromHref(item.href, series)
   if (!found) return null
-  const status = found.round.responses?.find((response) => response.profileId === profileId)?.status ?? 'pending'
   return {
     roundId: found.round.id,
-    scheduleVersion: found.round.scheduleVersion ?? 1,
-    status,
+    scheduleVersion: found.round.scheduleVersion,
+    status: found.round.response,
     role: 'member',
-    finalized: Boolean(found.round.manualConfirmation),
+    finalized: found.round.finalized,
   }
 }
 
-export function meetingNoticeItems(invitations: readonly InboxNotification[], series: readonly MeetingSeries[] | undefined, profileId: string | undefined): InboxNotification[] {
-  if (!profileId) return [...invitations]
-  const rows = series ?? []
+export function meetingNoticeItems(invitations: readonly InboxNotification[], series: readonly NoticeSeries[]): InboxNotification[] {
   const memberItems = invitations.map((item) => {
-    const meeting = memberNotice(item, rows, profileId)
+    const meeting = memberNotice(item, series)
     return meeting ? { ...item, meeting } : item
   })
   return [...new Map(memberItems.map(item => [item.id, item])).values()]

@@ -19,11 +19,14 @@ const source = {
     import {MeetingStartReminder} from '/src/features/meetings/MeetingStartReminder.tsx'; import '/src/index.css';
     window.fixture={profile:{id:'member',companyId:'company',status:'active'},rows:[${JSON.stringify(initial)}],calls:0};
     const client=new QueryClient({defaultOptions:{queries:{retry:false,staleTime:30000,refetchOnWindowFocus:false}}});
-    window.changeFixture=async patch=>{Object.assign(window.fixture,patch);window.dispatchEvent(new Event('fixture'));await client.invalidateQueries({queryKey:['company-meetings']});};
+    window.changeFixture=async patch=>{Object.assign(window.fixture,patch);window.dispatchEvent(new Event('fixture'));await client.invalidateQueries({queryKey:['meeting-invitations']});};
     createRoot(document.getElementById('root')).render(<QueryClientProvider client={client}><BrowserRouter><main>다른 업무 화면</main><MeetingStartReminder/></BrowserRouter></QueryClientProvider>);`,
   auth: `import {useSyncExternalStore} from 'react'; const subscribe=fn=>{window.addEventListener('fixture',fn);return()=>window.removeEventListener('fixture',fn)}; export function useAuth(){const profile=useSyncExternalStore(subscribe,()=>window.fixture.profile);return {profile}}`,
   attendance: `export const useAttendanceEntry=()=>null;`,
-  api: `export async function listCompanyMeetings(){window.fixture.calls++;return structuredClone(window.fixture.rows)};export async function listMeetingRooms(){return [{id:'room-1',name:'대회의실'},{id:'room-2',name:'소회의실'}]}`,
+  api: `import {legacyMeetingNoticeContext} from '/src/features/meetings/meeting-notices.ts';
+    export async function listCompanyMeetings(){throw Error('Unexpected full meeting read')};
+    export async function listMeetingNoticeContext(person){window.fixture.calls++;if(window.fixture.failed)throw Error('timeout');return legacyMeetingNoticeContext([],structuredClone(window.fixture.rows),person)};
+    export async function listMeetingRooms(){return [{id:'room-1',name:'대회의실'},{id:'room-2',name:'소회의실'}]}`,
 }
 const virtual = name => path.join(root, `__meeting-reminder-${name}.tsx`).replaceAll('\\', '/')
 const server = await createServer({ root, configFile: false, envFile: false, logLevel: 'error',
@@ -77,6 +80,10 @@ try {
   await panel.getByText('30분 후 시작 · 내 역할: 멤버', { exact: true }).waitFor()
   await panel.getByText('2030-01-08 10:00 (한국 시간)', { exact: true }).waitFor()
   await panel.getByText('대회의실', { exact: true }).waitFor()
+  await page.evaluate(() => window.changeFixture({ failed: true }))
+  await waitHidden()
+  await page.evaluate(() => window.changeFixture({ failed: false }))
+  await panel.waitFor()
   await page.reload()
   await panel.waitFor()
   await panel.getByRole('button', { name: '확인', exact: true }).click()

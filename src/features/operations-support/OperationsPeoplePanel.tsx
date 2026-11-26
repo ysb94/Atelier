@@ -4,7 +4,7 @@ import { OrgChartPage } from '@/features/org/OrgChartPage'
 import { MembersPage } from '@/features/settings/MembersPage'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
-import { canViewPeopleMembers, canViewPeopleOrg } from './operations-support-sections'
+import { canViewPeopleMembers, canViewPeopleOrg, OVERTIME_ROSTER_EMPLOYEE_PARAM } from './operations-support-sections'
 
 type PeopleView = 'org' | 'members'
 
@@ -24,6 +24,7 @@ export function OperationsPeoplePanel() {
       if (next === 'org') nextParams.delete('peopleView')
       else nextParams.set('peopleView', next)
       nextParams.delete('orgView')
+      nextParams.delete(OVERTIME_ROSTER_EMPLOYEE_PARAM)
       return nextParams
     }, { replace: true })
   }

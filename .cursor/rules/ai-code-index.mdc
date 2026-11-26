@@ -14,5 +14,7 @@ alwaysApply: true
    - `ai-index.md`에 표시된 `파일경로 (총줄수)`와 `exp: 심볼명:줄번호`, `db: 테이블/RPC@L줄번호`를 보고 해당 파일의 필요한 줄 구간만 `Read`한다.
    - `dev-tools/structure-map/generated/structure.json` 전체를 통째로 읽거나 출력하지 않는다.
 3. **코드 변경 후 목차 최신화**:
-   - `npm run dev` 실행 중에는 감시 프로세스가 2초마다 `ai-index.md`와 `structure.json`을 자동 갱신한다.
+   - `npm run dev` 실행 중에는 감시 프로세스가 `ai-index.md`, `structure.json`, `data-index.md`를 자동 갱신한다.
    - 감시 프로세스가 꺼져 있거나 파일/심볼/라우트 변경 후 즉시 목차를 갱신해야 하면 `npm run structure:map`을 실행한다.
+4. **데이터 연결 변경 기록**
+   - `AGENTS.md`의 데이터 연결 기록 규칙에 따라 기준·수정·반영·별도 저장 이유를 코드와 같은 커밋에서 갱신하고 `npm run verify:data-map`을 실행한다.

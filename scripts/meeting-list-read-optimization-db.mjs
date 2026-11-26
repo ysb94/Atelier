@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { verifyMeetingNoticeContext } from './meeting-notice-context-db.mjs'
 
 // Run after the existing DB scenarios. Their meetings include manual decisions,
 // different kinds, historical invites, unpublished rounds, files and shared results.
@@ -148,4 +149,5 @@ export async function verifyMeetingListReadOptimization(db, { company, host, mem
     rounds: before.host.meetings.reduce((total, s) => total + s.rounds.length, 0),
     before: summary(times.before), after: summary(times.after)
   }))
+  await verifyMeetingNoticeContext(db, actor, users)
 }

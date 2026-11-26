@@ -4,6 +4,7 @@ import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activ
 import { listCompanyMeetings } from '@/lib/supabase/meetings'
 import { listLeaveRequests } from '@/lib/supabase/leave-requests'
 import { useAuth } from '@/lib/supabase/auth'
+import { sharedReadPolicy } from '@/lib/query/shared-read-policy'
 import { emptyList } from '@/lib/utils'
 import type { MeetingSeries } from '@/features/meetings/meeting-schedule'
 import type { PersonalRequest } from '@/features/settings/personal-requests'
@@ -16,8 +17,9 @@ export function useHomeCalendarEvents(month: string) {
   const allowed = profile?.status === 'active' && Boolean(userId)
   const window = useMemo(() => homeCalendarWindow(month), [month])
   const meetings = useQuery({
-    queryKey: ['home-my-meetings', userId, profile?.companyId],
+    queryKey: ['company-meetings', userId, profile?.companyId],
     queryFn: listCompanyMeetings,
+    ...sharedReadPolicy,
     enabled: allowed && active,
   })
   const leaves = useQuery({

@@ -14,15 +14,17 @@ export const PERSONAL_WORK_FEEDBACK_PARAM = 'personalWorkFeedback'
 export const personalWorkFeedbackKey = (actor?: string) => ['personal-work-feedback-notices', actor] as const
 export const personalWorkCardsKey = (actor?: string) => ['personal-work-cards', actor] as const
 const detailKey = (actor?: string, id?: string) => [...personalWorkFeedbackKey(actor), 'detail', id] as const
-const columns = 'id,card_id,card_revision,round,title,note,requester_name,created_at,read_at,resolved_at'
+const listColumns = 'id,card_id,round,title,requester_name,created_at,read_at,resolved_at'
+const detailColumns = `${listColumns},card_revision,note`
 
 export type PersonalWorkFeedbackNotice = {
   id: string; card_id: string; card_revision: number; round: number; title: string; note: string | null
   requester_name: string; created_at: string; read_at: string | null; resolved_at: string | null
 }
-type NoticeList = { available: boolean; rows: PersonalWorkFeedbackNotice[] }
+type FeedbackNoticeSummary = Omit<PersonalWorkFeedbackNotice, 'card_revision' | 'note'>
+type NoticeList = { available: boolean; rows: FeedbackNoticeSummary[] }
 
-export function personalWorkFeedbackNoticeItem(notice: PersonalWorkFeedbackNotice): InboxNotification {
+export function personalWorkFeedbackNoticeItem(notice: FeedbackNoticeSummary): InboxNotification {
   const href = `/settings/profile?part=my-work&${PERSONAL_WORK_FEEDBACK_PARAM}=${encodeURIComponent(notice.id)}`
   return {
     id: notice.id, kind: 'personal_work_feedback', title: notice.title,
@@ -35,8 +37,8 @@ export function personalWorkFeedbackNoticeItem(notice: PersonalWorkFeedbackNotic
 
 async function listNotices(actor: string, signal: AbortSignal): Promise<NoticeList> {
   try {
-    const rows = await diagnosticQuery<PersonalWorkFeedbackNotice[]>('notification', 'list_personal_work_feedback',
-      getSupabase().from('personal_work_feedback_notices').select(columns).eq('recipient_id', actor)
+    const rows = await diagnosticQuery<FeedbackNoticeSummary[]>('notification', 'list_personal_work_feedback',
+      getSupabase().from('personal_work_feedback_notices').select(listColumns).eq('recipient_id', actor)
         .order('resolved_at', { ascending: false, nullsFirst: true }).order('created_at', { ascending: false })
         .limit(100).abortSignal(signal))
     return { available: true, rows }
@@ -82,7 +84,7 @@ export function usePersonalWorkFeedbackNoticeDetail(actor: string | undefined, i
   return useQuery({
     queryKey: detailKey(actor, id), enabled: Boolean(actor && validId && active), retry: false, staleTime: 0,
     queryFn: ({ signal }) => diagnosticQuery<PersonalWorkFeedbackNotice | null>('notification', 'get_personal_work_feedback',
-      getSupabase().from('personal_work_feedback_notices').select(columns).eq('id', id!)
+      getSupabase().from('personal_work_feedback_notices').select(detailColumns).eq('id', id!)
         .eq('recipient_id', actor!).abortSignal(signal).maybeSingle()),
   })
 }

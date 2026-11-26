@@ -13,7 +13,8 @@ import { colorSampleLabel, sampleOrderLabel } from '@/lib/drafts/sample-registra
 import { sampleElapsedDays, sampleTripSpanDays } from '@/lib/drafts/sample-work-order'
 import { cn, formatNumber } from '@/lib/utils'
 import { checkMyChinaWorkOrder, getMyChinaWorkOrderFile, shipMyChinaWorkOrder, type AssignedChinaOrder } from '@/lib/supabase/china-assigned-work-orders'
-import { downloadSamplePack, receiveSamplePack } from '@/lib/supabase/sample-work-order-packs'
+import { receiveSamplePack } from '@/lib/supabase/sample-work-order-packs'
+import { useSamplePackDownload } from '@/features/drafts/useSamplePackDownload'
 import { ChinaMaterialRequests } from './ChinaMaterialRequests'
 import { useMaterialRequests } from '@/features/planning/useMaterialRequests'
 import { workerMaterialGroups } from './china-material-workload'
@@ -44,6 +45,7 @@ export function ChinaAssignedWorkOrders({ orders, brandById, accountId }: {
   const [tab, setTab] = useState<(typeof workTabs)[number]['value']>('orders')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const bulk = useSamplePackDownload()
   const materials = useMaterialRequests('china', { refreshMs: 30_000 })
   const materialGroups = workerMaterialGroups(materials.requests, accountId)
   const materialOpen = materialGroups.filter(({ rounds }) => rounds.some(round => !round.shippedAt)).length
@@ -66,7 +68,8 @@ export function ChinaAssignedWorkOrders({ orders, brandById, accountId }: {
     try {
       if (action === 'download') {
         if (order.packId) {
-          await trace.run('get_file', () => downloadSamplePack(order.packId!, `${order.draftNo} ${order.fileName || '작업지시서'}`))
+          const saved = await trace.run('get_file', () => bulk.download(order.packId!, `${order.draftNo} ${order.fileName || '작업지시서'}`))
+          if (!saved) { trace.done({ writeOutcome: 'none' }); return }
         } else {
           const url = await trace.run('get_file', () => getMyChinaWorkOrderFile(order))
           const link = document.createElement('a')
@@ -117,6 +120,7 @@ export function ChinaAssignedWorkOrders({ orders, brandById, accountId }: {
       })} value={tab} onChange={setTab} ariaLabel="중국팀 업무" variant="underline" size="large" className="flex-1" />
     </div>
     {error && <p role="alert" className="mb-3 text-sm text-danger">{error}</p>}
+    {bulk.dialog}
     {tab === 'orders' ? <Card className="overflow-x-auto">
       <table className="w-full min-w-[820px] table-fixed border-collapse text-sm">
         <colgroup><col className="w-[30%]" /><col className="w-[22%]" /><col className="w-[48%]" /></colgroup>
