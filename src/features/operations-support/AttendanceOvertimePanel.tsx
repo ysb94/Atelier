@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { InfoNote } from '@/components/ui/info-note'
 import { departmentScopeCards, inDepartmentScope } from '@/components/ui/scope-cards'
-import { memberLabel, MemberCell } from './OpsStat'
+import { memberLabel } from './OpsStat'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { canAccessOperationsSupport } from '@/lib/company/capabilities'
 import { readPollInterval, sharedReadPolicy } from '@/lib/query/shared-read-policy'
@@ -176,7 +176,7 @@ export function AttendanceOvertimePanel({ directory, schedules }: { directory: R
         const allowanceLink = row.threshold == null && allowanceStatus === '미등록' && canOpenRoster
           ? <Link to={overtimeRosterHref(row.employeeId)} className="font-medium text-primary underline underline-offset-2" title={`${row.name} 약정 연장근로시간 입력으로 이동`}>미등록·확인 필요</Link>
           : allowanceStatus
-        return <Fragment key={row.employeeId}><tr className={`border-t border-border ${open ? 'bg-muted/40' : ''}`}><td className="px-3 py-2"><MemberCell name={row.name} /></td><td className="px-3 py-2">{row.team}</td><td className="px-3 py-2">{row.count}건</td><td className="px-3 py-2">{workDurationLabel(row.approved)}</td><td className="px-3 py-2 font-semibold">{workDurationLabel(row.minutes)}</td><td className="px-3 py-2 font-semibold">{unrequestedBusy ? '조회 중…' : unrequested ? workDurationLabel(row.unrequestedMinutes) : '—'}</td>
+        return <Fragment key={row.employeeId}><tr className={`border-t border-border ${open ? 'bg-muted/40' : ''}`}><td className="px-3 py-2">{row.name}</td><td className="px-3 py-2">{row.team}</td><td className="px-3 py-2">{row.count}건</td><td className="px-3 py-2">{workDurationLabel(row.approved)}</td><td className="px-3 py-2 font-semibold">{workDurationLabel(row.minutes)}</td><td className="px-3 py-2 font-semibold">{unrequestedBusy ? '조회 중…' : unrequested ? workDurationLabel(row.unrequestedMinutes) : '—'}</td>
           <td className="px-3 py-2"><AllowanceComparison minutes={row.minutes} threshold={row.threshold} allowancePlaceholder={allowanceLink} /></td>
           <td className="px-3 py-2"><AllowanceComparison minutes={row.combinedMinutes} threshold={row.threshold} allowancePlaceholder={allowanceStatus} workPlaceholder={unrequestedBusy ? '조회 중…' : '—'} /></td>
           <td className="px-3 py-2">{row.excessMinutes == null ? '—' : workDurationLabel(row.excessMinutes)}</td><td className="px-3 py-2"><Button size="sm" variant="outline" aria-expanded={open} onClick={() => setSelected(open ? null : row.employeeId)}>{open ? '입력 내역 닫기' : '입력 내역'}</Button></td></tr>

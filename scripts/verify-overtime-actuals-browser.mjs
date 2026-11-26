@@ -65,6 +65,7 @@ await page.getByRole('button',{name:'테스트 퇴근 무르기',exact:true}).cl
 await page.getByRole('button',{name:'테스트 퇴근',exact:true}).click()
 await page.getByRole('button',{name:'관리 야근',exact:true}).click();await page.getByRole('cell',{name:'실제 입력 직원',exact:true}).waitFor();assert.equal(await page.getByRole('cell',{name:'미입력 직원',exact:true}).count(),0);assert.equal(await page.getByRole('cell',{name:'미승인 직원',exact:true}).count(),0);assert.equal(await page.getByRole('cell',{name:'외근 직원',exact:true}).count(),0)
 const row=page.getByRole('row').filter({has:page.getByRole('cell',{name:'실제 입력 직원',exact:true})});assert.deepEqual(await row.getByRole('cell').allTextContents(),['실제 입력 직원','디자인','1건','4시간','5시간','0분','5시간 / 1시간','5시간 / 1시간','4시간','입력 내역'])
+assert.equal(await row.getByRole('cell',{name:'실제 입력 직원',exact:true}).evaluate(cell=>cell.childElementCount),0)
 await page.getByRole('button',{name:'입력 내역',exact:true}).click();await page.getByRole('cell',{name:'18:00–23:00',exact:true}).waitFor();await page.screenshot({path:path.join(dir,'overtime.png'),fullPage:true})
 await page.getByRole('button',{name:'관리 외근',exact:true}).click();await page.getByRole('cell',{name:'외근 직원',exact:true}).waitFor();await page.getByRole('cell',{name:'거래처',exact:true}).waitFor();
 await page.evaluate(()=>window.__holidayCredits=true)
