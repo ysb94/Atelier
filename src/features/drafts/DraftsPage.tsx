@@ -511,6 +511,7 @@ function CompanyDraftsContent() {
         brandCards={brandCards}
         unassignedScopeCounts={unassignedScopeCounts}
         onSelect={setBrandScope}
+        showUnassigned
         unassignedFirst
       />
 
