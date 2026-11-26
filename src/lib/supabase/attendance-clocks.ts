@@ -41,7 +41,7 @@ export async function listCompanyDeferredClockOuts(): Promise<CompanyDeferredClo
     autoClosedAt: row.auto_closed_at, workConfirmedAt: row.work_confirmed_at,
   }] : [])
 }
-export type CompanyAttendanceSpan = CompanyAttendanceClock & { clockOutAt: string | null }
+export type CompanyAttendanceSpan = CompanyAttendanceClock & { clockOutAt: string | null; clockOutSource?: string | null }
 type SpanRow = { employee_id: string; work_date: string; clock_in: string; clock_out_at: string | null }
 export async function listCompanyAttendanceSpans(month: string): Promise<CompanyAttendanceSpan[]> {
   const dates = attendanceMonthDates(month)
@@ -50,7 +50,7 @@ export async function listCompanyAttendanceSpans(month: string): Promise<Company
       .order('work_date', { ascending: false }).order('employee_id').range(from, to)
     return { data: result.data as EffectiveClockRow[] | null, error: result.error }
   })
-  if (!effective.error) return effective.rows.map(row => ({ employeeId: row.employee_id, date: row.work_date, clockIn: row.clock_in.slice(0, 5), clockOutAt: row.clock_out_at, clockInSource: row.clock_in_source ?? null }))
+  if (!effective.error) return effective.rows.map(row => ({ employeeId: row.employee_id, date: row.work_date, clockIn: row.clock_in.slice(0, 5), clockOutAt: row.clock_out_at, clockInSource: row.clock_in_source ?? null, clockOutSource: row.clock_out_source ?? null }))
   if (!missingEffectiveRpc(effective.error)) { console.warn('[attendance-clock] 유효 회사 근무시간 조회 실패', { month, error: effective.error }); throw new Error(effective.error.message) }
   console.warn('[attendance-clock] 외근 출퇴근 연결 대기: 기존 회사 기록을 표시합니다.', { month })
   const fallback = await fetchAttendancePages<SpanRow>(async (from, to) => {

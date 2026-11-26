@@ -44,6 +44,7 @@ try {
   const body = await transport(`${origin}/rest/v1/slow-body`)
   await assert.rejects(body.json(), isSupabaseReadTimeout)
   await assert.rejects(transport(`${origin}/rest/v1/rpc/is_my_attendance_exempt`, { method: 'POST', body: '{}' }), isSupabaseReadTimeout)
+  await assert.rejects(transport(`${origin}/rest/v1/rpc/list_my_meeting_notice_context`, { method: 'POST', body: '{}' }), isSupabaseReadTimeout)
   await assert.rejects(transport(`${origin}/auth/v1/token`, { method: 'POST', body: '{}' }), isSupabaseReadTimeout)
   assert.equal(hits.get('/rest/v1/stalled'), 1)
   assert.equal(hits.get('/rest/v1/rpc/is_my_attendance_exempt'), 1)
@@ -70,7 +71,7 @@ try {
     assert.equal(response.status, 200)
     assert.ok(await response.json())
   }
-  assert.equal(warnings.length, 4, 'success, caller cancellation and writes leave no delayed timeout warnings')
+  assert.equal(warnings.length, 5, 'success, caller cancellation and writes leave no delayed timeout warnings')
 
   // Exercise the actual app factory: SDK GET retry must be disabled there.
   const clientFile = path.join(dir, 'client.mjs')

@@ -4,7 +4,8 @@ import type { DraftSampleWorkOrder } from '@/lib/types'
 import { sampleElapsedDays, sampleHistoryDay, sampleTripSpanDays } from '@/lib/drafts/sample-work-order'
 import { CHINA_EXTERNAL_DESTINATION, canReceiveSample, sampleCountry, sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
 import { colorSampleLabel, sampleOrderLabel } from '@/lib/drafts/sample-registration'
-import { downloadSamplePack, samplePackId } from '@/lib/supabase/sample-work-order-packs'
+import { samplePackId } from '@/lib/supabase/sample-work-order-packs'
+import { useSamplePackDownload } from './useSamplePackDownload'
 import './draft-sample-progress.css'
 
 type WorkOrderFile = { url: string; name: string }
@@ -24,6 +25,7 @@ type Props = {
 export function DraftSampleProgress({ orders, kind = 'sample', joined = false, originCountry, readOnly = false, saving = false, onReceive, onOpen }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const bulk = useSamplePackDownload()
   const pending = useRef(false)
   const list = orders.filter(order => order.url?.trim()).slice().sort((a, b) => a.round - b.round)
   const latest = list.at(-1)
@@ -45,7 +47,7 @@ export function DraftSampleProgress({ orders, kind = 'sample', joined = false, o
     pending.current = true
     setBusy(true)
     setError('')
-    try { await downloadSamplePack(id, label) }
+    try { await bulk.download(id, label) }
     catch (cause) { setError(cause instanceof Error ? cause.message : '작업지시서를 받지 못했습니다.') }
     finally { pending.current = false; setBusy(false) }
   }
@@ -100,5 +102,6 @@ export function DraftSampleProgress({ orders, kind = 'sample', joined = false, o
       </section>
     })}
     {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+    {bulk.dialog}
   </div>
 }

@@ -33,6 +33,7 @@
 ## 작업별 참고 문서
 
 - 코드 목차를 갱신하거나 구조도를 프로그램에서 사용할 때는 [코드 탐색](docs/architecture/AI_WORK_REFERENCE.md#코드-탐색)을 읽는다.
+- 데이터 조회·저장·동기화·복제 경로를 추가하거나 바꿀 때는 [데이터 연결 기록](docs/architecture/AI_WORK_REFERENCE.md#데이터-연결-기록)을 확인한다. 기준값, 수정 경로, 반영 대상, 별도 저장값과 이유를 근거와 함께 `docs/architecture/data-flows.json`의 관련 항목에 기록한다. 코드와 같은 커밋에 포함하고 `npm run verify:data-map`을 실행한다.
 - UI를 수정할 때는 [화면 디자인](docs/architecture/AI_WORK_REFERENCE.md#화면-디자인)을 읽고 기존 공용 부품과 색상 토큰을 사용한다.
 - 렉·렌더링·새 DB 연결을 다룰 때는 [성능과 진단](docs/architecture/AI_WORK_REFERENCE.md#성능과-진단)과 해당 검증 절차를 따른다.
 

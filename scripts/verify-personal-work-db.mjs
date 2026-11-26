@@ -193,10 +193,45 @@ try {
   assert.equal(messages.filter(message => message.author_id === ids.owner).length, 3)
   assert.deepEqual(messages.filter(message => message.author_id === ids.worker).map(message => message.id), [legacyCommand])
   assert.ok(messages.some(message => message.body.includes('수정할 내용')))
+  await verifyFeedbackListProjection(assigned)
   console.log('내 업무 DB 검증 통과: 배정, 차수 전환, 피드백 알림, 권한, 읽음과 처리 상태 분리, 재시도')
 } catch (error) {
   console.error(error.message, error.code ?? '', error.where ?? '')
   process.exitCode = 1
 } finally {
   await db.close()
+}
+
+async function verifyFeedbackListProjection(cardId) {
+  await db.exec('begin')
+  const summaryColumns = 'id,card_id,round,title,requester_name,created_at,read_at,resolved_at'
+  const allColumns = summaryColumns + ',card_revision,note'
+  // A batch of handovers can give several unresolved notices the same created_at.
+  // Include such rows at the 100th position, and mix recipients in physical order.
+  await db.query(`insert into public.personal_work_feedback_notices
+    (id,company_id,recipient_id,card_id,card_revision,round,title,note,requester_name,created_at,resolved_at)
+    select gen_random_uuid(), $1, case when i<=1000 then $2::uuid else $3::uuid end,
+      $4, i+1000, i, '테스트 업무', repeat('시안에서 요청한 수정 사항을 확인해 주세요. ',8), '검수',
+      case when i<=95 then timestamptz '2026-11-30 10:00Z'+i*interval '1 second'
+           when i<=115 then timestamptz '2026-11-27 09:00Z'
+           else timestamptz '2026-01-01'+make_interval(secs=>i) end,
+      case when i>115 then timestamptz '2026-09-01'+make_interval(secs=>i) end
+    from generate_series(1,6000) i order by (i*3899)%6007`, [ids.company, ids.owner, ids.worker, cardId])
+  await db.exec('analyze public.personal_work_feedback_notices')
+  await actor(ids.owner)
+  const from = `from public.personal_work_feedback_notices where recipient_id=$1
+    order by resolved_at desc nulls first,created_at desc limit 100`
+  const full = (await db.query('select '+allColumns+' '+from,[ids.owner])).rows
+  const summary = (await db.query('select '+summaryColumns+' '+from,[ids.owner])).rows
+  assert.equal(full.length, 100)
+  assert.deepEqual(summary, full.map(({ note,card_revision,...row }) => row))
+  const detail = await db.query('select '+allColumns+' from public.personal_work_feedback_notices where id=$1 and recipient_id=$2',
+    [summary[0].id,ids.owner])
+  assert.deepEqual(detail.rows, [full[0]], 'detail restores original note and submission revision on demand')
+  await actor(ids.worker)
+  assert.equal((await db.query('select id '+from,[ids.owner])).rows.length, 0, 'another recipient cannot read the summary')
+  console.log('Personal feedback 100-row JSON bytes', {
+    before: Buffer.byteLength(JSON.stringify(full)), after: Buffer.byteLength(JSON.stringify(summary)),
+  })
+  await db.exec('reset role;rollback')
 }

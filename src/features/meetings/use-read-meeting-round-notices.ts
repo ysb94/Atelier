@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { useNotificationDetailVisibility } from '@/lib/inbox/use-notification-visibility'
 import { useAuth } from '@/lib/supabase/auth'
-import { listMeetingInvitations, readMeetingRoundNotice } from '@/lib/supabase/meetings'
+import { readMeetingRoundNotice } from '@/lib/supabase/meetings'
+import { useCachedMeetingInvitations } from './use-meeting-notice-context'
 import type { MeetingRound } from './meeting-schedule'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 
@@ -10,17 +11,17 @@ export function useReadMeetingRoundNotices(round: MeetingRound, enabled: boolean
   const active = useNotificationDetailVisibility()
   const { profile } = useAuth()
   const cache = useQueryClient()
-  const invitations = useQuery({ queryKey: ['meeting-invitations', profile?.id], queryFn: listMeetingInvitations, enabled: false })
+  const invitations = useCachedMeetingInvitations()
   const [error, setError] = useState<string | null>(null)
   const [retry, setRetry] = useState(0)
   useEffect(() => {
-    if (!active || !enabled || !profile?.id || !invitations.data || round.detailAccess === 'none' || document.visibilityState !== 'visible') return
+    if (!active || !enabled || !profile?.id || !invitations || round.detailAccess === 'none' || document.visibilityState !== 'visible') return
     let cancelled = false
     async function read() {
       const trace=startWorkflow('notification','read_meeting_result')
       trace.step('match_displayed_version')
       try {
-        const notices = invitations.data ?? []
+        const notices = invitations ?? []
         let changed = false
         for (const notice of notices) {
           if (cancelled || notice.readAt || !['meeting_result', 'meeting_removed'].includes(notice.kind)) continue
@@ -41,6 +42,6 @@ export function useReadMeetingRoundNotices(round: MeetingRound, enabled: boolean
     }
     void read()
     return () => { cancelled = true }
-  }, [active, enabled, profile?.id, round.id, round.detailAccess, round.sharedResults, invitations.data, cache, retry])
+  }, [active, enabled, profile?.id, round.id, round.detailAccess, round.sharedResults, invitations, cache, retry])
   return { error, retry: () => setRetry(value => value + 1) }
 }

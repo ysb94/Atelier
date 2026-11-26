@@ -1317,6 +1317,67 @@ try {
     where set_id='${activeId()}' and box_qr=${quote(reviewQr)} and normalized_style_no='M1234'
       and units_per_box=14 and remaining_boxes=1;`), '1')
   console.log('PASS: real Finder QR photo and Atelier review leave the box unplaced until the next scan; retry keeps a single reviewed box')
+
+  query(atelierSql('20261125170952_finder_qr_placement_review_manual_product'))
+  const manualQr = 'FIXTURE-EXISTING-MANUAL-QR'
+  const manualAa = 'manual-existing-verified-aa'
+  const manualReviewId = randomUUID()
+  const manualRow = { ...row(manualAa, manualQr, '2-1-1'), style_id: null,
+    source_style_no: '', normalized_style_no: '', source_product_name: '포장재',
+    units_per_box: 500, units_per_box_raw: '500', quantity_status: 'known' }
+  query(asService + sheet([...refreshed(), manualRow], 'clock_timestamp()'))
+  const manualMove = { mode: 'place', place: '2-1-3', qr: manualQr,
+    backgroundJobId: randomUUID() + ':0' }
+  const needsReview = lookup(manualQr, manualMove.place).box
+  assert.equal(needsReview.needsPhotoReview, true)
+  const request = { ...manualMove, jobId: manualReviewId, sourceToken: needsReview.placementReviewToken }
+  const manualPhotoPath = `${brand}/${actor}/${manualReviewId}/${manualReviewId}.jpg`
+  query(asReader + `insert into storage.objects(bucket_id,name) values ('warehouse-qr-audit',${quote(manualPhotoPath)});`)
+  assert.equal(JSON.parse(query(asService + `select public.run_finder_placement_review_background(
+    '${brand}','${actor}','save',${json(request)});`)).pendingReview, true)
+  query(atelierSql('20261125172809_finder_qr_placement_review_label_date'))
+  const queuedManual = unplacedQueue().items.find(item => item.external_row_id === manualReviewId)
+  assert.equal(queuedManual?.label_date, '2026-11-13', 'pending reviews keep their original source identity')
+  const confirmation = { rowId: manualReviewId, name: ' 부직포 ', units: 500,
+    date: '2026-11-14', previousDate: queuedManual.label_date }
+  query(manualReview('link_placement_review', { ...confirmation, date: '2026-02-30' }), '22008')
+  query(manualReview('link_placement_review', { ...confirmation, previousDate: '2026-11-12' }), '40001')
+  for (const invalid of ['', 'M1234']) {
+    query(manualReview('link_placement_review', { ...confirmation, name: invalid }), '22023')
+  }
+  query(manualReview('link_placement_review', { ...confirmation, styleId: randomUUID() }), '22023')
+  const confirmManual = () => JSON.parse(query(manualReview('link_placement_review', confirmation)))
+  const manualResult = { number: '', productName: '부직포' }
+  assert.deepEqual(confirmManual(), manualResult)
+  assert.deepEqual(confirmManual(), manualResult)
+  query(manualReview('link_placement_review', { ...confirmation, name: '다른 이름' }), '22023')
+  query(manualReview('link_placement_review', { ...confirmation, date: '2026-11-15' }), '22023')
+  assert.equal(readPosition(manualAa).place, '2-1-1', 'photo review only confirms the existing AA')
+  assert.equal(lookup(manualQr, manualMove.place).box.needsPhotoReview, undefined)
+  const beforeMoveCount = query(`select count(*) from app.warehouse_qr_audit_sheet_exports
+    where brand_id='${brand}' and stock_request->>'qr'=${quote(manualQr)};`)
+  assert.equal(beforeMoveCount, '1', 'retries do not duplicate the review export')
+  const movedManual = JSON.parse(query(asService + backgroundMove('prepare', manualMove)))
+  assert.equal(movedManual.status, 'saved')
+  assert.equal(movedManual.sheetPending, true)
+  assert.equal(JSON.parse(query(asService + backgroundMove('prepare', manualMove))).operationId, movedManual.operationId)
+  assert.equal(JSON.parse(query(asService + backgroundMove('prepare', {
+    ...manualMove, backgroundJobId: randomUUID() + ':0',
+  }))).status, 'already_registered')
+  const manualStock = readPosition(manualAa)
+  assert.equal(manualStock.place, manualMove.place)
+  assert.equal(manualStock.box_qr, manualQr)
+  assert.equal(manualStock.style_id, null)
+  assert.equal(manualStock.units_per_box, 500)
+  assert.equal(manualStock.received_on, '2026-11-14')
+  assert.equal(query(`select count(*) from public.warehouse_boxes where brand_id='${brand}'
+    and display_code=${quote(manualQr)};`), '0', 'name-only stock uses the shared AA and no fictitious SKU')
+  const manualExport = JSON.parse(query(`select after_rows from app.warehouse_qr_audit_sheet_exports
+    where id='${movedManual.operationId}';`))
+  assert.equal(manualExport[0].id, manualAa)
+  assert.equal(manualExport[0].qr, manualQr)
+  assert.deepEqual(manualExport[0].values.slice(0, 6), ['', '부직포', manualMove.place, '261114', '500', '1'])
+  console.log('PASS: pending name-only QR review prefills and saves the date, rejects stale dates, and moves the same AA row once')
 } finally {
   if (started) command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore' })
   assert.equal(path.dirname(fixture), tempRoot)

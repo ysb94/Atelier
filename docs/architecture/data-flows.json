@@ -1,0 +1,578 @@
+[
+  {
+    "id": "sku-identity",
+    "label": "M번호, SKU, 상품명",
+    "origin": "전체 상품의 현재 품번은 styles.style_no, 이름은 styles.name. 색상·사이즈별 SKU이며 연결 키는 브랜드와 SKU UUID다.",
+    "write": "전체 상품 편집과 승인된 상품 일괄 반영은 styles를 사용한다.",
+    "propagation": "상품 목록·상세는 현재 SKU를 읽는다. 창고 원본 표기와 송장 매핑은 각각의 연결 규칙을 확인한다.",
+    "copies": "창고 원본 행의 source_style_no·source_product_name과 해석된 normalized_style_no·style_id를 보관한다.",
+    "reason": "원본 시트 값과 매칭 결과를 따로 보존해 빈 품번과 중복 후보를 검수한다.",
+    "resources": [
+      "table:public.styles",
+      "table:public.warehouse_stock_positions"
+    ],
+    "evidence": [
+      "docs/architecture/INVENTORY.md",
+      "src/lib/supabase/styles.ts",
+      "src/lib/warehouse/stock.ts"
+    ]
+  },
+  {
+    "id": "brand-fields",
+    "label": "브랜드 사용자 항목, 선택지, 엑셀 양식",
+    "origin": "brand_fields와 brand_field_options가 브랜드별 항목·선택지 정의다. 실제 상품 입력값은 styles.values[field.id]에 있다.",
+    "write": "항목 관리에서 정의를 바꾸고 save_brand_field_options로 선택지를 저장한다. 상품 입력·일괄 반영은 SKU 값을 수정한다.",
+    "propagation": "상품 입력 화면과 엑셀 양식은 같은 브랜드별 정의를 참조한다.",
+    "copies": "상품에는 정규 선택명 문자열을 보관한다. 이전 custom_fields 표시명 키는 기존 값의 읽기 경로에 남는다.",
+    "reason": "기존 상품과 엑셀 호환을 유지하면서 새 항목은 고정 ID로 식별한다.",
+    "resources": [
+      "table:public.brand_fields",
+      "table:public.brand_field_options",
+      "table:public.styles",
+      "rpc:public.save_brand_field_options"
+    ],
+    "evidence": [
+      "docs/architecture/SUPABASE.md"
+    ]
+  },
+  {
+    "id": "product-image",
+    "label": "상품 대표 이미지, 물류 이미지, Cloudflare R2",
+    "origin": "원본 이미지 파일은 R2 CDN에 있다. 상품 행의 styles.values에는 직접 입력한 이미지 주소를 담을 수 있다.",
+    "write": "업로드가 파일을 저장하고 상품에서 직접 주소를 입력한다. 시스템 이미지 주소 규칙은 IMAGE_RULES에서 편집한다.",
+    "propagation": "상품 화면은 직접 지정 주소를 우선하고, 값이 없으면 시스템 키의 품번 기반 주소 규칙을 사용한다.",
+    "copies": "이미지 주소만 SKU에 남길 수 있다. 규칙으로 계산하는 주소는 매 SKU에 다시 쓰지 않는다.",
+    "reason": "기존 CDN 파일 경로를 공유하고, 품번과 파일명이 다른 이미지는 직접 지정할 수 있게 한다.",
+    "resources": [
+      "table:public.styles",
+      "external:cdn2.auchee.com"
+    ],
+    "evidence": [
+      "docs/architecture/SUPABASE.md",
+      "src/lib/products/product-image.ts"
+    ]
+  },
+  {
+    "id": "warehouse-stock",
+    "label": "재고 수량, 위치, 창고입력 시트, 파인더, AA",
+    "origin": "마스마룰즈 연속 반영이 켜진 작업은 활성 warehouse_stock_positions와 요청 원장을 DB에 먼저 저장한다. 시트 전체 가져오기는 새 스냅샷 입력이다.",
+    "write": "Atelier와 Finder의 창고 RPC가 입고·수량·이동·소진을 저장한다. 시트 전체 가져오기는 warehouse-sheet-sync 보호 경로에서 실행한다.",
+    "propagation": "창고 관리·파인더는 활성 DB 재고를 읽는다. 시트는 반영 대기를 처리한 뒤 실측 B:H·S·AA를 대조해야 완료된다.",
+    "copies": "시트 반영 큐가 이전값·최종값을 AA 기준으로 보관한다. 시트에 재고 행이 복제되고 작업 이력은 별도로 남는다.",
+    "reason": "시트 쓰기 실패와 재시도에서 같은 재고를 이중 등록하지 않고, 오래된 시트가 DB 변경을 덮지 않게 한다.",
+    "resources": [
+      "table:public.warehouse_stock_positions",
+      "table:app.warehouse_qr_audit_sheet_exports",
+      "table:public.warehouse_stock_movements",
+      "function:warehouse-sheet-sync",
+      "external:SpreadsheetApp"
+    ],
+    "evidence": [
+      "docs/architecture/WAREHOUSE_SHEET_WRITEBACK.md",
+      "docs/architecture/WAREHOUSE_FINDER.md",
+      "src/lib/supabase/warehouse-stock.ts",
+      "supabase/functions/warehouse-sheet-sync/index.ts",
+      "scripts/google-apps-script/warehouse-qr-audit-sheet-sync.gs"
+    ]
+  },
+  {
+    "id": "warehouse-qr-review",
+    "label": "QR 상품 검수, 선적일, M번호 없는 물품",
+    "origin": "검수의 QR과 출처로 재고를 찾는다. 활성 재고는 DB에서 브랜드·QR·AA로 선적일을 읽으며, 소진 추정과 미배치는 각각 DB 스냅샷 및 미배치 링크를 읽는다.",
+    "write": "review_warehouse_qr_audit를 호출하는 Atelier 검수 패널에서 상품·수량과 변경한 선적일을 확정한다.",
+    "propagation": "대기 목록은 현재 출처에 있는 선적일을 보여준다. 활성 재고를 수정하면 검수 완료와 시트 반영 대기에 이어진다. 자리 이동은 Finder의 별도 동작이다.",
+    "copies": "확인한 수기 물품명과 입력한 선적일을 검수에 남긴다. 활성 재고의 변경은 같은 QR과 AA로 시트에 반영한다.",
+    "reason": "사진 검수 증거와 등록 재시도를 관리하고, M번호 없는 확인 상품도 가짜 SKU 없이 기존 행을 유지한다.",
+    "resources": [
+      "table:app.finder_placement_reviews",
+      "table:app.finder_unplaced_box_qr_links",
+      "table:app.finder_warehouse_presumed_boxes",
+      "table:public.warehouse_stock_positions",
+      "rpc:public.review_warehouse_qr_audit",
+      "storage:warehouse-qr-audit"
+    ],
+    "evidence": [
+      "src/features/logistics/WarehouseQrAuditReviewPanel.tsx",
+      "supabase/migrations/20261125170952_finder_qr_placement_review_manual_product.sql",
+      "supabase/migrations/20261125172809_finder_qr_placement_review_label_date.sql"
+    ]
+  },
+  {
+    "id": "box-labels",
+    "label": "박스 QR 발급, 과거 번호, 재출력",
+    "origin": "warehouse_box_label_batches와 warehouse_box_labels가 공유 발급 기록이다. 재고 데이터는 활성 재고 및 박스 원장에서 관리한다.",
+    "write": "서버 issue_warehouse_box_labels로 새 번호를 발급하거나 기존 번호를 검증해 등록한다.",
+    "propagation": "다른 컴퓨터의 발급 목록과 라벨 재출력은 같은 서버 기록을 조회한다.",
+    "copies": "이전 브라우저 번호는 가져오기 후보로 사용하고, 요청 UUID와 번호 묶음을 서버에 남긴다.",
+    "reason": "요청 재시도에 기존 결과를 돌려주고 발급 중복과 재고 생성 혼동을 막는다.",
+    "resources": [
+      "table:public.warehouse_box_label_batches",
+      "table:public.warehouse_box_labels",
+      "rpc:public.issue_warehouse_box_labels"
+    ],
+    "evidence": [
+      "docs/architecture/BOX_LABEL_REGISTRY.md"
+    ]
+  },
+  {
+    "id": "onboarding",
+    "label": "직원, 가입 승인, 명부, 입사 서류",
+    "origin": "로그인 식별은 Supabase Auth, 계정 상태의 업무 기준은 profiles, 인사 입력은 employee_roster와 온보딩 기록이다.",
+    "write": "신규직원에서 review_employee_access로 승인·거절하고 인사 입력과 서류 완료는 각 저장 경로에서 처리한다.",
+    "propagation": "승인 후 조직도·명부·계정·입사 목록이 갱신된다. 입사 서류 완료는 기존 온보딩 절차를 따른다.",
+    "copies": "승인 상태와 입사 자료·서류 진행 이력을 직원 ID로 연결해 보관한다.",
+    "reason": "서비스 접근 결정과 인사 서류 완료의 시점과 권한이 다르다.",
+    "resources": [
+      "service:supabase-auth",
+      "table:public.profiles",
+      "table:public.employee_roster",
+      "rpc:public.review_employee_access"
+    ],
+    "evidence": [
+      "docs/architecture/NEW_EMPLOYEE_ACCESS.md",
+      "docs/architecture/EMPLOYEE_ONBOARDING.md"
+    ]
+  },
+  {
+    "id": "permissions",
+    "label": "회사, 브랜드, 권한 지정과 부서",
+    "origin": "회사는 companies, 브랜드는 brands, 배정된 접근 권한은 permission_grants 및 기존 브랜드 멤버십/업무 권한에서 확인한다.",
+    "write": "권한·담당자 설정과 브랜드 관리에서 기존 권한 검사를 거쳐 저장한다.",
+    "propagation": "메뉴 접근과 DB 조회·쓰기 검사는 각 회사·브랜드·대상 범위를 적용한다. 퇴사 완료는 관련 권한과 세션을 종료한다.",
+    "copies": "현재 권한 배정과 권한 변경·인계 이력이 별도 역할을 가진다.",
+    "reason": "현재 권한을 철회해도 과거 처리자와 업무 기록을 보존하기 위해서다.",
+    "resources": [
+      "table:public.companies",
+      "table:public.brands",
+      "table:public.permission_grants",
+      "service:supabase-auth"
+    ],
+    "evidence": [
+      "docs/architecture/SUPABASE.md",
+      "supabase/migrations/20261021055942_permission_assignment_storage.sql"
+    ]
+  },
+  {
+    "id": "attendance",
+    "label": "출퇴근 원본, 승인 정정, 지각·결근 집계 기준",
+    "origin": "attendance_clock_ins가 기록된 출퇴근 원본이다. 유효 기록은 승인 정정과 외근 규칙을 적용한다. 명부 집계 시작은 근태 등록 기준으로 계산한다.",
+    "write": "상단 출퇴근, 승인받은 출퇴근 정정, 운영지원 근태 보정과 가입 승인에 각각 저장 경로가 있다.",
+    "propagation": "My home·My Schedule·운영지원 근태 집계는 권한과 집계 시작일에 따라 유효 기록을 본다.",
+    "copies": "attendance_enrollments에는 최초 승인 시각·당시 기준을 보존한다. 보정과 정정은 출퇴근 원본과 별도로 기록한다.",
+    "reason": "입사일·원본을 유지하며 승인 지연이나 이후 기준 변경이 과거 판정을 임의로 바꾸지 않게 한다.",
+    "resources": [
+      "table:public.attendance_clock_ins",
+      "table:app.attendance_enrollments",
+      "table:public.company_leave_requests"
+    ],
+    "evidence": [
+      "docs/architecture/ATTENDANCE_ENROLLMENT.md",
+      "docs/architecture/SUPABASE.md",
+      "src/lib/supabase/attendance-clocks.ts"
+    ]
+  },
+  {
+    "id": "department-scope",
+    "label": "소속 부서, 본사 근태 관리, 부서 일정",
+    "origin": "현재 소속의 부서·팀 정책은 department_workforce_policies다. 부서 일정도 조회 시 현재 관계와 서버 권한을 적용한다.",
+    "write": "권한 있는 운영지원이 부서 관리 범위를 지정한다. 각 직원의 부서 이동은 조직도·명부 흐름을 따른다.",
+    "propagation": "신규·이동 직원은 현재 부서의 관리 범위를 상속한다. 본사 근태 목록과 본인 관련 화면의 적용 기준에 사용한다.",
+    "copies": "부서 단위 정책을 저장하고, 기존 출퇴근과 신청 기록 및 별도 원장은 보존한다.",
+    "reason": "팀 단위 정책 변경과 과거 인사·근태 원본의 소유 및 이력을 구분한다.",
+    "resources": [
+      "table:public.department_workforce_policies",
+      "table:public.profiles"
+    ],
+    "evidence": [
+      "docs/architecture/WORKFORCE_MANAGEMENT.md",
+      "docs/architecture/DEPARTMENT_ABSENCE_SCHEDULE.md"
+    ]
+  },
+  {
+    "id": "leave-balances",
+    "label": "연차 발생, 잔여, 선사용, 승인 대기",
+    "origin": "기본·추가 크레딧과 회사 휴가 신청의 유효 사용량이 잔여 계산의 기준이다.",
+    "write": "직원은 휴가를 등록하거나 선사용 요청을 제출한다. 운영지원 건별 승인 때 기본·추가 가용량을 다시 배분한다.",
+    "propagation": "직원 달력·근태현황과 운영지원 연차현황이 서버 잔여·미정산 부족분을 표시한다. 대기는 실제 차감에 포함하지 않는다.",
+    "copies": "선사용 승인·취소·정산과 원래 부족 기간을 원장에 남긴다.",
+    "reason": "다음 기본 연차에서 부족분만 정산하고 같은 선사용을 중복 차감하지 않기 위해서다.",
+    "resources": [
+      "table:public.company_leave_requests",
+      "table:app.employee_leave_accrual"
+    ],
+    "evidence": [
+      "docs/architecture/LEAVE_ADVANCES.md"
+    ]
+  },
+  {
+    "id": "overtime",
+    "label": "근무 실제 시간, 야근 누적, 주말·공휴일 보상",
+    "origin": "승인 야근은 신청 시작부터 유효 퇴근까지 합산한다. 기존 수동 실제 입력 이력과 확정된 외근·휴일 근무는 기존 집계 경로를 사용한다.",
+    "write": "직원 퇴근·승인 정정과 기존 야근 승인 경로를 사용한다. 운영지원은 기존 휴일 업무 절차에서 보상을 확정한다.",
+    "propagation": "직원 My home 월 합계와 운영지원 야근·보상 관리가 최신 유효분을 표시한다. 확정 휴가 보상은 추가 연차에 반영된다.",
+    "copies": "실제 시간 수정 이력과 휴일 확인서·보상 정산 원장을 유지한다.",
+    "reason": "승인 예상 시간, 실제 근무, 수당 또는 보상휴가의 확정 근거와 중복 지급 방지를 위해서다.",
+    "resources": [
+      "table:public.overtime_actual_reports",
+      "table:public.company_leave_requests",
+      "rpc:public.holiday_work"
+    ],
+    "evidence": [
+      "docs/architecture/OVERTIME_CHECKOUT_LINK.md",
+      "docs/architecture/HOLIDAY_WORK.md"
+    ]
+  },
+  {
+    "id": "inclusive-overtime-hours",
+    "label": "약정 연장근로시간, 포괄임금, 직원 배치",
+    "origin": "직원별 월 약정 연장근로시간은 employee_roster.inclusive_overtime_hours에 시간 단위로 저장한다. 고정OT 설계 유형은 별도 입력값이다.",
+    "write": "운영지원 → 조직·멤버 → 조직도 → 직원 배치의 해당 직원 입력칸에서 포커스를 옮기면 기존 명부 저장 경로로 반영된다. 저장 권한은 직원 배치의 기존 검사를 따른다.",
+    "propagation": "근태 → 야근은 신청 근무시간과 신청·미신청 합계를 각각 월 약정시간과 비교해 표시한다. 약정 초과는 신청 근무시간을 기준으로 계산한다. 미등록 링크는 직원 배치의 해당 직원 입력칸으로 열리며, 저장 시 명부와 야근 조회를 갱신한다.",
+    "copies": "명부와 야근 화면의 조회 캐시만 사용한다. 약정시간을 다른 표에 다시 저장하지 않는다.",
+    "reason": "직원별 계약 기준과 실제 야근 누적을 각각 관리하면서 야근 화면에 같은 약정시간을 반영한다.",
+    "resources": [
+      "table:public.employee_roster"
+    ],
+    "evidence": [
+      "src/features/org/OrgChartPage.tsx",
+      "src/features/operations-support/AttendanceOvertimePanel.tsx",
+      "src/lib/supabase/employee-roster.ts"
+    ]
+  },
+  {
+    "id": "unrequested-overtime",
+    "label": "운영지원 근태, 미신청 연장근무, 예정 퇴근 초과",
+    "origin": "집계 대상 본사 직원의 직접 퇴근과 승인 정정을 유효 출퇴근 조회에서 가져온다. 개인 우선 월별 출근 기준, 회사 점심시간, 승인 휴가를 사용해 예정 퇴근을 계산한다.",
+    "write": "기존 출퇴근, 정정, 신청·승인, 출근 기준의 저장 화면을 사용한다. 목록은 읽기만 한다.",
+    "propagation": "운영지원 야근 표에서 평일 예정 퇴근을 넘긴 시간을 월별로 표시한다. 야근 신청 이력 및 승인 외근 날짜, 주말·공휴일, 자동 종료, 기준 미설정, 관리 시작 전 기록을 제외한다. 직원별 내역은 예정 퇴근과 실제 퇴근을 함께 표시한다.",
+    "copies": "선택한 월의 조회 결과와 화면 계산만 사용한다. 새 저장 행은 만들지 않는다.",
+    "reason": "이미 기록된 늦은 퇴근을 별도로 확인할 수 있게 하고 승인 야근, 약정 초과 및 휴일 보상에 중복 산입되는 것을 막는다.",
+    "resources": [
+      "table:public.attendance_clock_ins",
+      "table:public.attendance_start_settings",
+      "table:public.company_leave_requests",
+      "table:public.company_work_hours",
+      "rpc:public.list_effective_attendance_clocks"
+    ],
+    "evidence": [
+      "src/features/operations-support/AttendanceOvertimePanel.tsx",
+      "src/features/operations-support/unrequested-overtime.ts",
+      "src/lib/supabase/attendance-clocks.ts"
+    ]
+  },
+  {
+    "id": "work-requests",
+    "label": "부서 업무 요청, 자체 업무, 배정, 댓글, 처리 시간",
+    "origin": "work_requests가 요청/자체 업무와 진행 상태의 기준이다. 댓글·첨부·타이머는 같은 업무 ID에 연결된다.",
+    "write": "부서/내 업무의 저장·배정·확인·취소 RPC를 사용한다. 자체 업무는 초기 배정 흐름이 다르다.",
+    "propagation": "부서 목록, 담당자 내 업무와 상세는 공동 상태를 조회한다. Visual 분류 담당과 해당 분류의 내역은 기존 업무에 연결된다.",
+    "copies": "댓글·첨부·작업 시간과 상태/분류 진행 이력을 업무와 연결해 저장한다.",
+    "reason": "한 요청에 여러 사람과 분류가 참여하며 진행과 과거 처리 내용의 조회 권한을 유지하기 위해서다.",
+    "resources": [
+      "table:public.work_requests",
+      "table:public.work_request_messages",
+      "table:public.work_request_files",
+      "table:public.work_request_time_entries"
+    ],
+    "evidence": [
+      "docs/architecture/DEPARTMENT_WORK.md",
+      "docs/architecture/VISUAL_WORK_DETAIL.md"
+    ]
+  },
+  {
+    "id": "notifications",
+    "label": "종합 알림, 읽음, 처리 대기, PC 알림",
+    "origin": "서버 업무 이벤트와 본인 읽음 기록이 기준이다. 내 업무 피드백은 수신자별 최근 목록에서 표시할 값만 읽고, 본문과 회차 확인에 쓸 버전은 상세에서 조회한다. 읽음과 실제 승인·참석 응답·확인 처리는 독립 상태다.",
+    "write": "권한 확인 후 상세 표시가 끝나면 정확한 이벤트 버전을 읽음 저장한다. 실제 처리는 각 업무 API를 사용한다.",
+    "propagation": "종합 알림과 각 탭은 같은 이벤트·읽음 상태를 공유한다. 주말근무 알림은 한 번의 조회 안에서 같은 직원·수신 역할의 권한 판정을 재사용하며 다음 조회 때 다시 확인한다. 회의 초대와 시작 안내는 본인 계정의 공통 조회 결과를 사용한다. 브라우저 PC 알림은 같은 조회의 현재 미확인 이벤트를 사용한다.",
+    "copies": "서버에는 결과 이벤트의 당시 내용과 읽음을 남긴다. 브라우저는 전달 중복을 막는 식별자와 시각을 IndexedDB에 보관한다.",
+    "reason": "업무 진행과 열람을 구분하고 여러 탭의 동일 시스템 알림을 한 번만 표시한다.",
+    "resources": [
+      "table:public.my_home_notification_reads",
+      "table:public.my_home_request_events",
+      "table:public.personal_work_feedback_notices",
+      "rpc:public.list_my_managed_work_notifications",
+      "rpc:app.holiday_work_notifications",
+      "rpc:public.list_my_meeting_notice_context",
+      "browser:indexedDB"
+    ],
+    "evidence": [
+      "docs/architecture/MY_HOME_NOTIFICATIONS.md",
+      "docs/architecture/DESKTOP_NOTIFICATIONS.md",
+      "src/features/settings/use-my-home-notifications.ts",
+      "src/features/settings/use-personal-work-feedback-notices.ts",
+      "src/lib/supabase/request-policy.ts",
+      "supabase/migrations/20261126063000_reuse_holiday_notice_audiences.sql"
+    ]
+  },
+  {
+    "id": "meetings",
+    "label": "회의 회차, 참석자, 공유 결과, 회의 채팅",
+    "origin": "회의의 유효 회차와 역할·초대·일정 버전이 참석·응답 조회의 기준이다. 결과 초안과 공개 결과의 수신 범위가 구분된다.",
+    "write": "호스트가 회차 명단·일정을 변경하고 결과 초안을 저장하거나 공개한다. 참석자의 응답은 해당 회차·버전에 연결된다.",
+    "propagation": "회의 상세와 캘린더는 회의 목록을 사용한다. 종합 알림과 회의 시작 안내는 같은 회차에서 알림에 필요한 항목을 30초 주기로 조회하고, 실시간 변경도 반영한다. 단체채팅은 가장 최근 공개한 회차의 참석자로 맞춘다.",
+    "copies": "후속 회차에 명단을 승계하고, 공개 결과는 버전·수신자와 함께 보관한다.",
+    "reason": "과거 회차와 이미 공유받은 내용에 이후 명단·초안 변경이 소급되지 않게 한다.",
+    "resources": [
+      "table:public.meeting_series",
+      "table:public.meeting_rounds",
+      "table:public.meeting_round_notices",
+      "table:app.meeting_result_versions",
+      "rpc:public.list_company_meetings",
+      "rpc:public.list_my_meeting_notice_context",
+      "rpc:app.meeting_notice_context"
+    ],
+    "evidence": [
+      "docs/architecture/MEETING_ROUND_PEOPLE.md",
+      "docs/architecture/MEETING_GROUP_CHAT.md",
+      "src/features/home/use-home-calendar-events.ts",
+      "src/features/meetings/MeetingStartReminder.tsx",
+      "src/features/meetings/use-meeting-notice-context.ts",
+      "src/features/meetings/use-meeting-notices.ts",
+      "src/features/meetings/use-meeting-realtime.ts",
+      "src/features/meetings/use-read-meeting-round-notices.ts",
+      "supabase/migrations/20261126062000_meeting_notice_context.sql"
+    ]
+  },
+  {
+    "id": "chat",
+    "label": "사내 채팅, 메시지, 첨부, 반응",
+    "origin": "같은 회사 채팅방의 서버 메시지와 사용자·방 접근 기준을 사용한다.",
+    "write": "채팅 전송·수정, 반응 저장과 파일 등록은 채팅 전용 경로를 사용한다.",
+    "propagation": "방·읽지 않은 메시지·관련 업무 화면은 해당 방 또는 업무 대화의 원본을 불러온다.",
+    "copies": "메시지/첨부의 서버 행과 실제 Storage 객체를 참조로 연결한다.",
+    "reason": "메시지와 대용량 파일의 수명·업로드 처리 및 접근을 관리한다.",
+    "resources": [
+      "table:public.chat_messages",
+      "table:public.chat_message_reactions"
+    ],
+    "evidence": [
+      "docs/architecture/SUPABASE.md",
+      "src/lib/supabase/chat.ts"
+    ]
+  },
+  {
+    "id": "planning-drafts",
+    "label": "기획안, 컬러, 옵션, 브랜드, 단가 회신",
+    "origin": "기획안 기록은 product_drafts, 옵션·컬러는 draft_options와 draft_colors다. 단가요청과 회신은 요청의 차수·컬러 ID를 사용한다.",
+    "write": "기획에서 기획안과 단가요청을 저장하고, 해당 업무 권한이 있는 중국팀이 컬러별 단가를 회신한다.",
+    "propagation": "기획 목록은 현재 요청에 연결된 회신을 읽고 중국 업무는 대기·이전 회신을 권한에 따라 표시한다.",
+    "copies": "요청 차수와 회신값, 요청 당시 컬러 이미지 참조가 따로 보존된다.",
+    "reason": "기획안 변경 뒤에도 이전 요청이 어떤 색과 자료에 대한 것인지 복구하고 기존 회신을 보존한다.",
+    "resources": [
+      "table:public.product_drafts",
+      "table:public.draft_colors",
+      "table:public.draft_options",
+      "table:app.draft_price_requests"
+    ],
+    "evidence": [
+      "docs/architecture/SUPABASE.md",
+      "src/lib/supabase/product-drafts.ts",
+      "supabase/migrations/20261109044448_draft_price_requests.sql"
+    ]
+  },
+  {
+    "id": "sample-packs",
+    "label": "샘플 회차, 중국 작업지시서, 받기 확인",
+    "origin": "기획안의 샘플 회차와 등록된 작업지시서 묶음 버전을 사용한다. 실제 파일은 비공개 sample-work-orders 버킷에 있다.",
+    "write": "회차별 묶음 등록에서 서버가 파일 참조와 등재 버전을 확정하고 중국팀 권한 사용자만 해당 버전 수령을 기록한다.",
+    "propagation": "기획 화면과 중국팀 작업 목록은 등록된 최신 버전을 공유한다. 수정본의 수령은 새 버전에 연결된다.",
+    "copies": "묶음 참조, 파일 메타데이터, 과거 버전과 역할별 수령 기록을 보존한다.",
+    "reason": "기획안 본문과 여러 파일을 분리하고, 누가 어느 버전을 받았는지 확인하기 위해서다.",
+    "resources": [
+      "table:public.product_drafts",
+      "storage:sample-work-orders"
+    ],
+    "evidence": [
+      "docs/architecture/SUPABASE.md",
+      "src/lib/supabase/sample-work-order-packs.ts"
+    ]
+  },
+  {
+    "id": "material-requests",
+    "label": "자재요청, 전송 회차, 배정, 완료, 만족도",
+    "origin": "기획/중국 업무가 같은 material_requests 서버 ID를 사용한다.",
+    "write": "기획이 초안과 전송을 저장하고 중국팀이 해당 회차를 처리한다. 기획 권한자가 완료 기준과 내부 점수를 관리한다.",
+    "propagation": "기획과 중국 업무 목록은 권한 있는 요청·회차를 읽는다. 내부 만족도는 기획 쪽에서 조회한다.",
+    "copies": "전송 시 본문·파일 참조를 회차에 고정하고 완료 이력과 조르기 알림을 기록한다.",
+    "reason": "전송 뒤 초안 편집이 기존 작업 내용을 덮지 않고, 재시도와 수신자별 처리를 추적할 수 있게 한다.",
+    "resources": [
+      "table:app.material_requests"
+    ],
+    "evidence": [
+      "docs/architecture/MATERIAL_REQUEST_WORKFLOW.md",
+      "supabase/migrations/20261106133000_material_request_workflow.sql"
+    ]
+  },
+  {
+    "id": "partner-codes",
+    "label": "사방넷, 출고업체, 바코드, 업체별 헤더와 값",
+    "origin": "출고업체 연결과 코드 사용 기준은 code_usage_targets/assignments, 공통 바코드와 구성품은 product_codes/components에서 찾는다.",
+    "write": "업체·코드 관리는 원래 식별자로 저장하고, 업체별 헤더에서 표시 이름이나 전용 입력 항목을 편집한다.",
+    "propagation": "업체 목록과 엑셀 양식은 업체별 설정과 공통 원본 참조를 적용한다. 전용 값은 선택한 업체 연결 범위에 표시된다.",
+    "copies": "업체 표시 설정, 별칭, 업체가 직접 관리하는 전용 값을 원본 코드와 분리해서 보관한다.",
+    "reason": "같은 공통 값을 여러 화면에서 재사용하면서 업체별 표기와 실제 별도 입력값을 그대로 유지한다.",
+    "resources": [
+      "table:public.code_usage_targets",
+      "table:public.code_usage_assignments",
+      "table:public.product_codes",
+      "table:public.product_code_components"
+    ],
+    "evidence": [
+      "docs/architecture/USAGE_PARTNER_HEADERS.md"
+    ]
+  },
+  {
+    "id": "invoice-work",
+    "label": "송장 파일, 품목명 매핑, 검수, 출고반영",
+    "origin": "선택한 송장 파일이 작업 입력이다. 브랜드별 품목명·내품명 매핑과 SKU가 해석 근거다.",
+    "write": "파일 단계에서 입력 형식과 업체 연결을 확인하고 검수 확정·출고반영은 기존 단계 제어를 따른다.",
+    "propagation": "같은 작업 세대에서 피킹·송장·출고 계산이 연결 키가 일치한 행만 사용한다.",
+    "copies": "작업 중 기준 스냅샷 캐시와 반영된 출고 원장은 용도가 구분된다.",
+    "reason": "작업 중 새 기준과 기존 입력이 섞이는 것을 막고, 파일 검수와 실제 반영의 시점을 보존한다.",
+    "resources": [
+      "table:public.invoice_product_name_maps",
+      "table:public.styles"
+    ],
+    "evidence": [
+      "docs/architecture/INVOICE_WORK.md",
+      "docs/architecture/INVENTORY.md",
+      "src/features/logistics/useInvoiceWorkCriteria.ts",
+      "src/features/logistics/useInvoiceWorkController.ts"
+    ]
+  },
+  {
+    "id": "styled-image-tests",
+    "label": "연출컷 생성, 외부 AI 요청, 결과 다운로드",
+    "origin": "연출컷 시험 화면에 선택한 입력 이미지와 요청이며 전용 styled-image 함수가 제공자를 호출한다.",
+    "write": "디자인 스튜디오에서 인증된 요청으로 생성하고 결과는 화면에서 다운로드한다.",
+    "propagation": "완료한 시안은 같은 탭의 시험 화면에 표시된다.",
+    "copies": "시험 화면의 요청·생성 이미지는 메모리에 두고, 제공자 호출 기록의 메타데이터는 서버 진단에 사용한다.",
+    "reason": "시험 시안을 업무 원본에 섞지 않고 생성 결과와 오류를 추적한다.",
+    "resources": [
+      "function:styled-image",
+      "external:api.openai.com"
+    ],
+    "evidence": [
+      "docs/architecture/STYLED_IMAGES.md",
+      "supabase/functions/styled-image/index.ts"
+    ]
+  },
+  {
+    "id": "access-observation",
+    "label": "접속 IP, 로그인과 출근 요청 관찰",
+    "origin": "기록은 access-ip-record가 인증된 계정과 검증된 게이트웨이 IP로 수집한다.",
+    "write": "실제 로그인 및 출근 버튼에서 관찰 이벤트를 보낸다. 지정 검토자는 회사/외부 확인 표시를 저장한다.",
+    "propagation": "권한 있는 설정 화면에서 접속·출근 관찰 내역을 본다.",
+    "copies": "접속 세션과 출근 요청 시 주소·확인 상태를 출퇴근과 별도 관찰 기록으로 남긴다.",
+    "reason": "출근 요청의 주소와 실제 출근 성공 여부가 서로 다른 이벤트이기 때문이다.",
+    "resources": [
+      "function:access-ip-record",
+      "table:public.attendance_clock_ins"
+    ],
+    "evidence": [
+      "docs/architecture/ACCESS_IP.md",
+      "supabase/functions/access-ip-record/index.ts"
+    ]
+  },
+  {
+    "id": "warehouse-fixed-locations",
+    "label": "고정 자리, 방별리스트, 전체 상품 M번호",
+    "origin": "자리와 시트 표기 상품명은 네임변경!E3:F에서 읽는다. 품번은 같은 브랜드의 styles를 조회해 정규화한 이름이 고유하게 일치하는 경우 가져온다.",
+    "write": "warehouse-fixed-locations가 원본 시트를 읽고 save_warehouse_fixed_location_snapshot을 통해 저장한다.",
+    "propagation": "창고 관리와 방별리스트는 DB에 저장된 목록과 같은 브랜드의 SKU 참조를 사용한다. 이름이 일치하는 SKU가 없거나 복수면 품번을 비운다.",
+    "copies": "시트 자리·상품명과 동기화 시각은 DB 스냅샷에 둔다. 화면에서 해석한 품번은 그 스냅샷에 추가로 쓰지 않는다.",
+    "reason": "시트 조회가 중단되어도 마지막 목록을 유지하고, DB 상품과 시트 표기가 다른 경우 품번을 임의로 붙이지 않기 위해서다.",
+    "resources": [
+      "table:public.warehouse_fixed_location_snapshots",
+      "table:public.styles",
+      "rpc:public.save_warehouse_fixed_location_snapshot",
+      "function:warehouse-fixed-locations",
+      "external:sheets.googleapis.com"
+    ],
+    "evidence": [
+      "docs/architecture/WAREHOUSE_FIXED_LOCATIONS.md",
+      "src/lib/supabase/warehouse-fixed-locations.ts",
+      "supabase/functions/warehouse-fixed-locations/index.ts"
+    ]
+  },
+  {
+    "id": "late-statement-files",
+    "label": "지각 사유서 본문, 첨부파일, 제출 상태",
+    "origin": "본문은 직원·날짜별 사유서 기존 행을 사용한다. 첨부 목록은 late_arrival_statement_files의 상태를 읽고 파일 바이트는 비공개 버킷에 있다.",
+    "write": "준비 RPC, Storage 업로드, 완료 RPC로 제출한다. 완료 응답이 끊기면 서버의 ready 기록을 확인한다.",
+    "propagation": "작성자와 권한 있는 조회 화면이 기존 본문과 완료된 첨부를 조회한다. 남은 파일을 재시도할 때 이전 본문은 재저장하지 않는다.",
+    "copies": "첨부 메타데이터와 완료 상태는 DB, 실제 파일은 Storage에 저장한다. 진행 중 준비 ID는 선택한 파일의 재시도에 재사용한다.",
+    "reason": "서버 기록과 실제 업로드를 대조하고 응답 단절 시 이미 저장한 파일의 삭제나 중복 업로드를 피한다.",
+    "resources": [
+      "table:public.late_arrival_statement_files",
+      "storage:company-late-statements",
+      "rpc:public.begin_late_statement_file",
+      "rpc:public.finish_late_statement_file"
+    ],
+    "evidence": [
+      "docs/architecture/LATE_STATEMENT_ATTACHMENTS.md",
+      "src/lib/supabase/late-arrival-statements.ts",
+      "supabase/migrations/20261102145000_late_arrival_statement_files.sql"
+    ]
+  },
+  {
+    "id": "offsite-settlement",
+    "label": "외근 예정·복귀·후처리, 야근과 추가 휴가",
+    "origin": "외근 일정은 company_leave_requests를 사용한다. 확정한 추가 근무와 보상 방식은 외근당 한 건의 offsite_settlements에 있다.",
+    "write": "운영지원이 실제 분 또는 지급 휴가를 확인해 save_offsite_settlement로 저장한다. 저장과 필요한 추가 휴가 지급은 같은 트랜잭션에서 처리한다.",
+    "propagation": "회의 시간표는 외근 일정 범위를 사용한다. 확정 야근은 월별 누적에 반영되고, 휴가 방식은 추가 연차 지급 기능을 사용한다. 본인 결과는 공통 알림에 연결한다.",
+    "copies": "당초 일정과 별도로 실제 날짜별 확인 분 및 보상 결과를 저장한다.",
+    "reason": "예정 시간과 실제 보상을 구분하고 동일 외근의 재요청으로 보상이 두 번 지급되는 것을 막는다.",
+    "resources": [
+      "table:public.company_leave_requests",
+      "table:public.offsite_settlements",
+      "rpc:public.save_offsite_settlement",
+      "rpc:public.offsite_settlement_preview"
+    ],
+    "evidence": [
+      "docs/architecture/OFFSITE_SETTLEMENT.md",
+      "supabase/migrations/20261103105522_offsite_continuous_settlement.sql"
+    ]
+  },
+  {
+    "id": "employee-departure",
+    "label": "직원 퇴사 확정, 세션 종료, 업무 인계",
+    "origin": "확정 퇴사는 명부·직원 프로필과 app.employee_departures에 기록한다. 미완료 인계와 후임 지정 이력은 퇴사 업무의 별도 상태다.",
+    "write": "운영지원이 confirm_employee_departure에서 조건을 검증해 명부·권한·Auth를 처리한다. 세부 인계는 각 기능의 지정 권한에 따라 저장한다.",
+    "propagation": "퇴사 확정 뒤 로그인과 배정 후보가 갱신된다. 남은 인계는 승인 담당자의 업무 알림과 My home에 연결된다.",
+    "copies": "퇴사 확정 이력과 후임 지정 관련 이벤트를 남기고 별도 신호로 세션과 목록의 갱신을 알린다.",
+    "reason": "이미 처리한 인계 및 남은 업무를 구분하고 퇴사자의 권한 해제와 업무 기록 보존을 같이 처리한다.",
+    "resources": [
+      "table:app.employee_departures",
+      "table:app.employee_departure_handover_events",
+      "table:public.employee_departure_signals",
+      "rpc:public.confirm_employee_departure",
+      "service:supabase-auth"
+    ],
+    "evidence": [
+      "docs/architecture/SUPABASE.md",
+      "supabase/migrations/20261125023152_employee_departure.sql",
+      "supabase/migrations/20261125032510_employee_departure_handover_inbox.sql"
+    ]
+  },
+  {
+    "id": "product-count-and-stock-summary",
+    "label": "브랜드별 상품 개수, 상품 화면 재고 요약, 조회 중복 제거",
+    "origin": "상품 개수는 권한을 확인한 브랜드의 styles에서 계산한다. 상품 재고 요약은 해당 브랜드의 기존 활성 재고에서 계산한다.",
+    "write": "개수와 재고 요약은 읽기 API에서 계산한다. 원본 상품·재고 변경은 각 저장 경로에서 실행한다.",
+    "propagation": "상품 상단 개수와 상품 상세 재고 표시가 해당 조회를 사용한다. 저장 후 기존 쿼리 무효화로 다시 읽는다.",
+    "copies": "재고 요약에 필요한 열만 가져오고 요약 캐시 키를 원본 목록과 분리한다. 같은 진행 중 조회는 겹친 요청에 결과를 공유한다.",
+    "reason": "원본 목록을 반복 전송하지 않고 화면별 캐시가 다른 구조의 응답으로 덮이는 것을 막는다.",
+    "resources": [
+      "table:public.styles",
+      "table:public.warehouse_stock_positions",
+      "rpc:public.count_brand_styles"
+    ],
+    "evidence": [
+      "docs/architecture/PRODUCT_NOTIFICATION_READ_OPTIMIZATION.md",
+      "src/lib/supabase/coalesced-read-fetch.ts",
+      "src/lib/supabase/warehouse-stock.ts"
+    ]
+  }
+]

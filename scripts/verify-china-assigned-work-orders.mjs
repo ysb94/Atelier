@@ -61,6 +61,9 @@ try {
   await db.exec(await sql('20261106134500_china_assigned_order_elapsed_days'))
   await db.exec(await sql('20261124121357_require_china_work_order_receipt_before_shipping'))
   await db.exec(await sql('20261125100000_sample_work_order_packs'))
+  await db.exec(await sql('20261125100001_sample_work_order_attachment_capacity'))
+  assert.deepEqual((await db.query("select public,file_size_limit::text from storage.buckets where id='sample-work-orders'")).rows,
+    [{ public:false,file_size_limit:'10000000000' }])
   const received = { receivedAt: '2026-11-04T00:00:00Z' }
   for (const [draftId, actor, rounds, colors] of [
     [id(11), id(1), [
@@ -163,10 +166,10 @@ try {
   const savePack=(pack,files,notes='지퍼 길이 확인')=>packCall('save_sample_work_order_pack',[pack.id,pack.revision,JSON.stringify(files),notes])
   const receivePack=(pack,stamp)=>packCall('receive_sample_work_order_pack',[pack.id,stamp])
   const readStamp=async ()=>(await db.query('select updated_at::text as stamp from public.product_drafts where id=$1',[id(13)])).rows[0].stamp
-  const upload=async (pack,key,name)=>{
+  const upload=async (pack,key,name,size=42)=>{
     const path=pack.id+'/'+id(key)
-    await db.query("insert into storage.objects values('sample-work-orders',$1,'{\"size\":42}')",[path])
-    return {path,name,size:42,sha256:'0'.repeat(64)}
+    await db.query("insert into storage.objects values('sample-work-orders',$1,$2)",[path,JSON.stringify({size})])
+    return {path,name,size,sha256:'0'.repeat(64)}
   }
   const publish=async (pack)=>{
     const rounds=[{...order('packed',null),url:'atelier-sample-pack:'+pack.id+':'+pack.revision}]
@@ -182,6 +185,15 @@ try {
   assert.equal((await getPack(saved.id)).files.length,1)
   const image=await upload(saved,32,'참고.jpg')
   const finalPack=await savePack(saved,[sheet,image])
+  const largePack=await openPack('next')
+  const art=await upload(largePack,50,'시안.ai',10_000_000_000)
+  const artOnly=await savePack(largePack,[art])
+  const manyFiles=await Promise.all(Array.from({length:11},(_,index)=>upload(largePack,51+index,`참고 ${index}.pdf`)))
+  await assert.rejects(savePack(artOnly,[art,...manyFiles]),{code:'22023'})
+  await assert.rejects(savePack(artOnly,[{...art,size:art.size-1}]),{code:'22023'})
+  await assert.rejects(savePack(artOnly,[{...art,path:art.path+'-missing'}]),{code:'22023'})
+  await assert.rejects(savePack(artOnly,[manyFiles[0],manyFiles[0]]),{code:'22023'})
+  assert.equal((await savePack(artOnly,manyFiles)).files.length,11)
   await asActor(id(3))
   await assert.rejects(getPack(finalPack.id),{code:'42501'})
   assert.equal((await db.query('select * from storage.objects where name=$1',[sheet.path])).rows.length,0)

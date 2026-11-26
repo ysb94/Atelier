@@ -29,6 +29,7 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { isPersonnelMember } from '@/lib/company/workforce-management'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { useEmployeeRoster } from '@/features/operations-support/use-employee-roster'
+import { OVERTIME_ROSTER_EMPLOYEE_PARAM } from '@/features/operations-support/operations-support-sections'
 import {
   canEditOrgAssignment,
   OPERATIONS_SUPPORT_DEPARTMENT,
@@ -197,6 +198,7 @@ export function OrgChartPage({
       const params = new URLSearchParams(previous)
       if (next === 'members') params.delete('orgView')
       else params.set('orgView', next)
+      params.delete(OVERTIME_ROSTER_EMPLOYEE_PARAM)
       return params
     }, { replace: true })
   }
@@ -340,12 +342,22 @@ export function OrgChartPage({
   const editingMember =
     members.find((member) => member.id === editingId) ?? null
   const activeView = mode === 'chart' ? 'chart' : view
+  const overtimeEmployee = activeView === 'members' ? searchParams.get(OVERTIME_ROSTER_EMPLOYEE_PARAM) : null
+  const assignmentMembers = overtimeEmployee ? members.filter(member => member.id === overtimeEmployee) : visibleMembers
   const loading =
     departmentsQuery.isPending ||
     membersQuery.isPending ||
     titlesQuery.isPending || (mode === 'manage' && Boolean(workforce?.loading))
   const directoryError = departmentsQuery.error || membersQuery.error || (mode === 'manage' ? workforce?.error : null)
   const hasFilter = Boolean(needle) || departmentFilter !== 'all'
+  function clearOvertimeEmployee() {
+    if (!tabActive) return
+    setSearchParams(previous => {
+      const params = new URLSearchParams(previous)
+      params.delete(OVERTIME_ROSTER_EMPLOYEE_PARAM)
+      return params
+    }, { replace: true })
+  }
   async function refreshAssignments() {
     setEditingId(null)
     await Promise.all([
@@ -501,7 +513,7 @@ export function OrgChartPage({
         </div>
       ) : null}
 
-      {mode === 'manage' && activeView === 'members' ? (
+      {mode === 'manage' && activeView === 'members' && !overtimeEmployee ? (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="relative min-w-0 flex-1 sm:max-w-sm">
             <Search
@@ -559,7 +571,15 @@ export function OrgChartPage({
 
       {activeView === 'members' ? (
         <div className="space-y-4">
-          {!loading && !directoryError ? (
+          {overtimeEmployee && <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card px-4 py-2">
+            <p role="status" className="text-sm">
+              {!loading && !directoryError && assignmentMembers.length === 0 ? '직원 배치에서 해당 직원을 찾을 수 없습니다.'
+                : !canEdit ? '약정 연장근로시간을 입력하려면 직원 배치 수정 권한이 필요합니다.'
+                : '약정 연장근로시간(포괄임금) 입력'}
+            </p>
+            <Button type="button" size="sm" variant="outline" onClick={clearOvertimeEmployee}>전체 직원 보기</Button>
+          </div>}
+          {!overtimeEmployee && !loading && !directoryError ? (
             <AssignmentStatus
               members={unsetMembers}
               onEdit={
@@ -569,14 +589,15 @@ export function OrgChartPage({
           ) : null}
           <MemberAssignmentTable
             loading={loading}
-            members={directoryError ? [] : visibleMembers}
+            members={directoryError ? [] : assignmentMembers}
             departments={departments}
             duties={duties}
             grades={grades}
             departmentName={departmentName}
             onSaved={refreshAssignments}
             canChange={canEdit && !directoryError && !titlesQuery.isError}
-            filtered={hasFilter}
+            filtered={hasFilter || Boolean(overtimeEmployee)}
+            overtimeEmployee={overtimeEmployee}
           />
         </div>
       ) : activeView === 'workforce' ? (
@@ -760,6 +781,7 @@ function MemberAssignmentTable({
   onSaved,
   canChange,
   filtered,
+  overtimeEmployee,
 }: {
   loading: boolean
   members: OrgChartMember[]
@@ -770,6 +792,7 @@ function MemberAssignmentTable({
   onSaved: () => Promise<void>
   canChange: boolean
   filtered: boolean
+  overtimeEmployee?: string | null
 }) {
   const { profile } = useAuth()
   const queryClient = useQueryClient()
@@ -809,7 +832,7 @@ function MemberAssignmentTable({
   const headerSettingsQuery = useQuery({ queryKey: ['employee-roster-header-settings'], queryFn: listRosterHeaderSettings, enabled: profile?.status === 'active', retry: false })
   const headerSettings = headerSettingsQuery.data?.settings ?? emptyList<RosterHeaderSetting>()
   const headerSettingsMap = useMemo(() => new Map(headerSettings.map(setting => [setting.key, setting])), [headerSettings])
-  const showHeader = (key: string) => !headerSettingsMap.get(key)?.hidden
+  const showHeader = (key: string) => (key === 'inclusiveOvertimeHours' && Boolean(overtimeEmployee)) || !headerSettingsMap.get(key)?.hidden
   const headerLabel = (key: string, fallback: string) => headerSettingsMap.get(key)?.label ?? fallback
   const extraColumns = allExtraColumns.filter(column => showHeader(`column:${column.id}`))
   const visibleRosterFields = ROSTER_FIELDS.filter(field => showHeader(field.key))
@@ -873,6 +896,7 @@ function MemberAssignmentTable({
     onSuccess: async (_result, input) => {
       setError(null)
       await queryClient.invalidateQueries({ queryKey: ['employee-roster'] })
+      if (input.field === 'inclusiveOvertimeHours') await queryClient.invalidateQueries({ queryKey: ['employee-roster-overtime'] })
       if (input.field === 'remainingAnnualLeave') await Promise.all(['my-attendance-basis', 'my-extra-leave', 'employee-extra-leave', 'employee-leave-advances', 'leave-notice-management'].map(key => queryClient.invalidateQueries({ queryKey: [key] })))
     },
     onError: (err) => {
@@ -1063,6 +1087,7 @@ function MemberAssignmentTable({
                     {rosterQuery.isPending ? '불러오는 중…' : rosterQuery.isError ? '조회 실패' : <div className="flex items-center justify-end gap-1">
                       <RosterField label={`${memberName(member)} 약정 연장근로시간 입력`} value={String(rosters.get(member.id)?.inclusiveOvertimeHours ?? '')}
                         maxLength={10} className="w-24 text-right tabular-nums" type="number" disabled={rosterMutation.isPending}
+                        focusOnOpen={active && overtimeEmployee === member.id}
                         onCommit={value => {
                           const current=rosters.get(member.id)?.inclusiveOvertimeHours ?? null
                           if ((value.trim() === '' && current === null) || (value.trim() !== '' && Number(value) === current)) return
@@ -1238,6 +1263,7 @@ function RosterField({
   money = false,
   numeric = false,
   disabled,
+  focusOnOpen = false,
   onCommit,
 }: {
   label: string
@@ -1248,9 +1274,11 @@ function RosterField({
   money?: boolean
   numeric?: boolean
   disabled: boolean
+  focusOnOpen?: boolean
   onCommit: (value: string) => void
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const didFocus = useRef(false)
   const [text, setText] = useState(() => money ? formatMoney(value, maxLength) : numeric ? plainNumber(value, maxLength) : value)
   const [pickingDate, setPickingDate] = useState(false)
   useEffect(() => {
@@ -1260,6 +1288,13 @@ function RosterField({
     if (!pickingDate || inputRef.current?.type !== 'date') return
     inputRef.current.showPicker?.()
   }, [pickingDate])
+  useEffect(() => {
+    if (!focusOnOpen) { didFocus.current = false; return }
+    if (didFocus.current || disabled || !inputRef.current) return
+    didFocus.current = true
+    inputRef.current.focus({ preventScroll: true })
+    inputRef.current.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [focusOnOpen, disabled])
   const filled = text.trim().length > 0
   const dateActive = type === 'date' && (filled || pickingDate)
   const contentWidth = money && filled

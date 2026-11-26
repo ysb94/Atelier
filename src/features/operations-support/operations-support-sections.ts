@@ -2,6 +2,7 @@ import { canViewMembers, canViewOperationsSupportPart, isOperationsDepartmentMem
 import { releaseAccess } from '../../lib/company/release-access.ts'
 
 export const OPERATIONS_SUPPORT_ROOT = '/operations-support'
+export const OVERTIME_ROSTER_EMPLOYEE_PARAM = 'overtimeEmployee'
 
 /** 운영지원 사이드 메뉴 순서. 권한·담당자 설정은 별도 화면(`/settings/permissions`)이다. */
 export const OPERATIONS_SECTIONS = [
@@ -24,6 +25,11 @@ export function operationsSectionHref(section: OperationsSection) {
 
 export function leaveAdvanceReviewHref(requestId: string) {
   return `${operationsSectionHref('leave')}?leaveView=balance&advanceRequest=${encodeURIComponent(requestId)}`
+}
+
+export function overtimeRosterHref(employeeId: string) {
+  const params = new URLSearchParams({ peopleView: 'org', orgView: 'members', [OVERTIME_ROSTER_EMPLOYEE_PARAM]: employeeId })
+  return `${operationsSectionHref('people')}?${params}`
 }
 
 /** `/operations-support/<section>` 경로의 업무. 다른 경로는 null. */

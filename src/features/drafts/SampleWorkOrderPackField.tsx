@@ -5,9 +5,9 @@ import { Button } from '@/components/ui/button'
 import { useAuth } from '@/lib/supabase/auth'
 import { cn } from '@/lib/utils'
 import {
-  buildSamplePackZip, getSamplePack, openSamplePack, SAMPLE_PACK_ACCEPT, samplePackId, samplePackPrefix, samplePackReference,
+  getSamplePack, openSamplePack, samplePackId, samplePackPrefix, samplePackReference,
   samplePackServerMissing, saveSamplePack, uploadSamplePackFile, validateSelectedSampleFiles,
-  type SamplePack, type SamplePackFile,
+  type SamplePack, type SamplePackFile, type SamplePackUpload,
 } from '@/lib/supabase/sample-work-order-packs'
 import { SampleWorkOrderPackDetails } from './SampleWorkOrderPackDetails'
 
@@ -29,10 +29,12 @@ export function SampleWorkOrderPackField({ label, draftId, slot, side, readOnly,
   const fileInput = useRef<HTMLInputElement>(null)
   const persistedDraft = useRef(draftId)
   const uploadedFiles = useRef(new Map<File, SamplePackFile>())
+  const uploadAttempts = useRef(new Map<File, SamplePackUpload>())
   const [createdDraftId, setCreatedDraftId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
+  const [progress, setProgress] = useState('')
   const [added, setAdded] = useState<File[]>([])
   const [removed, setRemoved] = useState<string[]>([])
   const [dragging, setDragging] = useState(false)
@@ -72,13 +74,14 @@ export function SampleWorkOrderPackField({ label, draftId, slot, side, readOnly,
   }
 
   async function save(register: boolean) {
-    if (!editable || busyRef.current || saving || loading || waiting) return
+    if (!actor || !editable || busyRef.current || saving || loading || waiting) return
     busyRef.current = true
     setBusy(true)
     setError('')
     setStatus('')
     try {
       if (register) validateRegistration?.()
+      validateSelectedSampleFiles(files, added)
       const id = draftId ?? persistedDraft.current ?? await onCreateDraft?.()
       if (!id) throw new Error('기획안을 먼저 저장해 주세요.')
       persistedDraft.current = id
@@ -86,10 +89,20 @@ export function SampleWorkOrderPackField({ label, draftId, slot, side, readOnly,
       let pack: SamplePack = draftPack.data ?? await openSamplePack(id, slot)
       if (hasEdits || (!draftPack.data && previous.data)) {
         const uploaded: SamplePackFile[] = []
+        let index = 0
         for (const file of added) {
+          index += 1
           let item = uploadedFiles.current.get(file)
           if (!item?.path.startsWith(`${pack.id}/`)) {
-            item = await uploadSamplePackFile(pack.id, file)
+            let attempt = uploadAttempts.current.get(file)
+            if (!attempt?.path.startsWith(`${pack.id}/`)) {
+              attempt = { path: `${pack.id}/${crypto.randomUUID()}` }
+              uploadAttempts.current.set(file, attempt)
+            }
+            setProgress(`파일 확인 중 · ${index}/${added.length} · ${file.name}`)
+            item = await uploadSamplePackFile(file, attempt, actor, sent => {
+              setProgress(`업로드 중 · ${index}/${added.length} · ${Math.floor(sent / file.size * 100)}% · ${file.name}`)
+            })
             uploadedFiles.current.set(file, item)
           }
           uploaded.push(item)
@@ -98,9 +111,9 @@ export function SampleWorkOrderPackField({ label, draftId, slot, side, readOnly,
       }
       cache.setQueryData([...samplePackPrefix, actor, 'draft', id, slot], pack)
       uploadedFiles.current.clear()
+      uploadAttempts.current.clear()
       setAdded([]); setRemoved([])
       if (register) {
-        await buildSamplePackZip(pack)
         await onRegister?.(samplePackReference(pack, slot.startsWith('edit:') ? `${label} 수정본` : label))
         cache.removeQueries({ queryKey: [...samplePackPrefix, actor, pack.id], exact: true })
         cache.setQueryData([...samplePackPrefix, actor, 'draft', id, slot], null)
@@ -114,6 +127,7 @@ export function SampleWorkOrderPackField({ label, draftId, slot, side, readOnly,
     } finally {
       busyRef.current = false
       setBusy(false)
+      setProgress('')
     }
   }
 
@@ -135,7 +149,11 @@ export function SampleWorkOrderPackField({ label, draftId, slot, side, readOnly,
         {added.map((file, index) => <li key={index} className="flex items-center justify-between gap-2 px-3 py-1">
           <span className="break-all">{file.name}</span>
           <Button type="button" variant="ghost" size="sm" disabled={busy || saving} aria-label={`${file.name} 선택 취소`}
-            onClick={() => setAdded(current => current.filter((_, i) => i !== index))}>빼기</Button>
+            onClick={() => {
+              uploadedFiles.current.delete(file)
+              uploadAttempts.current.delete(file)
+              setAdded(current => current.filter((_, i) => i !== index))
+            }}>빼기</Button>
         </li>)}
       </ul>}
       <div
@@ -155,7 +173,7 @@ export function SampleWorkOrderPackField({ label, draftId, slot, side, readOnly,
           select(event.dataTransfer.files)
         }}
       >
-        <input ref={fileInput} type="file" multiple accept={SAMPLE_PACK_ACCEPT} className="hidden"
+        <input ref={fileInput} type="file" multiple className="hidden"
           aria-label={`${label} 작업지시서 파일`} disabled={uploadDisabled}
           onChange={event => { select(event.currentTarget.files); event.currentTarget.value = '' }} />
         <Button type="button" variant="ghost" disabled={uploadDisabled} aria-label={`${label} 작업지시서 파일 선택`}
@@ -163,16 +181,18 @@ export function SampleWorkOrderPackField({ label, draftId, slot, side, readOnly,
             dragging && 'border-primary bg-primary/5')}
           onClick={() => fileInput.current?.click()}>
           <span className="flex items-center gap-2"><Upload aria-hidden="true" className="size-4 shrink-0" />파일을 끌어다 놓거나 클릭하세요.</span>
-          <span className="text-xs">최대 10개 · 파일당 30MB · 전체 100MB</span>
+          <span className="text-xs">작업지시서 한 건당 첨부 전체 10GB</span>
         </Button>
       </div>
       {waiting && <p role="status" className="text-sm text-warning">작업지시서 묶음 서버 연결 대기</p>}
       {draftPack.isError && !waiting && <p role="alert" className="text-sm text-danger">임시저장을 불러오지 못했습니다. <Button type="button" size="sm" variant="ghost" onClick={() => void draftPack.refetch()}>다시 조회</Button></p>}
       {previous.isError && <p role="alert" className="text-sm text-danger">기존 파일을 확인하지 못했습니다. <Button type="button" size="sm" variant="ghost" onClick={() => void previous.refetch()}>다시 조회</Button></p>}
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      {progress && <p role="status" className="break-all text-sm text-muted-foreground">{progress}</p>}
       {(status || draftPack.data) && <p role="status" className="text-sm text-muted-foreground">{status || `임시저장 · 첨부 ${draftPack.data?.files.length ?? 0}개`}</p>}
       <div className="flex flex-wrap justify-end gap-2">
         {editing && <Button type="button" variant="ghost" disabled={busy || saving} onClick={() => {
+          uploadedFiles.current.clear(); uploadAttempts.current.clear()
           setEditing(false); setAdded([]); setRemoved([]); setDragging(false); setStatus(''); setError('')
         }}>닫기</Button>}
         <Button type="button" variant="outline" disabled={busy || saving || loading || waiting || !hasEdits || draftPack.isError || previous.isError} onClick={() => void save(false)}>임시저장</Button>
