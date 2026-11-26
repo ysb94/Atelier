@@ -30,6 +30,7 @@
 .draft-sheet-row>td[hidden]{display:none}
 .draft-sheet-row>td.draft-row-position-cell{padding:6px;text-align:center;vertical-align:middle}
 .draft-row-position-handle{display:inline-grid;min-width:28px;min-height:28px;place-items:center;border-radius:4px;cursor:grab;font-variant-numeric:tabular-nums;user-select:none}
+.draft-row-position-cell>.draft-row-position-handle{position:absolute;inset:0;border-radius:0}
 .draft-row-position-handle:hover{background:color-mix(in srgb,currentColor 10%,transparent)}
 .draft-row-position-handle:active{cursor:grabbing}
 .draft-row-position-handle:focus-visible{outline:2px solid currentColor;outline-offset:-2px}
