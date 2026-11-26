@@ -59,14 +59,18 @@ const sharing = await page.evaluate(async () => {
 const viewerUrl = new URL(sharing.viewer)
 assert.equal(viewerUrl.pathname, '/viewer.html')
 assert.equal(viewerUrl.searchParams.get('model'), sharing.source)
-assert.match(sharing.tag, /^<iframe .*title="상품 360도 보기".*<\/iframe>$/)
-assert.ok(sharing.tag.includes(sharing.viewer))
+assert.equal(sharing.tag, `<img src="${sharing.source}"><br>`)
 assert.match(sharing.image, /^<img /)
 assert.match(sharing.video, /^<video /)
 await page.route('https://cdn2.auchee.com/Prod_Images/360_test/**', route => route.fulfill({
  headers: { 'Access-Control-Allow-Origin': '*' }, contentType: 'application/octet-stream', body: model,
 }))
-await page.evaluate(tag => { document.body.innerHTML = tag }, sharing.tag)
+await page.evaluate(src => {
+ const frame = document.createElement('iframe')
+ frame.src = src
+ frame.title = '상품 360도 보기'
+ document.body.replaceChildren(frame)
+}, sharing.viewer)
 const embedded = page.frameLocator('iframe[title="상품 360도 보기"]')
 await embedded.locator('canvas[data-ready="true"]').waitFor({timeout:60000})
 await embedded.getByRole('slider',{name:'3D 회전 각도'}).fill('120')
