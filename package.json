@@ -96,7 +96,7 @@
     "verify:workflow-diagnostics": "node scripts/verify-workflow-diagnostics.mjs",
     "verify:late-attachments": "node scripts/verify-late-statement-attachments-browser.mjs",
     "verify:desktop-notifications": "node scripts/verify-desktop-notifications-browser.mjs",
-    "verify:overtime-actuals": "node --experimental-strip-types src/features/operations-support/overtime-hours.verify.ts && node --experimental-strip-types src/features/home/my-attendance-summary.verify.ts && node scripts/verify-overtime-actuals-db.mjs && node scripts/verify-overtime-actuals-browser.mjs",
+    "verify:overtime-actuals": "node --experimental-strip-types src/features/operations-support/overtime-hours.verify.ts && node --experimental-strip-types src/features/operations-support/unrequested-overtime.verify.ts && node --experimental-strip-types src/features/home/my-attendance-summary.verify.ts && node scripts/verify-overtime-actuals-db.mjs && node scripts/verify-overtime-actuals-browser.mjs",
     "verify:overnight-annual": "node --experimental-strip-types src/features/settings/overnight-annual.verify.ts && node scripts/verify-overnight-annual-db.mjs && node scripts/verify-overnight-annual-browser.mjs",
     "verify:offsite-groups": "node scripts/verify-offsite-groups-db.mjs && node scripts/verify-offsite-groups-browser.mjs",
     "verify:offsite-extra-hours": "node --experimental-strip-types src/features/operations-support/offsite-extra-hours.verify.ts && node scripts/verify-overtime-actuals-browser.mjs",
