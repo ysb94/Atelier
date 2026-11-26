@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
+import { useCloseWorkspaceTab } from '@/components/layout/workspace-tab-activity'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -328,6 +329,7 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
   const workAccess = useBasicWorkAccess()
   const { draftId } = useParams()
   const navigate = useNavigate()
+  const closeWorkspaceTab = useCloseWorkspaceTab()
   const queryClient = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const location = useLocation()
@@ -430,7 +432,8 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
   async function saveSampleAttachment(nextForm: ProductDraftInput) {
     if (saveMutation.isPending) throw new Error('기획안 저장이 끝난 뒤 다시 등록해 주세요.')
     const saved = await saveMutation.mutateAsync(nextForm)
-    if (!isNew) setForm(draftToInput(saved))
+    if (isNew) navigate(draftDetailPath(saved.id), { replace: true })
+    else setForm(draftToInput(saved))
   }
 
   async function registerFirstSample(file: SampleWorkOrderFile) {
@@ -535,19 +538,26 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
       if (!draftId) throw new Error('기획안을 찾을 수 없습니다.')
       return updateProductDraft(draftId, { ...payload, expectedUpdatedAt: payload.expectedUpdatedAt ?? loaded?.updatedAt })
     },
-    onSuccess: async (saved) => {
+    onSuccess: async () => {
       setError(null)
       setSavedAt(new Date().toLocaleTimeString('ko-KR'))
       await queryClient.invalidateQueries({ queryKey: ['product-drafts'] })
       await queryClient.invalidateQueries({ queryKey: ['product-draft'] })
-      if (isNew) {
-        navigate(draftDetailPath(saved.id), { replace: true })
-      }
     },
     onError: (err) => {
       setError(err instanceof Error ? err.message : '저장에 실패했습니다.')
     },
   })
+
+  function saveFromHeader() {
+    saveMutation.mutate(form, {
+      onSuccess: () => {
+        if (!isNew) return
+        if (closeWorkspaceTab) closeWorkspaceTab(listPath)
+        else navigate(listPath, { replace: true })
+      },
+    })
+  }
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -665,7 +675,7 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
             type="button"
             size="sm"
             disabled={!editable || saveMutation.isPending}
-            onClick={() => saveMutation.mutate(form)}
+            onClick={saveFromHeader}
           >
             <Save className="size-3.5" />
             {saveMutation.isPending ? '저장 중...' : '저장'}
@@ -1063,7 +1073,11 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
                             aria-label="저장"
                             title="저장"
                             disabled={saveMutation.isPending}
-                            onClick={() => saveMutation.mutate(form)}
+                            onClick={() => saveMutation.mutate(form, {
+                              onSuccess: (saved) => {
+                                if (isNew) navigate(draftDetailPath(saved.id), { replace: true })
+                              },
+                            })}
                           >
                             <Save className="size-3.5" />
                           </Button>

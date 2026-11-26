@@ -10,6 +10,29 @@ const db=await createWorkTestDb(),root=process.cwd(),events=new Set(),objects=ne
 const origin='http://127.0.0.1:5196'
 const proposerOnly=process.argv.includes('--draft-proposer-only')
 const draftCreationOnly=process.argv.includes('--draft-creation-only')
+const draftWorkspaceRoutes = {
+ name: 'draft-workspace-test-routes',
+ enforce: 'pre',
+ resolveId(source, importer) {
+  if (source === './company-routes' && importer?.replaceAll('\\', '/').endsWith('/layout/workspace-tabs.tsx')) {
+   return '\0draft-workspace-test-routes'
+  }
+ },
+ load(id) {
+  if (id !== '\0draft-workspace-test-routes') return
+  return `
+   import { createElement as h } from 'react'
+   import { Route } from 'react-router-dom'
+   import { CompanyDraftsPage } from '@/features/drafts/DraftsPage'
+   import { DraftEditPage } from '@/features/drafts/DraftEditPage'
+   export const companyWorkspaceRoutes = [
+    h(Route, { key: 'home', path: '/', element: h('h1', null, '검증 홈') }),
+    h(Route, { key: 'drafts', path: '/drafts', element: h(CompanyDraftsPage) }),
+    h(Route, { key: 'draft-edit', path: '/drafts/:draftId', element: h(DraftEditPage) }),
+   ]
+  `
+ },
+}
 let queue=Promise.resolve(),browser,server,failNextSave=false,failPlannerExemptions=false
 const rpcNames=new Set(['get_my_basic_work_access','begin_work_request','save_work_request','delete_work_request','send_work_request_message','set_active_work_request','list_work_requests','begin_work_request_file','finish_work_request_file','finish_work_request_delete','save_product_draft'])
 async function localApi(req,res){
@@ -28,6 +51,7 @@ async function localApi(req,res){
      if(actor===ids.planner&&failPlannerExemptions)throw Error('출퇴근 제외 조회 실패 검증')
      data=[]
     }
+    else if(body.name==='get_sample_work_order_pack')data=null
     else {if(!rpcNames.has(body.name))throw Error('Unsupported test RPC '+body.name);if(body.name==='save_work_request'&&failNextSave){failNextSave=false;throw Error('저장 실패 재시도 검증')}const names=Object.keys(body.args);if(names.some(name=>!/^p_[a-z_]+$/.test(name)))throw Error('Invalid argument');data=(await db.query(`select public.${body.name}(${names.map((name,i)=>name+'=>$'+(i+1)).join(',')}) as data`,Object.values(body.args))).rows[0].data}
    }else if(route==='table'){
     if(!['brands','product_drafts','draft_colors','draft_options','seasons','styles'].includes(body.table))throw Error('Unsupported table '+body.table)
@@ -47,7 +71,7 @@ async function localApi(req,res){
    }else if(route==='remove'){for(const name of body.paths){await db.query("delete from storage.objects where bucket_id='company-work-requests' and name=$1",[name]);objects.delete(name)}data={}}
    else throw Error('Unknown test route')
    res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data,error:null}))
-   if(route==='rpc'&&!['get_my_basic_work_access','list_work_requests','list_org_chart_members','list_company_attendance_exempt'].includes(body.name))for(const stream of events)stream.write('data: changed\n\n')
+   if(route==='rpc'&&!['get_my_basic_work_access','list_work_requests','list_org_chart_members','list_company_attendance_exempt','get_sample_work_order_pack'].includes(body.name))for(const stream of events)stream.write('data: changed\n\n')
   }catch(error){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:null,error:{message:error.message,code:error.code}}))}
  });queue=task.catch(()=>{});await task
 }
@@ -56,7 +80,7 @@ try{
  const brandId = 'b0000000-0000-4000-8000-000000000001'
  const folderId = '20000000-0000-4000-8000-000000000001'
  await db.query("insert into public.seasons(id,brand_id,code,name,release_timing,year,status) values($1,$2,'TEST-FOLDER','출시 폴더 검증','',2030,'active')",[folderId,brandId])
- server=await createServer({configFile:false,envDir:false,cacheDir:path.join(root,'node_modules/.cache/work-live-vite'),logLevel:'error',plugins:[{name:'work-live-test',enforce:'pre',resolveId(source,importer){if(importer&&source.startsWith('.')){const target=path.resolve(path.dirname(importer),source).replace(/\.tsx?$/,'');if(target===path.join(root,'src/lib/supabase/auth'))return path.join(root,'dev-tools/ai-workflow/browser-fixture/work-live-auth.tsx');if(target===path.join(root,'src/lib/supabase/client'))return path.join(root,'dev-tools/ai-workflow/browser-fixture/work-live-client.ts')}},configureServer(vite){vite.middlewares.use((req,res,next)=>{if(req.url.startsWith('/__work-test/')){void localApi(req,res).catch(next);return}if(!req.headers.accept?.includes('text/html'))return next();void vite.transformIndexHtml(req.url,'<html><body><div id="root"></div><script type="module" src="/dev-tools/ai-workflow/browser-fixture/work-live-entry.tsx"></script></body></html>').then(html=>{res.setHeader('Content-Type','text/html');res.end(html)}).catch(next)})}},react(),tailwindcss()],resolve:{alias:[{find:'@/components/layout/company-brand-scope',replacement:path.join(root,'dev-tools/ai-workflow/browser-fixture/work-live-brand.ts')},{find:'@/lib/supabase/auth',replacement:path.join(root,'dev-tools/ai-workflow/browser-fixture/work-live-auth.tsx')},{find:'@/lib/supabase/client',replacement:path.join(root,'dev-tools/ai-workflow/browser-fixture/work-live-client.ts')},{find:'@',replacement:path.join(root,'src')}]},server:{host:'127.0.0.1',port:5196,strictPort:true,hmr:false}})
+ server=await createServer({configFile:false,envDir:false,cacheDir:path.join(root,'node_modules/.cache/work-live-vite'),logLevel:'error',plugins:[draftWorkspaceRoutes,{name:'work-live-test',enforce:'pre',resolveId(source,importer){if(importer&&source.startsWith('.')){const target=path.resolve(path.dirname(importer),source).replace(/\.tsx?$/,'');if(target===path.join(root,'src/lib/supabase/auth'))return path.join(root,'dev-tools/ai-workflow/browser-fixture/work-live-auth.tsx');if(target===path.join(root,'src/lib/supabase/client'))return path.join(root,'dev-tools/ai-workflow/browser-fixture/work-live-client.ts')}},configureServer(vite){vite.middlewares.use((req,res,next)=>{if(req.url.startsWith('/__work-test/')){void localApi(req,res).catch(next);return}if(!req.headers.accept?.includes('text/html'))return next();void vite.transformIndexHtml(req.url,'<html><body><div id="root"></div><script type="module" src="/dev-tools/ai-workflow/browser-fixture/work-live-entry.tsx"></script></body></html>').then(html=>{res.setHeader('Content-Type','text/html');res.end(html)}).catch(next)})}},react(),tailwindcss()],resolve:{alias:[{find:'@/components/layout/company-brand-scope',replacement:path.join(root,'dev-tools/ai-workflow/browser-fixture/work-live-brand.ts')},{find:'@/lib/supabase/auth',replacement:path.join(root,'dev-tools/ai-workflow/browser-fixture/work-live-auth.tsx')},{find:'@/lib/supabase/client',replacement:path.join(root,'dev-tools/ai-workflow/browser-fixture/work-live-client.ts')},{find:'@',replacement:path.join(root,'src')}]},server:{host:'127.0.0.1',port:5196,strictPort:true,hmr:false}})
  await server.listen();browser=await chromium.launch({executablePath:process.env.ATELIER_CHROMIUM_BIN||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true})
  const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage(),errors=[]
  await context.route('**/*',route=>route.request().url().startsWith(origin+'/')?route.continue():route.abort())
@@ -105,7 +129,9 @@ try{
  await page.setViewportSize({width:1440,height:1000})
  }
  async function openNewDraft(search) {
-  await page.goto(origin+'/drafts'+search,{waitUntil:'domcontentloaded',timeout:120000})
+  const params = new URLSearchParams(search)
+  params.set('draft-workspace', '1')
+  await page.goto(origin+'/drafts?'+params,{waitUntil:'domcontentloaded',timeout:120000})
   await page.getByRole('link',{name:'기획안 추가',exact:true}).click()
   await page.getByRole('heading',{name:'새 기획안',exact:true}).waitFor()
   return new URL(page.url()).searchParams
@@ -126,14 +152,24 @@ try{
  assert.equal(await nameOnNewDraft.inputValue(),'')
  await page.getByText('출시 폴더 · 출시 폴더 검증',{exact:true}).waitFor()
  await nameOnNewDraft.fill('선택 폴더 신규 기획안')
+ const newDraftTab = page.getByRole('button',{name:'기획안 추가 탭 닫기',exact:true})
+ const rpcPattern = '**/__work-test/rpc'
+ async function failDraftSave(route) {
+  if (route.request().postDataJSON().name !== 'save_product_draft') return route.fallback()
+  await route.fulfill({ json: { data:null, error:{ message:'기획안 저장 실패 검증' } } })
+ }
+ await page.route(rpcPattern, failDraftSave)
  await page.getByRole('button',{name:'저장',exact:true}).click()
- await page.waitForURL(url=>/\/drafts\/[0-9a-f-]{36}/.test(url.pathname))
- const newDraftId = new URL(page.url()).pathname.split('/').at(-1)
- const storedDraft = await db.query('select brand_id, season_id from public.product_drafts where id=$1',[newDraftId])
- assert.deepEqual(storedDraft.rows,[{brand_id:brandId,season_id:folderId}])
- await page.getByRole('textbox',{name:'한글명',exact:true}).waitFor()
- await page.getByRole('button',{name:'목록',exact:true}).click()
+ await page.getByText('기획안 저장 실패 검증',{exact:true}).waitFor()
+ await page.unroute(rpcPattern, failDraftSave)
+ assert.equal(await nameOnNewDraft.inputValue(),'선택 폴더 신규 기획안')
+ assert.equal(await newDraftTab.isVisible(),true)
+ await page.getByRole('button',{name:'저장',exact:true}).click()
  await page.waitForURL(url=>url.pathname==='/drafts' && url.searchParams.get('scope')==='atelier' && url.searchParams.get('folder')===folderId)
+ await newDraftTab.waitFor({state:'detached'})
+ await nameOnNewDraft.waitFor({state:'detached'})
+ const storedDraft = await db.query('select brand_id, season_id from public.product_drafts where name_ko=$1',['선택 폴더 신규 기획안'])
+ assert.deepEqual(storedDraft.rows,[{brand_id:brandId,season_id:folderId}])
  await page.getByText('선택 폴더 신규 기획안',{exact:true}).first().waitFor()
  await page.getByRole('link',{name:'기획안 추가',exact:true}).click()
  await nameOnNewDraft.waitFor()
@@ -142,6 +178,14 @@ try{
  assert.equal(await draftBrand.inputValue(),brandId)
  await draftBrand.selectOption('')
  assert.equal(await page.getByText('출시 폴더 · 출시 폴더 검증',{exact:true}).count(),0)
+ await page.getByRole('button',{name:'목록',exact:true}).click()
+ await page.getByRole('button',{name:/^ATELIER/}).click()
+ await page.waitForURL(url=>url.pathname==='/drafts' && !url.searchParams.has('scope'))
+ await page.getByRole('link',{name:'기획안 추가',exact:true}).click()
+ await nameOnNewDraft.waitFor()
+ assert.equal(await nameOnNewDraft.inputValue(),'')
+ assert.equal(await draftBrand.inputValue(),'')
+ assert.equal(await page.getByRole('textbox',{name:'영문명',exact:true}).inputValue(),'')
  if(!draftCreationOnly){
  await page.goto(origin+'/drafts/new?actor=planner',{waitUntil:'domcontentloaded',timeout:120000})
  const draftNameKo=page.getByRole('textbox',{name:'한글명',exact:true})
@@ -194,7 +238,10 @@ try{
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false)
  await page.setViewportSize({width:1440,height:1000})
  await page.getByRole('button',{name:'저장',exact:true}).click()
- await page.waitForURL(url=>/\/drafts\/[0-9a-f-]{36}/.test(url.pathname))
+ await page.waitForURL(url=>url.pathname==='/drafts')
+ const savedDraft = await db.query('select id from public.product_drafts where name_ko=$1',['작성자 계정 검증 기획안'])
+ assert.equal(savedDraft.rows.length,1)
+ await page.goto(origin+'/drafts/'+savedDraft.rows[0].id+'?actor=planner',{waitUntil:'domcontentloaded',timeout:120000})
  await page.getByRole('button',{name:'저장',exact:true}).waitFor()
  assert.equal(await page.getByRole('button',{name:'저장',exact:true}).isEnabled(),true)
  await page.reload()
@@ -278,7 +325,7 @@ try{
  }
  assert.deepEqual(errors,[])
  console.log(draftCreationOnly
-  ? 'Draft creation browser: blank all/unassigned scopes, brand and folder prefill, exact stored placement, scoped return and fresh form passed (local PostgreSQL)'
+  ? 'Draft creation browser: brand and folder prefill, failed save keeps input, successful save closes the workspace tab, reopening from the same or a different scope starts a blank form (local PostgreSQL)'
   : proposerOnly
   ? 'Draft proposer browser: create, edit, clear, search focus, failed attendance lookup independence, and saved reload passed (local PostgreSQL)'
   : 'work-requests-browser: real create/reload/attachment, two-window realtime refresh, same-department account switch, private chat, completion review/result confirmation, My home hub, desktop/mobile and draft creator/read-only/operator transition passed (local PostgreSQL, no production writes)')
