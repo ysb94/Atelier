@@ -104,7 +104,7 @@ function emptyMessage(
 
 export function CompanyDraftsPage() {
   useRenderWatch('CompanyDraftsPage')
-  const { brands, brandById } = useCompanyBrandScope()
+  const { brands, brandById, loading: brandsLoading } = useCompanyBrandScope()
   const { profile, session } = useAuth()
   const workAccess = useBasicWorkAccess()
   const navigate = useNavigate()
@@ -406,15 +406,15 @@ export function CompanyDraftsPage() {
   const loading =
     draftsQuery.isLoading || seasonQueries.loading
 
-  const selectedSeason = seasons.find(season =>
-    !isUnassignedReleaseFolder(season) &&
-    (!scopedBrand || season.brandId === scopedBrand.id) &&
-    matchesDraftFolder(season.id, folderFilter, !folderParam ? season.code : undefined) &&
-    folderFilter !== 'all' && folderFilter !== 'unassigned',
-  )
-  const newHref = draftNewPath(scopedBrand?.slug ?? (selectedSeason ? brandById.get(selectedSeason.brandId)?.slug : undefined), {
-    season: folderFilter === 'unassigned' ? 'none' : selectedSeason?.id ?? null,
-  })
+  const scopedFolderPending = (brandsLoading || seasonQueries.loading) && brandScope !== 'all' && brandScope !== UNASSIGNED_DRAFT_BRAND
+    && (!scopedBrand || (folderFilter !== 'all' && folderFilter !== 'unassigned' && !activeFolder))
+  function newDraftHref(entry: string | null = null) {
+    return draftNewPath(scopedBrand?.slug, {
+      season: scopedBrand ? activeFolder?.id ?? (folderFilter === 'unassigned' ? 'none' : null) : null,
+      scope: brandScope === UNASSIGNED_DRAFT_BRAND ? UNASSIGNED_DRAFT_BRAND : null,
+      entry,
+    })
+  }
 
   function setFolderFilter(value: string) {
     setBoardFilter('all')
@@ -529,8 +529,14 @@ export function CompanyDraftsPage() {
               }}
             />
           )}
-          {canWriteDraft(workAccess.access) && <Link
-            to={newHref}
+          {!scopedFolderPending && canWriteDraft(workAccess.access) && <Link
+            to={newDraftHref()}
+            onClick={event => {
+              if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return
+              event.preventDefault()
+              // The workspace keeps this tab alive. A deliberate new draft starts a new form.
+              navigate(newDraftHref(crypto.randomUUID()))
+            }}
             className="ml-auto inline-flex h-7 shrink-0 items-center gap-1 self-end rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 lg:self-start"
           >
             <Plus className="size-3" aria-hidden="true" />

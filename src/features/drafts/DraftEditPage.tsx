@@ -46,6 +46,7 @@ import {
   DRAFT_OPEN_TYPE_OPTIONS,
   DRAFT_REGISTER_TYPE_OPTIONS,
   DRAFT_SPEC_LABEL,
+  formatSeasonLabel,
   type CostCurrency,
   type DraftSpecKey,
   type ProductDraft,
@@ -55,7 +56,7 @@ import {
 } from '@/lib/types'
 import { DEFAULT_COMPANY_ID } from '@/lib/company/capabilities'
 import {
-  DRAFT_NAMES_REQUIRED, hasBothDraftNames, requiresDraftBrand,
+  DRAFT_NAMES_REQUIRED, hasBothDraftNames, requiresDraftBrand, UNASSIGNED_DRAFT_BRAND,
 } from '@/lib/drafts/company-draft'
 import {
   colorWorkOrderFileName,
@@ -78,11 +79,11 @@ import {
   formatSizeSpec,
   parseSizeSpec,
 } from '@/lib/drafts/spec-format'
-import { draftDetailPath } from '@/lib/workspace/company-paths'
+import { draftDetailPath, withSearch } from '@/lib/workspace/company-paths'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { cn, formatNumber } from '@/lib/utils'
+import { isUnassignedReleaseFolder } from './release-schedule-preview'
 
-const EMPTY_SEASONS: Season[] = []
 const EMPTY_STYLES: Style[] = []
 
 const TEXT_SPEC_KEYS = ['fabric', 'coating'] as const satisfies DraftSpecKey[]
@@ -271,30 +272,61 @@ function formatWeightSpec(value: string) {
   return value ? `${value} g` : ''
 }
 
-function listPathForSeason(seasonId: string | null, seasons: Season[]) {
-  if (!seasonId) return '/drafts?season=unassigned'
-  const season = seasons.find((item) => item.id === seasonId)
-  if (!season) return '/drafts'
-  return `/drafts?season=${encodeURIComponent(season.code)}`
-}
-
-function seasonIdFromQuery(
-  value: string | null,
-  seasons: Season[],
-): string | null | undefined {
-  if (value == null) return undefined
-  if (value === '' || value === 'none') return null
-  if (seasons.some((season) => season.id === value)) return value
-  return undefined
-}
-
 export function DraftEditPage() {
+  const { draftId } = useParams()
+  const { search } = useLocation()
+  return !draftId || draftId === 'new'
+    ? <NewDraft key={search} />
+    : <DraftEditor key={draftId} />
+}
+
+function NewDraft() {
+  const [params] = useSearchParams()
+  const navigate = useNavigate()
+  const { brandBySlug, loading, error } = useCompanyBrandScope()
+  const brandSlug = params.get('brand')?.trim()
+  const brand = brandSlug ? brandBySlug.get(brandSlug) : undefined
+  const folderId = params.get('season')
+  const needsFolder = Boolean(brandSlug && folderId && folderId !== 'none')
+  const seasons = useQuery({
+    queryKey: ['seasons', brand?.id],
+    queryFn: () => getSeasonsByBrand(brand!.id),
+    enabled: Boolean(brand && needsFolder),
+  })
+  if ((brandSlug && !brand && loading) || (needsFolder && brand && seasons.isPending)) {
+    return <p role="status" className="py-16 text-center text-sm text-muted-foreground">기획안 추가 위치를 불러오는 중입니다.</p>
+  }
+  const folder = needsFolder ? seasons.data?.find(item =>
+    item.id === folderId && item.brandId === brand?.id && !isUnassignedReleaseFolder(item)
+  ) : undefined
+  const listPath = withSearch('/drafts', {
+    scope: brandSlug ?? (params.get('scope') === UNASSIGNED_DRAFT_BRAND ? UNASSIGNED_DRAFT_BRAND : null),
+    folder: folder?.id ?? (brand && folderId === 'none' ? 'unassigned' : null),
+  })
+  if ((brandSlug && !brand) || (needsFolder && !folder)) {
+    const failed = (!brand && error) || (needsFolder && seasons.isError)
+    return (
+      <div className="space-y-4 py-16 text-center">
+        <p role="alert" className="text-sm text-danger">{failed
+          ? '기획안 추가 위치를 불러오지 못했습니다. 목록에서 다시 열어 주세요.'
+          : '선택한 브랜드 또는 출시 폴더를 찾을 수 없습니다. 목록에서 다시 선택해 주세요.'}</p>
+        <Button type="button" variant="outline" onClick={() => navigate(brand ? listPath : '/drafts')}>기획안 목록으로</Button>
+      </div>
+    )
+  }
+  return <DraftEditor initialBrandId={brand?.id} initialFolder={folder} initialListPath={listPath} />
+}
+
+function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
+  initialBrandId?: string
+  initialFolder?: Season
+  initialListPath?: string
+}) {
   useRenderWatch('DraftEditPage')
-  const { brands, brandById, brandBySlug } = useCompanyBrandScope()
+  const { brands, brandById } = useCompanyBrandScope()
   const { profile } = useAuth()
   const workAccess = useBasicWorkAccess()
   const { draftId } = useParams()
-  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -307,11 +339,13 @@ export function DraftEditPage() {
   const companyId = profile?.companyId ?? DEFAULT_COMPANY_ID
 
   const isNew = !draftId || draftId === 'new'
-  const [form, setForm] = useState<ProductDraftInput>(() => emptyDraftInput())
+  const [form, setForm] = useState<ProductDraftInput>(() => ({
+    ...emptyDraftInput(),
+    brandId: initialBrandId ?? null,
+    seasonId: initialFolder?.id ?? null,
+  }))
   const [error, setError] = useState<string | null>(null)
   const [savedAt, setSavedAt] = useState<string | null>(null)
-  const [seasonPrefillDone, setSeasonPrefillDone] = useState(false)
-  const [seasonFromQueryDone, setSeasonFromQueryDone] = useState(false)
   const [editorPart, setEditorPart] = useState<'basic' | 'pending'>('basic')
   const partners = useDraftSabangnetPartners(form.brandId, editorPart === 'pending')
   const openChannelId = form.specs.openChannelTargetId ?? null
@@ -330,15 +364,6 @@ export function DraftEditPage() {
     enabled: !isNew && Boolean(draftId),
     retry: 1,
   })
-
-  const seasonsQuery = useQuery({
-    queryKey: ['seasons', form.brandId],
-    queryFn: () => getSeasonsByBrand(form.brandId ?? ''),
-    enabled: Boolean(form.brandId),
-  })
-  const seasons = form.brandId
-    ? (seasonsQuery.data ?? EMPTY_SEASONS)
-    : EMPTY_SEASONS
 
   const stylesQuery = useQuery({
     queryKey: ['styles', form.brandId],
@@ -366,42 +391,10 @@ export function DraftEditPage() {
     setForm(rest)
   }, [loaded])
 
-  useEffect(() => {
-    if (!isNew || seasonPrefillDone) return
-    const requestedBrand = searchParams.get('brand')?.trim() ?? ''
-    const brand = requestedBrand ? brandBySlug.get(requestedBrand) : undefined
-    if (requestedBrand && !brand && brands.length === 0) return
-    setForm((prev) => ({ ...prev, brandId: brand?.id ?? null }))
-    setSeasonPrefillDone(true)
-  }, [brandBySlug, brands.length, isNew, searchParams, seasonPrefillDone])
-
-  useEffect(() => {
-    if (
-      !isNew ||
-      seasonFromQueryDone ||
-      !form.brandId ||
-      seasonsQuery.isLoading
-    ) {
-      return
-    }
-    const fromQuery = seasonIdFromQuery(
-      searchParams.get('season'),
-      seasonsQuery.data ?? [],
-    )
-    if (fromQuery !== undefined) {
-      setForm((prev) => ({ ...prev, seasonId: fromQuery }))
-    }
-    setSeasonFromQueryDone(true)
-  }, [
-    form.brandId,
-    isNew,
-    searchParams,
-    seasonFromQueryDone,
-    seasonsQuery.data,
-    seasonsQuery.isLoading,
-  ])
-
-  const listPath = listPathForSeason(form.seasonId, seasons)
+  const listPath = initialListPath ?? withSearch('/drafts', {
+    scope: selectedBrand?.slug ?? UNASSIGNED_DRAFT_BRAND,
+    folder: form.seasonId ?? 'unassigned',
+  })
 
   const totalQty = useMemo(
     () => form.colors.reduce((sum, color) => sum + (color.orderQty ?? 0), 0),
@@ -812,8 +805,6 @@ export function DraftEditPage() {
               <Select aria-label="브랜드 선택" className="h-8 w-full text-xs" value={form.brandId ?? ''}
                 disabled={!isNew || !editable || saveMutation.isPending}
                 onChange={event => {
-                  setSeasonPrefillDone(true)
-                  setSeasonFromQueryDone(true)
                   patch({
                     brandId: event.target.value || null, seasonId: null,
                     ...(form.specs.openChannelTargetId
@@ -825,6 +816,9 @@ export function DraftEditPage() {
                 {brands.map(brand => <option key={brand.id} value={brand.id}
                   disabled={isNew && !canWriteDraft(workAccess.access, null, brand.id)}>{brand.name}</option>)}
               </Select>
+              {initialFolder && form.seasonId === initialFolder.id && (
+                <p className="text-xs text-muted-foreground">출시 폴더 · {formatSeasonLabel(initialFolder)}</p>
+              )}
               {savedSamples.length === 0 && <SampleDestinationSelect value={form.originCountry}
                 disabled={!editable || saveMutation.isPending} onChange={originCountry => {
                   const sampleWorkOrders = applySampleOrigin(form.sampleWorkOrders, originCountry)

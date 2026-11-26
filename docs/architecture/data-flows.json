@@ -355,18 +355,21 @@
     "id": "planning-drafts",
     "label": "기획안, 컬러, 옵션, 브랜드, 단가 회신",
     "origin": "기획안 기록은 product_drafts, 옵션·컬러는 draft_options와 draft_colors다. 단가요청과 회신은 요청의 차수·컬러 ID를 사용한다.",
-    "write": "기획에서 기획안과 단가요청을 저장하고, 해당 업무 권한이 있는 중국팀이 컬러별 단가를 회신한다.",
-    "propagation": "기획 목록은 현재 요청에 연결된 회신을 읽고 중국 업무는 대기·이전 회신을 권한에 따라 표시한다.",
+    "write": "기획안 추가 시 브랜드·폴더 미지정은 빈 값으로 시작한다. 목록에서 브랜드와 실제 폴더를 선택한 경우 새 폼에 해당 브랜드 ID와 폴더 UUID를 넘기고 기존 기획안 저장 API가 brand_id와 season_id로 저장한다. 해당 업무 권한이 있는 중국팀이 컬러별 단가를 회신한다.",
+    "propagation": "저장한 기획안은 같은 브랜드·폴더 목록에 표시된다. 기획 목록은 현재 요청에 연결된 회신을 읽고 중국 업무는 대기·이전 회신을 권한에 따라 표시한다.",
     "copies": "요청 차수와 회신값, 요청 당시 컬러 이미지 참조가 따로 보존된다.",
     "reason": "기획안 변경 뒤에도 이전 요청이 어떤 색과 자료에 대한 것인지 복구하고 기존 회신을 보존한다.",
     "resources": [
       "table:public.product_drafts",
+      "table:public.seasons",
       "table:public.draft_colors",
       "table:public.draft_options",
       "table:app.draft_price_requests"
     ],
     "evidence": [
       "docs/architecture/SUPABASE.md",
+      "src/features/drafts/DraftsPage.tsx",
+      "src/features/drafts/DraftEditPage.tsx",
       "src/lib/supabase/product-drafts.ts",
       "supabase/migrations/20261109044448_draft_price_requests.sql"
     ]
