@@ -19,7 +19,7 @@ function disposeObject(object: THREE.Object3D) {
 
 export function createModelViewer(host: HTMLElement, src: string | ArrayBuffer, callbacks: {
   ready: () => void; error: (message: string) => void; angle: (degrees: number) => void
-}) {
+}, { stageHeightFill }: { stageHeightFill?: number } = {}) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5))
   renderer.outputColorSpace = THREE.SRGBColorSpace
@@ -43,6 +43,7 @@ export function createModelViewer(host: HTMLElement, src: string | ArrayBuffer, 
   scene.add(pivot)
   let disposed = false, loaded = false, active = true, visible = true, playing = false
   let angle = 0, target = 0, frame = 0, lastTime = 0
+  let framing: { frontHalfHeight: number; maxHalfHeight: number; maxHalfWidth: number } | undefined
   let drag: { id: number; x: number; angle: number } | null = null
   const controller = new AbortController()
   const allowed = () => active && visible && !document.hidden && !disposed && loaded
@@ -64,18 +65,29 @@ export function createModelViewer(host: HTMLElement, src: string | ArrayBuffer, 
     else lastTime = 0
   }
   const pauseFrame = () => { cancelAnimationFrame(frame); frame = 0; lastTime = 0 }
-  const resize = new ResizeObserver(() => {
+  function resizeViewport() {
     const width = Math.max(1, host.clientWidth)
     const height = Math.max(1, host.clientHeight)
     const aspect = width / height
-    camera.right = 1.8 * Math.max(1, aspect)
+    if (framing && stageHeightFill) {
+      const maxFill = 0.9
+      camera.top = Math.max(
+        framing.frontHalfHeight / stageHeightFill,
+        framing.maxHalfHeight / maxFill,
+        framing.maxHalfWidth / (aspect * maxFill),
+      )
+      camera.right = camera.top * aspect
+    } else {
+      camera.top = 1.8 * Math.max(1, 1 / aspect)
+      camera.right = 1.8 * Math.max(1, aspect)
+    }
     camera.left = -camera.right
-    camera.top = 1.8 * Math.max(1, 1 / aspect)
     camera.bottom = -camera.top
     camera.updateProjectionMatrix()
     renderer.setSize(width, height, false)
     schedule()
-  })
+  }
+  const resize = new ResizeObserver(resizeViewport)
   resize.observe(host)
   const intersection = new IntersectionObserver(([entry]) => {
     visible = entry.isIntersecting
@@ -127,6 +139,19 @@ export function createModelViewer(host: HTMLElement, src: string | ArrayBuffer, 
       gltf.scene.position.sub(bounds.getCenter(new THREE.Vector3()))
       pivot.add(gltf.scene)
       pivot.scale.setScalar(2 / extent)
+      if (stageHeightFill) {
+        // Use the full turn's bounds to keep framing steady and avoid cropping mid-rotation.
+        const yawRadius = Math.hypot(size.x, size.z) / extent
+        const tiltSin = Math.abs(camera.getWorldDirection(new THREE.Vector3()).y)
+        const tiltCos = Math.sqrt(1 - tiltSin ** 2)
+        const uprightHalfHeight = size.y / extent * tiltCos
+        framing = {
+          frontHalfHeight: uprightHalfHeight + size.x / extent * tiltSin,
+          maxHalfHeight: uprightHalfHeight + yawRadius * tiltSin,
+          maxHalfWidth: yawRadius,
+        }
+        resizeViewport()
+      }
       loaded = true
       canvas.dataset.ready = 'true'
       callbacks.ready()

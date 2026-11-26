@@ -37,7 +37,7 @@ await page.route(`${origin}/__atelier-spin360/**`,async route=>{
 await page.route('https://r2-worker.masmarulez-upload.workers.dev/**',route=>{storageRequests++;return route.abort()});
 // A real binary glTF triangle exercises WebGL/GLTFLoader without an AI request.
 const positions=Buffer.from(new Float32Array([-1,-1,0,1,-1,0,0,1,0]).buffer);
-const gltf={asset:{version:'2.0'},scene:0,scenes:[{nodes:[0]}],nodes:[{mesh:0}],meshes:[{primitives:[{attributes:{POSITION:0},material:0}]}],materials:[{doubleSided:true}],buffers:[{byteLength:positions.length}],bufferViews:[{buffer:0,byteLength:positions.length}],accessors:[{bufferView:0,componentType:5126,count:3,type:'VEC3',min:[-1,-1,0],max:[1,1,0]}]};
+const gltf={asset:{version:'2.0'},scene:0,scenes:[{nodes:[0]}],nodes:[{mesh:0}],meshes:[{primitives:[{attributes:{POSITION:0},material:0}]}],materials:[{doubleSided:true,pbrMetallicRoughness:{baseColorFactor:[.15,.23,.32,1],metallicFactor:0}}],buffers:[{byteLength:positions.length}],bufferViews:[{buffer:0,byteLength:positions.length}],accessors:[{bufferView:0,componentType:5126,count:3,type:'VEC3',min:[-1,-1,0],max:[1,1,0]}]};
 let json=Buffer.from(JSON.stringify(gltf));json=Buffer.concat([json,Buffer.alloc((4-json.length%4)%4,32)]);const header=Buffer.alloc(20);header.writeUInt32LE(0x46546c67,0);header.writeUInt32LE(2,4);header.writeUInt32LE(28+json.length+positions.length,8);header.writeUInt32LE(json.length,12);header.writeUInt32LE(0x4e4f534a,16);const binHeader=Buffer.alloc(8);binHeader.writeUInt32LE(positions.length);binHeader.writeUInt32LE(0x004e4942,4);const model=process.env.TRIPO_VERIFY_REAL_MODEL?await fs.readFile(path.join(root,'.tmp/tripo360/model.glb')):Buffer.concat([header,json,binHeader,positions]);
 downloadBody=model;
 let modelReads=0,failModel=false,oldViewerReads=0;
@@ -62,6 +62,45 @@ await offlinePage.goto(pathToFileURL(htmlFile).href)
 await offlinePage.locator('canvas[data-ready="true"]').waitFor({ timeout: 60000 })
 await offlinePage.getByRole('slider', { name: '3D 회전 각도' }).fill('90')
 await offlinePage.locator('canvas[data-angle="90.000"]').waitFor()
+if (!process.env.TRIPO_VERIFY_REAL_MODEL) {
+  // Measure rendered pixels so a larger canvas with an unchanged model fails the assertion.
+  const canvas = offlinePage.locator('canvas')
+  async function measure(viewport) {
+    await offlinePage.setViewportSize(viewport)
+    const snapshot = await canvas.screenshot({ scale: 'css' })
+    return offlinePage.evaluate(async encoded => {
+      const image = new Image()
+      image.src = 'data:image/png;base64,' + encoded
+      await image.decode()
+      const scratch = document.createElement('canvas')
+      const { width, height } = image
+      scratch.width = width
+      scratch.height = height
+      const context = scratch.getContext('2d')
+      context.drawImage(image, 0, 0)
+      const { data } = context.getImageData(0, 0, width, height)
+      let left = width, right = -1, top = height, bottom = -1
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          if ((x < 8 || x >= width - 8) && (y < 8 || y >= height - 8)) continue
+          const index = (y * width + x) * 4
+          if (data[index] >= 235 && data[index + 1] >= 235 && data[index + 2] >= 235) continue
+          left = Math.min(left, x)
+          right = Math.max(right, x)
+          top = Math.min(top, y)
+          bottom = Math.max(bottom, y)
+        }
+      }
+      return { width: (right - left + 1) / width, height: (bottom - top + 1) / height, pixels: bottom - top + 1 }
+    }, snapshot.toString('base64'))
+  }
+  const small = await measure({ width: 520, height: 410 })
+  const large = await measure({ width: 1020, height: 765 })
+  for (const frame of [small, large]) assert.ok(frame.height >= .74 && frame.height <= .81, JSON.stringify(frame))
+  assert.ok(Math.abs(small.height - large.height) < .02 && large.pixels > small.pixels * 1.8)
+  const narrow = await measure({ width: 175, height: 460 })
+  assert.ok(narrow.width >= .85 && narrow.width <= .92 && narrow.height < small.height, JSON.stringify(narrow))
+}
 assert.deepEqual(exportRequests, [], 'HTML file must work using only embedded model and renderer')
 await offlinePage.close()
 assert.equal(await page.getByRole('button',{name:'사이트에 저장',exact:true}).count(),0);

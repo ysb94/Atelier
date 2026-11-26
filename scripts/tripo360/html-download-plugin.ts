@@ -58,9 +58,17 @@ export function spinHtmlDownloadPlugin(service: string): Plugin {
     name: 'atelier-spin-html-download',
     apply: 'serve',
     configureServer(server) {
+      const viewerEntry = path.resolve(server.config.root, 'scripts/tripo360/download-viewer.ts')
+      const viewerSources = new Set([
+        viewerEntry,
+        path.resolve(server.config.root, 'src/features/spin360/model-viewer-engine.ts'),
+      ])
+      server.watcher.on('change', file => {
+        if (viewerSources.has(path.resolve(file))) bundle = undefined
+      })
       function viewerBundle() {
         bundle ??= build({
-          entryPoints: [path.join(server.config.root, 'scripts/tripo360/download-viewer.ts')],
+          entryPoints: [viewerEntry],
           bundle: true, write: false, minify: true, legalComments: 'eof', platform: 'browser', format: 'iife',
         }).then(result => result.outputFiles[0].text.replace(/<\/script/gi, '<\\/script'))
           .catch((error: unknown) => { bundle = undefined; throw error })

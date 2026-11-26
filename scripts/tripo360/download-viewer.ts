@@ -39,7 +39,7 @@ try {
       play.disabled = true
     },
     angle: value => { angle.value = String(value) },
-  })
+  }, { stageHeightFill: 0.78 })
   function setPlaying(value: boolean) {
     playing = value
     viewer.play(value)
