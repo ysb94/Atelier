@@ -3,13 +3,20 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { analyze } from './analyze.mjs'
+import { contractsPath, dataFiles, makeDataIndex, readContracts } from './data-map.mjs'
 
 export const toolDir = path.dirname(fileURLToPath(import.meta.url))
 export const root = path.resolve(toolDir, '../..')
 export const outputDir = path.join(toolDir, 'generated')
 export const indexFile = path.join(outputDir, 'ai-index.md')
 export const jsonFile = path.join(outputDir, 'structure.json')
+export const dataIndexFile = path.join(outputDir, 'data-index.md')
 export const outputFile = indexFile
+
+export function structureInputs() {
+  return [contractsPath, ...dataFiles(root),
+    ...['domains.json', 'analyze.mjs', 'labels.mjs', 'build.mjs', 'data-map.mjs'].map(file => path.relative(root, path.join(toolDir, file)))]
+}
 
 export function replaceGeneratedFile(source, destination, rename = fs.renameSync, pause = milliseconds => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds)) {
   for (let attempt = 0;; attempt++) {
@@ -96,7 +103,7 @@ export function formatAiIndex(data) {
   const headerBase = [
     `# Atelier AI Code Index`,
     `generatedAt: ${data.generatedAt} | files: ${data.stats.files} | edges: ${data.stats.edges} | resources: ${data.stats.resources}`,
-    `사용법: 먼저 1~90줄(Section 0~1)만 Read하여 라우트와 도메인 줄 번호를 확인한 뒤, 필요한 도메인 줄 구간만 Read하고 타겟 소스 파일의 줄 범위(offset/limit)로 바로 이동하세요.`,
+    `사용법: 먼저 1~90줄에서 범위를 확인한다. 저장 기준·반영·복제 근거는 [데이터 연결 목록](data-index.md)을 검색하고, 화면·호출 위치는 아래 목차에서 찾는다.`,
     ``,
     `## 0. Section Line Map`,
   ]
@@ -140,12 +147,11 @@ export function build(writeSnapshot = true) {
   const started = performance.now()
   const config = JSON.parse(fs.readFileSync(path.join(toolDir, 'domains.json'), 'utf8'))
   const data = analyze(root, config)
-  data.fingerprint = crypto.createHash('sha256')
-    .update(data.fingerprint)
-    .update(fs.readFileSync(path.join(toolDir, 'analyze.mjs')))
-    .update(fs.readFileSync(path.join(toolDir, 'labels.mjs')))
-    .update(fs.readFileSync(path.join(toolDir, 'build.mjs')))
-    .digest('hex')
+  const fingerprint = crypto.createHash('sha256').update(data.fingerprint)
+  for (const file of structureInputs().sort()) fingerprint.update(file).update(fs.readFileSync(path.join(root, file)))
+  data.fingerprint = fingerprint.digest('hex')
+  const { markdown, ...inventoryStats } = makeDataIndex(root, data, readContracts(root))
+  data.dataInventory = inventoryStats
 
   const indexText = formatAiIndex(data)
   fs.mkdirSync(outputDir, { recursive: true })
@@ -158,13 +164,18 @@ export function build(writeSnapshot = true) {
     const temporaryIndex = `${indexFile}.${process.pid}.tmp`
     fs.writeFileSync(temporaryIndex, indexText)
     replaceGeneratedFile(temporaryIndex, indexFile)
+    const temporaryDataIndex = `${dataIndexFile}.${process.pid}.tmp`
+    fs.writeFileSync(temporaryDataIndex, markdown)
+    replaceGeneratedFile(temporaryDataIndex, dataIndexFile)
   }
 
   Object.defineProperty(data, 'aiIndex', { value: indexText })
+  Object.defineProperty(data, 'dataIndex', { value: markdown })
   const elapsed = Math.round(performance.now() - started)
   const log = elapsed >= 1000 ? console.warn : console.info
   log(`[structure-map] ${data.stats.files} files, ${data.stats.edges} links, ${data.stats.resources} resources (${elapsed}ms)`)
   if (writeSnapshot) console.info(`[structure-map] AI index: ${indexFile} (${Math.round(indexText.length / 1024)}KB)`)
+  if (writeSnapshot) console.info(`[structure-map] Data index: ${inventoryStats.resources} resources, ${inventoryStats.contracts} records, ${inventoryStats.migrations} migrations`)
   return data
 }
 
