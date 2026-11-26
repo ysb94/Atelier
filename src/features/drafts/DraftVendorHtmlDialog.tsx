@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { useDraftLoading } from './DraftLoading'
 import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, Textarea } from '@/components/ui/input'
@@ -19,6 +20,7 @@ export function DraftVendorHtmlDialog({ preferredVendor, value, partners, onSave
   const [selection, setSelection] = useState<string>()
   const [edits, setEdits] = useState(value)
   const [saving, setSaving] = useState(false)
+  useDraftLoading(saving && '업체별 HTML을 저장하는 중…', true)
   const [saveError, setSaveError] = useState('')
   const activeIds = new Set(partners.options.map(option => option.id))
   const options = [...partners.options]

@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { Eye, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useDraftLoading } from '@/features/drafts/DraftLoading'
 
 const previewTypes = {
   'application/pdf': { extension: /\.pdf$/i, matches: (bytes: Uint8Array) => [37, 80, 68, 70, 45].every((byte, index) => bytes[index] === byte) },
@@ -44,6 +45,7 @@ function ChinaWorkOrderPreview({ url, name, type, readFile, onClose }: {
   const [failedSource, setFailedSource] = useState<string | null>(null)
   const objectUrl = preview?.source === url ? preview.objectUrl : undefined
   const failed = failedSource === url
+  useDraftLoading(!failed && !objectUrl && '작업지시서 미리보기를 준비하는 중…')
 
   useEffect(() => {
     const element = dialog.current

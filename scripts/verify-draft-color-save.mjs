@@ -104,8 +104,47 @@ try {
   assert.deepEqual((await parent()).specs.colorNames, colorNames, 'An older full save preserves names it does not send')
   await fullSave([{ id: white, name: '아이보리' }])
   assert.deepEqual((await parent()).specs.colorNames, { [white]: colorNames[white] }, 'Removing a color prunes only its names')
+  await db.exec('reset role')
+  const rpcPrivileges = async () => (await db.query(`
+    select proname, proacl::text as grants, proowner, prosecdef from pg_proc
+    where oid in (
+      'public.save_draft_colors(uuid,timestamptz,jsonb)'::regprocedure,
+      'public.save_draft_colors_with_names(uuid,timestamptz,jsonb)'::regprocedure
+    ) order by proname`
+  )).rows
+  const originalPrivileges = await rpcPrivileges()
+  await db.exec(await readFile('supabase/migrations/20261126083207_draft_color_capacity.sql', 'utf8'))
+  assert.deepEqual(await rpcPrivileges(), originalPrivileges)
+  await actor(author)
+  const colorsAtLimit = [
+    { id: white, ...colorNames[white] },
+    ...Array.from({length:99}, (_, index) => ({
+      id:crypto.randomUUID(), nameEn:`Color ${index + 2}`, nameKo:`컬러 ${index + 2}`,
+    })),
+  ]
+  const infoBefore = await parent()
+  await saveNames(await revision(), colorsAtLimit.slice(0, 60))
+  assert.deepEqual((await read()).map(row => row.id), colorsAtLimit.slice(0, 60).map(row => row.id))
+  await saveNames(await revision(), colorsAtLimit)
+  const atLimit = await read()
+  assert.deepEqual(atLimit.map(row => row.id), colorsAtLimit.map(row => row.id))
+  assert.equal(atLimit.at(-1).sort_order, 100)
+  assert.deepEqual(await parent(), {
+    ...infoBefore,
+    specs: {
+      ...infoBefore.specs,
+      colorNames:Object.fromEntries(colorsAtLimit.map(({id, nameEn, nameKo}) => [id, {nameEn, nameKo}])),
+    },
+  })
+  const capacityRevision = await revision()
+  const tooMany = [...colorsAtLimit, {id:crypto.randomUUID(),nameEn:'Over limit',nameKo:''}]
+  await assert.rejects(saveNames(capacityRevision, tooMany), {code:'22023', message:/100컬러/})
+  await assert.rejects(save(capacityRevision, tooMany.map(color => ({id:color.id,name:color.nameEn}))), {code:'22023', message:/100컬러/})
+  assert.deepEqual(await read(), atLimit)
+  assert.equal(await revision(), capacityRevision)
   console.log('Draft colors SQL: add, reorder, delete, photo changes, revision conflicts and attachment preservation passed')
   console.log('Draft bilingual color names SQL: partial draft names, atomic save, permission checks and legacy preservation passed')
+  console.log('Draft color capacity SQL: 60 and 100 rows saved with names and ordering, 101 rejected without writes, existing files and RPC grants preserved')
 } finally {
   await db.close()
 }

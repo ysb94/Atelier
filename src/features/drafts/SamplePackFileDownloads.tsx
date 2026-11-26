@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { useDraftLoading } from './DraftLoading'
 import { Button } from '@/components/ui/button'
 import { downloadSamplePackFile, type SamplePack } from '@/lib/supabase/sample-work-order-packs'
 
@@ -7,6 +8,7 @@ export function SamplePackFileDownloads({ pack, onClose }: { pack: SamplePack; o
   const title = useId()
   const [started, setStarted] = useState<Set<string>>(() => new Set())
   const [busy, setBusy] = useState<string | null>(null)
+  useDraftLoading(busy !== null && '작업지시서 다운로드를 준비하는 중…', true)
   const [error, setError] = useState('')
   useEffect(() => {
     const element = dialog.current

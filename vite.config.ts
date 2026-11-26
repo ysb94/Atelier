@@ -15,6 +15,14 @@ export default defineConfig(({command, isPreview, mode}) => ({
     'import.meta.env.VITE_ATELIER_BUILT_AT': JSON.stringify(new Date().toISOString()),
   },
   plugins: [windowsOutputCleanupPlugin(), react(), tailwindcss(), mdPriceBrowserPlugin(loadEnv(mode,process.cwd(),''))],
+  build: {
+    rolldownOptions: {
+      input: {
+        index: fileURLToPath(new URL('./index.html', import.meta.url)),
+        viewer: fileURLToPath(new URL('./viewer.html', import.meta.url)),
+      },
+    },
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

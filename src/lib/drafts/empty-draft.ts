@@ -5,8 +5,8 @@ import type {
 } from '@/lib/types'
 import { newSampleWorkOrder } from '@/lib/drafts/sample-work-order'
 
-/** 기획안에서 최대 몇 색까지 잡는지. 기획 시트가 9줄이다. */
-export const MAX_DRAFT_COLORS = 9
+/** 기획안 한 건의 컬러 등록 한도. 컬러 저장 RPC와 같은 값을 사용한다. */
+export const MAX_DRAFT_COLORS = 100
 
 function newId(prefix: string) {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {

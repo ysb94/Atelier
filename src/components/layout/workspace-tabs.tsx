@@ -15,7 +15,7 @@ import {
 import { Home, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { companyWorkspaceRoutes } from './company-routes'
-import { WorkspaceTabActivityContext } from './workspace-tab-activity'
+import { WorkspaceTabActivityContext, WorkspaceTabCloseContext } from './workspace-tab-activity'
 
 export type WorkspaceTab = {
   id: string
@@ -23,6 +23,8 @@ export type WorkspaceTab = {
   pathname: string
   search: string
 }
+
+type CloseTab = (tabId: string, options?: { returnTo: string; expectedSearch: string }) => void
 
 const NAV_LABELS: {
   match: RegExp
@@ -268,6 +270,12 @@ export function useWorkspaceTabs() {
     return next
   }, [active, closingActive, tabs])
 
+  // A save can finish after the user has switched to another tab.
+  const tabState = useRef({ tabs: displayTabs, activeId, navigate })
+  useLayoutEffect(() => {
+    tabState.current = { tabs: displayTabs, activeId, navigate }
+  }, [displayTabs, activeId, navigate])
+
   const openTab = useCallback(
     (tab: WorkspaceTab) => {
       navigate(`${tab.pathname}${tab.search}`)
@@ -275,20 +283,28 @@ export function useWorkspaceTabs() {
     [navigate],
   )
 
-  const closeTab = useCallback(
-    (tabId: string) => {
-      if (tabs.length <= 1) return
+  const closeTab = useCallback<CloseTab>(
+    (tabId, options) => {
+      const { tabs, activeId, navigate } = tabState.current
+      if (tabs.length <= 1 && !options) return
       const index = tabs.findIndex((tab) => tab.id === tabId)
-      if (index === -1) return
+      if (index === -1 || (options && tabs[index].search !== options.expectedSearch)) return
       const next = tabs.filter((tab) => tab.id !== tabId)
-      closingTabRef.current = tabId
+      tabState.current = { tabs: next, activeId, navigate }
       if (tabId === activeId) {
-        const fallback = next[Math.max(0, index - 1)] ?? next[0]
-        if (fallback) navigate(`${fallback.pathname}${fallback.search}`)
+        closingTabRef.current = tabId
+        if (options) {
+          const returnPathname = options.returnTo.split('?')[0]
+          const existing = next.find((tab) => tab.pathname === returnPathname)
+          navigate(existing ? `${existing.pathname}${existing.search}` : options.returnTo, { replace: true })
+        } else {
+          const fallback = next[Math.max(0, index - 1)] ?? next[0]
+          if (fallback) navigate(`${fallback.pathname}${fallback.search}`)
+        }
       }
       setTabs(next)
     },
-    [activeId, navigate, tabs],
+    [],
   )
 
   return {
@@ -362,10 +378,15 @@ export function WorkspaceTabBar({
 const WorkspaceTabPanel = memo(function WorkspaceTabPanel({
   tab,
   active,
+  onClose,
 }: {
   tab: WorkspaceTab
   active: boolean
+  onClose: CloseTab
 }) {
+  const close = useCallback((returnTo: string) => {
+    onClose(tab.id, { returnTo, expectedSearch: tab.search })
+  }, [onClose, tab.id, tab.search])
   return (
     <WorkspaceTabActivityContext.Provider value={active}>
       <div
@@ -375,9 +396,11 @@ const WorkspaceTabPanel = memo(function WorkspaceTabPanel({
           isFillHeightTabId(tab.id) && active && 'h-full min-h-0',
         )}
       >
-        <Routes location={toTabLocation(tab)}>
-          {companyWorkspaceRoutes}
-        </Routes>
+        <WorkspaceTabCloseContext.Provider value={close}>
+          <Routes location={toTabLocation(tab)}>
+            {companyWorkspaceRoutes}
+          </Routes>
+        </WorkspaceTabCloseContext.Provider>
       </div>
     </WorkspaceTabActivityContext.Provider>
   )
@@ -390,9 +413,11 @@ const WorkspaceTabPanel = memo(function WorkspaceTabPanel({
 export function WorkspaceTabPanels({
   tabs,
   activeId,
+  onClose,
 }: {
   tabs: WorkspaceTab[]
   activeId: string
+  onClose: CloseTab
 }) {
   const activatedRef = useRef(new Set<string>([activeId]))
   if (!activatedRef.current.has(activeId)) {
@@ -415,7 +440,7 @@ export function WorkspaceTabPanels({
         const active = tab.id === activeId
         if (isHomeTabId(tab.id) && !active) return null
         if (!activatedRef.current.has(tab.id)) return null
-        return <WorkspaceTabPanel key={tab.id} tab={tab} active={active} />
+        return <WorkspaceTabPanel key={tab.id} tab={tab} active={active} onClose={onClose} />
       })}
     </>
   )

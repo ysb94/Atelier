@@ -5,7 +5,7 @@ import { getSupabase } from './client'
 import type { BrandField, ProductDraft } from '../types'
 
 export type BasicWorkDomain = 'planning' | 'design' | 'md' | 'logistics' | 'china' | 'operations'
-export type BasicWorkAccess = { profileId: string; operator: boolean; legacyEdit: boolean; domains: BasicWorkDomain[]; brandDomains?: Record<string,BasicWorkDomain[]>; manageOwners: string[] }
+export type BasicWorkAccess = { profileId: string; operator: boolean; legacyEdit: boolean; planningDepartmentMember?: boolean; domains: BasicWorkDomain[]; brandDomains?: Record<string,BasicWorkDomain[]>; manageOwners: string[] }
 export async function loadBasicWorkAccess(): Promise<BasicWorkAccess> {
   const { data, error } = await getSupabase().rpc('get_my_basic_work_access')
   if (error) { console.warn('[work-access] 기본 업무 권한 조회 실패', error); throw new Error('업무 권한을 확인하지 못했습니다. 다시 시도해 주세요.') }
@@ -27,8 +27,15 @@ export function useBasicWorkAccess() {
   },[actorId,session?.user.id,reload,refreshProfile])
   return { ...query, access }
 }
+export function hasDraftOwnerAccess(access: BasicWorkAccess | undefined, draft: Pick<ProductDraft, 'createdBy'>) {
+  return Boolean(access && (access.operator || draft.createdBy === access.profileId))
+}
 export function canWriteDraft(access: BasicWorkAccess | undefined, draft?: Pick<ProductDraft, 'createdBy'> | null, brandId?: string | null) {
-  return Boolean(access && (draft ? access.operator || draft.createdBy === access.profileId : access.domains.includes('planning') || (brandId ? access.brandDomains?.[brandId]?.includes('planning') : Object.values(access.brandDomains??{}).some(domains=>domains.includes('planning')))))
+  if (!access) return false
+  if (draft) return hasDraftOwnerAccess(access, draft) || access.planningDepartmentMember === true
+  return access.domains.includes('planning') || Boolean(brandId
+    ? access.brandDomains?.[brandId]?.includes('planning')
+    : Object.values(access.brandDomains ?? {}).some(domains => domains.includes('planning')))
 }
 export function canWriteProductField(access: BasicWorkAccess | undefined, field: Pick<BrandField, 'owner'> & Partial<Pick<BrandField,'brandId'>>) {
   return Boolean(access && (access.operator || access.legacyEdit || (field.brandId ? access.brandDomains?.[field.brandId]?.includes(field.owner as BasicWorkDomain) : access.domains.includes(field.owner as BasicWorkDomain))))

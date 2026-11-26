@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { useDraftLoading } from './DraftLoading'
 
 export function DraftTeamActions({ label, className, confirmText = '확정', confirmBlockedReason, showSave = true, locked, confirmed, editing, conflict, busy, onEdit, onSave, onReset }: {
   label: string
@@ -16,6 +17,7 @@ export function DraftTeamActions({ label, className, confirmText = '확정', con
   onSave: (confirmed: boolean) => void
   onReset: () => void
 }) {
+  useDraftLoading(busy && `${label} 저장 중…`, true)
   return <div className={cn('draft-team-actions', className)} aria-busy={busy} title={confirmed ? undefined : confirmBlockedReason}>
     {conflict ? <Button type="button" variant="outline" size="sm" className="draft-team-control" disabled={locked}
       aria-label={`${label} 최신값 불러오기`} onClick={onReset}>다시 조회</Button> : <>

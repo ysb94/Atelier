@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { useDraftLoading } from './DraftLoading'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight, Paperclip } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -25,6 +26,8 @@ export function SampleWorkOrderPackDetails({ id, label, showBulk = false }: { id
   const actor = profile?.id === session?.user.id ? profile?.id : undefined
   const query = useQuery({ queryKey: [...samplePackPrefix, actor, id], queryFn: () => getSamplePack(id), enabled: Boolean(actor), retry: false })
   const pack = query.data
+  useDraftLoading(query.isLoading && '작업지시서 첨부 목록을 불러오는 중…')
+  useDraftLoading(busy && !bulk.dialog && '작업지시서 다운로드를 준비하는 중…', true)
 
   async function download(action: () => Promise<unknown>) {
     if (busy) return

@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { useDraftLoading } from './DraftLoading'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -27,6 +28,7 @@ export function DraftProposerPicker({ value, onChange, actorId, readOnly }: {
     ...sharedReadPolicy,
   })
   const query = search.trim().toLowerCase()
+  useDraftLoading(open && directory.isLoading && '제안자 직원 목록을 불러오는 중…')
   const people = (directory.data ?? [])
     .flatMap(person => person.displayName?.trim() ? [{ id: person.id, name: person.displayName.trim(), position: person.position }] : [])
     .filter(person => person.name.toLowerCase().includes(query))

@@ -18,7 +18,7 @@ import type { AccumulatedTag, ContextMenuItem, FolderGroup, GridSortMode, GridVi
 import {
   buildFolderPrefix, buildMediaTag, copyText, ensureTagBreak, findQueueInternalDuplicateKeys,
   findQueueInternalEmbedDuplicateKeys, formatLogSentenceParts, getCurrentMonthKey,
-  getFolderDisplayName, getItemKey, getItemPublicUrl, getItemStorageKey,
+  getFolderDisplayName, getItemKey, getItemPublicUrl, getItemShareUrl, getItemStorageKey,
   getParentFolderPath, getUploadJobKey, groupItemsByFolder, itemMatchesSearch,
   sanitizeNameInput, sortGlobalSearchMatches, sortItemsForGrid,
 } from './file-manager-utils'
@@ -274,7 +274,7 @@ export function useDesignFileManager() {
     })
   }, [activeBrowseType, brandSlug, refreshAfterCrud, uiConfirm, withBusy])
   const addSelectedToTags = useCallback(() => setAccumulatedTags((tags) => [...tags, ...[...selectedItems.values()].flatMap((entry) => entry.kind === 'file' ? [{ uid: ++tagUid.current, item: entry.item, type: entry.type, url: getItemPublicUrl(entry.item, entry.type, activeFolder, activeBrowseType), tag: ensureTagBreak(buildMediaTag(entry.type, getItemPublicUrl(entry.item, entry.type, activeFolder, activeBrowseType), entry.item)) }] : [])]), [activeBrowseType, activeFolder, selectedItems])
-  const copySelectedUrl = useCallback(async () => { if (!selectedPreview) return; await uiAlert(await copyText(getItemPublicUrl(selectedPreview.item, selectedPreview.type, activeFolder, activeBrowseType)) ? 'URL이 복사되었습니다.' : '복사에 실패했습니다. 브라우저 권한을 확인해주세요.') }, [activeBrowseType, activeFolder, selectedPreview, uiAlert])
+  const copySelectedUrl = useCallback(async () => { if (!selectedPreview) return; await uiAlert(await copyText(getItemShareUrl(selectedPreview.item, selectedPreview.type, activeFolder, activeBrowseType)) ? 'URL이 복사되었습니다.' : '복사에 실패했습니다. 브라우저 권한을 확인해주세요.') }, [activeBrowseType, activeFolder, selectedPreview, uiAlert])
   const copySelectedTag = useCallback(async () => { if (!selectedPreview) return; const url = getItemPublicUrl(selectedPreview.item, selectedPreview.type, activeFolder, activeBrowseType); await uiAlert(await copyText(ensureTagBreak(buildMediaTag(selectedPreview.type, url, selectedPreview.item))) ? '태그가 복사되었습니다.' : '복사에 실패했습니다. 브라우저 권한을 확인해주세요.') }, [activeBrowseType, activeFolder, selectedPreview, uiAlert])
   const openHistory = useCallback(async () => {
     setHistoryOpen(true)

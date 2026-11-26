@@ -18,7 +18,7 @@ import {
   getBrowseTypeSelectionKey,
   getFolderSelectionKey,
   getItemKey,
-  getItemPublicUrl,
+  getItemShareUrl,
   getImmediateChildFolders,
 } from './file-manager-utils'
 import type { SelectionEntry, ServerFileItem } from './types'
@@ -240,7 +240,7 @@ export function DesignFileManagerPage() {
   const open = () => {
     if (!manager.selectedPreview) return
     window.open(
-      getItemPublicUrl(
+      getItemShareUrl(
         manager.selectedPreview.item,
         manager.selectedPreview.type,
         manager.activeFolder,
