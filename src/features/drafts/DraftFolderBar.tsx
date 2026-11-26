@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useDraftLoading } from './DraftLoading'
 import { Folder, FolderOpen, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
@@ -60,6 +61,7 @@ export function DraftFolderBar({
   const savingOrder = useRef(false)
   const [dropTarget, setDropTarget] = useState<FolderDropTarget | null>(null)
   const [moveError, setMoveError] = useState('')
+  useDraftLoading(busy && '새 폴더를 저장하는 중…', true)
 
   function endDrag() {
     dragged.current = null
@@ -226,6 +228,7 @@ export function DraftFolderHeading({
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(folder.label)
   const [busy, setBusy] = useState(false)
+  useDraftLoading(busy && '폴더 변경 사항을 저장하는 중…', true)
   const [error, setError] = useState('')
   const editor = useRef<HTMLDivElement>(null)
 

@@ -27,6 +27,7 @@ import { DRAFT_STATUS_LABEL, type Brand, type DraftColorImageChoice, type DraftC
 import { cn, formatNumber } from '@/lib/utils'
 import { UNASSIGNED_DRAFT_FOLDER_LABEL } from './draft-folder-filter'
 import { formatReleaseGroupLabel } from './release-schedule-preview'
+import { useDraftLoading } from './DraftLoading'
 import './draft-board.css'
 import { DraftSampleProgress } from './DraftSampleProgress'
 import { DraftColorSampleProgress } from './DraftColorSampleProgress'
@@ -58,6 +59,7 @@ function SampleWorkOrderButton({
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
+  useDraftLoading(busy && '작업지시서를 올리는 중…', true)
   const [error, setError] = useState('')
 
   return (
@@ -126,6 +128,7 @@ function SheetConfirmButton({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const tone = confirmed && doneStyle ? 'is-done' : 'is-neutral'
+  useDraftLoading(busy && '기획안 확정 상태를 저장하는 중…', true)
   return (
     <>
       <button
@@ -225,6 +228,8 @@ function ColorDocumentButton({
   const [rows, setRows] = useState<ColorFormRow[]>([{ key: 1, id: null, ...EMPTY_COLOR_NAMES }])
   const [busy, setBusy] = useState(false)
   const [preparingPhotoKey, setPreparingPhotoKey] = useState<number | null>(null)
+  useDraftLoading(preparingPhotoKey !== null && '컬러 사진을 준비하는 중…', true)
+  useDraftLoading(busy && '컬러 구성을 저장하는 중…', true)
   const [error, setError] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
@@ -587,6 +592,7 @@ function SheetInlineField({
   const [busy, setBusy] = useState(false)
   const revertRef = useRef(false)
   const busyRef = useRef(false)
+  useDraftLoading(busy && '기획안 입력값을 저장하는 중…', true)
 
   useEffect(() => {
     if (!readOnly && inputRef.current && document.activeElement === inputRef.current) return
@@ -766,6 +772,7 @@ function DraftReleaseFolderSelect({ draft, folders, readOnly, onChange }: {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const selected = folders.find((folder) => folder.id === draft.seasonId)
+  useDraftLoading(saving && '출시 폴더를 저장하는 중…', true)
 
   async function selectFolder(seasonId: string) {
     setSaving(true)
@@ -852,6 +859,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   const colorSampleReceived = Boolean(latestColorRound?.receivedAt)
   const doneColorIds = new Set(latestColorRound ? draft.specs.colorSampleDone?.[latestColorRound.id] ?? [] : [])
   const [pendingDone, setPendingDone] = useState<Record<string, boolean>>({})
+  useDraftLoading(Object.keys(pendingDone).length > 0 && '컬러샘플 진행 상태를 저장하는 중…', true)
   const informationId = useId()
   const [information, setInformation] = useState<{
     anchor: HTMLButtonElement

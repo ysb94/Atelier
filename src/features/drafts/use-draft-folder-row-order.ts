@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useDraftLoading } from './DraftLoading'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { diagnosticOperation } from '@/lib/diagnostics/workflow-trace'
@@ -73,6 +74,8 @@ export function useDraftFolderRowOrder(folderId: string | undefined, actorId: st
   }
 
   const missing = ['PGRST205', '42P01'].includes(errorCode(query.error) ?? '')
+  useDraftLoading(query.isLoading && '기획안 순서를 불러오는 중…')
+  useDraftLoading(isPending && '기획안 순서를 저장하는 중…', true)
   return {
     ids: query.data?.draft_ids,
     ready,

@@ -1,4 +1,5 @@
 import { useState, useRef, type ReactNode } from 'react'
+import { useDraftLoading } from './DraftLoading'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -57,6 +58,8 @@ export function SampleWorkOrderPackField({ label, draftId, slot, side, readOnly,
   const showEditor = editable && (!savedFile || editing)
   const waiting = samplePackServerMissing(draftPack.error)
   const loading = draftPack.isFetching || (Boolean(previousId) && previous.isFetching)
+  useDraftLoading(showEditor && (draftPack.isLoading || previous.isLoading) && '작업지시서 첨부 목록을 불러오는 중…')
+  useDraftLoading(busy && (progress || '작업지시서를 저장하는 중…'), true)
   const uploadDisabled = busy || saving || loading || waiting
   const hasEdits = Boolean(added.length || removed.length)
 

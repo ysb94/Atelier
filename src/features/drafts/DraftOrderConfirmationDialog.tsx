@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
+import { useDraftLoading } from './DraftLoading'
 import { Button } from '@/components/ui/button'
 import { draftColorNames } from '@/lib/drafts/color-names'
 import { previewDraftOrderNumbers, type DraftOrderNumbers } from '@/lib/supabase/draft-team-work'
@@ -33,6 +34,7 @@ export function DraftOrderConfirmationDialog({ draft, actorId, quantities, desti
   })
   const candidates = styleNumbers.data?.numbers
   const loadingNumbers = Boolean(brandId && colors.length && styleNumbers.isPending && !styleNumbers.isError)
+  useDraftLoading(styleNumbers.isLoading && '사용 가능한 품번을 확인하는 중…')
   const notEnoughNumbers = Boolean(styleNumbers.isSuccess && colors.some(color => !candidates?.[color.id]))
   const confirmDisabled = locked || !brandId || !colors.length || !candidates || styleNumbers.isFetching || styleNumbers.isError || notEnoughNumbers
 

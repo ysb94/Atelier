@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { useDraftLoading } from './DraftLoading'
 import { Button } from '@/components/ui/button'
 import type { DraftSampleWorkOrder } from '@/lib/types'
 import { sampleElapsedDays, sampleHistoryDay, sampleTripSpanDays } from '@/lib/drafts/sample-work-order'
@@ -26,6 +27,7 @@ export function DraftSampleProgress({ orders, kind = 'sample', joined = false, o
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const bulk = useSamplePackDownload()
+  useDraftLoading(busy && !bulk.dialog && '샘플 작업을 처리하는 중…', true)
   const pending = useRef(false)
   const list = orders.filter(order => order.url?.trim()).slice().sort((a, b) => a.round - b.round)
   const latest = list.at(-1)

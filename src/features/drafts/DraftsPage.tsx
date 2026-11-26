@@ -50,6 +50,7 @@ import { useDraftFolderRowOrder } from './use-draft-folder-row-order'
 import { matchesDraftFolder, UNASSIGNED_DRAFT_FOLDER_LABEL } from './draft-folder-filter'
 import { DraftSheetRow, type DraftConfirmFlag } from './DraftSheetRow'
 import { DraftBoardView } from './DraftBoardView'
+import { DraftLoadingProvider, useDraftLoading } from './DraftLoading'
 import { useDraftSheetLayout } from './draft-sheet-layout'
 import { useDraftPriceRequests } from './useDraftPriceRequests'
 import { useDraftPriceDestinations } from './use-draft-price-destinations'
@@ -104,6 +105,10 @@ function emptyMessage(
 }
 
 export function CompanyDraftsPage() {
+  return <DraftLoadingProvider><CompanyDraftsContent /></DraftLoadingProvider>
+}
+
+function CompanyDraftsContent() {
   useRenderWatch('CompanyDraftsPage')
   const { brands, brandById, loading: brandsLoading } = useCompanyBrandScope()
   const { profile, session } = useAuth()
@@ -438,6 +443,10 @@ export function CompanyDraftsPage() {
 
   const loading =
     draftsQuery.isLoading || seasonQueries.loading
+  useDraftLoading((loading || brandsLoading) && '기획안과 폴더를 불러오는 중…')
+  useDraftLoading(workAccess.isLoading && '기획안 권한을 확인하는 중…')
+  useDraftLoading(!showingCompleted && (prices.query.isLoading || teamWork.query.isLoading || visualBoard.query.isLoading) &&
+    '단가와 팀별 작업 상태를 불러오는 중…')
 
   const scopedFolderPending = (brandsLoading || seasonQueries.loading) && Boolean(targetBrandSlug)
     && (!scopedBrand || (folderFilter !== 'all' && folderFilter !== 'unassigned' && !activeFolder))

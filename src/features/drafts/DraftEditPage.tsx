@@ -84,6 +84,7 @@ import { draftDetailPath, withSearch } from '@/lib/workspace/company-paths'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { cn, formatNumber } from '@/lib/utils'
 import { isUnassignedReleaseFolder } from './release-schedule-preview'
+import { DraftLoadingProvider, useDraftLoading } from './DraftLoading'
 
 const EMPTY_STYLES: Style[] = []
 const DRAFT_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp']
@@ -277,9 +278,9 @@ function formatWeightSpec(value: string) {
 export function DraftEditPage() {
   const { draftId } = useParams()
   const { search } = useLocation()
-  return !draftId || draftId === 'new'
+  return <DraftLoadingProvider>{!draftId || draftId === 'new'
     ? <NewDraft key={search} />
-    : <DraftEditor key={draftId} />
+    : <DraftEditor key={draftId} />}</DraftLoadingProvider>
 }
 
 function NewDraft() {
@@ -295,7 +296,9 @@ function NewDraft() {
     queryFn: () => getSeasonsByBrand(brand!.id),
     enabled: Boolean(brand && needsFolder),
   })
-  if ((brandSlug && !brand && loading) || (needsFolder && brand && seasons.isPending)) {
+  const loadingLocation = Boolean((brandSlug && !brand && loading) || (needsFolder && brand && seasons.isPending))
+  useDraftLoading(loadingLocation && '기획안 추가 위치를 불러오는 중…')
+  if (loadingLocation) {
     return <p role="status" className="py-16 text-center text-sm text-muted-foreground">기획안 추가 위치를 불러오는 중입니다.</p>
   }
   const folder = needsFolder ? seasons.data?.find(item =>
@@ -598,6 +601,13 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
       setError(err instanceof Error ? err.message : '삭제에 실패했습니다.')
     },
   })
+
+  useDraftLoading(!isNew && draftQuery.isFetching && !draftQuery.data && '기획안을 불러오는 중…')
+  useDraftLoading(workAccess.isLoading && '기획안 권한을 확인하는 중…')
+  useDraftLoading(Boolean(form.brandId) && stylesQuery.isLoading && '연결할 상품을 불러오는 중…')
+  useDraftLoading(readingImage && '대표 사진을 준비하는 중…', true)
+  useDraftLoading(saveMutation.isPending && '기획안을 저장하는 중…', true)
+  useDraftLoading(deleteMutation.isPending && '기획안을 삭제하는 중…', true)
 
   if (!isNew && draftQuery.isPending) {
     return (

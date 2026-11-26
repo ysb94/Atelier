@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { useDraftLoading } from './DraftLoading'
 import { ImagePlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -26,6 +27,8 @@ function DraftVisualImageCard({ name, visualPhoto, revision, colorPhoto, draftRe
   const [pending, setPending] = useState<PhotoSelection>()
   const [preparing, setPreparing] = useState(false)
   const [saving, setSaving] = useState(false)
+  useDraftLoading(preparing && '비주얼 이미지를 준비하는 중…', true)
+  useDraftLoading(saving && '비주얼 이미지를 저장하는 중…', true)
   const [error, setError] = useState('')
   const working = readOnly ? undefined : workingCopy?.edits.image
   const localSelection = pending ?? (working ? {
