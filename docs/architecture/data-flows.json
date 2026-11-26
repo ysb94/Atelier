@@ -358,7 +358,7 @@
     "id": "planning-drafts",
     "label": "기획안, 컬러, 옵션, 브랜드, 단가 회신",
     "origin": "기획안 기록은 product_drafts, 옵션·컬러는 draft_options와 draft_colors다. 단가요청과 회신은 요청의 차수·컬러 ID를 사용한다.",
-    "write": "기획안 추가 시 브랜드·폴더 미지정은 빈 값으로 시작한다. 목록에서 선택한 브랜드와 폴더는 새 폼에서 소속을 확인한 뒤 기존 기획안 저장 API가 brand_id와 season_id로 저장한다. 선택한 위치를 조회하지 못하면 저장 전에 다시 선택하도록 안내한다. 해당 업무 권한이 있는 중국팀이 컬러별 단가를 회신한다.",
+    "write": "기획안 추가 시 브랜드·폴더 미지정은 빈 값으로 시작한다. 목록에서 선택한 브랜드와 폴더는 새 폼에서 소속을 확인한 뒤 기존 기획안 저장 API가 brand_id와 season_id로 저장한다. 선택한 위치를 조회하지 못하면 저장 전에 다시 선택하도록 안내한다. 같은 회사의 활성 기획부서원은 동료 기획안을 수정하고 같은 브랜드 안에서 출시 폴더를 옮길 수 있다. 작성자 UUID는 고정되며 기획안 삭제는 작성자·지정 운영 계정이 처리한다. 해당 업무 권한이 있는 중국팀이 컬러별 단가를 회신한다.",
     "propagation": "저장한 기획안은 같은 브랜드·폴더 목록에 표시된다. 기획 목록은 현재 요청에 연결된 회신을 읽고 중국 업무는 대기·이전 회신을 권한에 따라 표시한다.",
     "copies": "요청 차수와 회신값, 요청 당시 컬러 이미지 참조가 따로 보존된다.",
     "reason": "기획안 변경 뒤에도 이전 요청이 어떤 색과 자료에 대한 것인지 복구하고 기존 회신을 보존한다.",
@@ -373,15 +373,17 @@
       "docs/architecture/SUPABASE.md",
       "src/features/drafts/DraftsPage.tsx",
       "src/features/drafts/DraftEditPage.tsx",
+      "src/lib/supabase/basic-work-access.ts",
       "src/lib/supabase/product-drafts.ts",
-      "supabase/migrations/20261109044448_draft_price_requests.sql"
+      "supabase/migrations/20261109044448_draft_price_requests.sql",
+      "supabase/migrations/20261126081745_draft_planning_collaboration.sql"
     ]
   },
   {
     "id": "sample-packs",
     "label": "샘플 회차, 중국 작업지시서, 받기 확인",
     "origin": "기획안의 샘플 회차와 등록된 작업지시서 묶음 버전을 사용한다. 실제 파일은 비공개 sample-work-orders 버킷에 있다.",
-    "write": "회차별 묶음 등록에서 서버가 파일 참조와 등재 버전을 확정하고 중국팀 권한 사용자만 해당 버전 수령을 기록한다.",
+    "write": "작성자·지정 운영 계정과 같은 회사의 활성 기획부서원이 회차별 묶음을 등록한다. 서버가 파일 참조와 등재 버전을 확정하고 중국팀 권한 사용자만 해당 버전 수령을 기록한다.",
     "propagation": "기획 화면과 중국팀 작업 목록은 등록된 최신 버전을 공유한다. 수정본의 수령은 새 버전에 연결된다.",
     "copies": "묶음 참조, 파일 메타데이터, 과거 버전과 역할별 수령 기록을 보존한다.",
     "reason": "기획안 본문과 여러 파일을 분리하고, 누가 어느 버전을 받았는지 확인하기 위해서다.",
@@ -391,7 +393,8 @@
     ],
     "evidence": [
       "docs/architecture/SUPABASE.md",
-      "src/lib/supabase/sample-work-order-packs.ts"
+      "src/lib/supabase/sample-work-order-packs.ts",
+      "supabase/migrations/20261126081745_draft_planning_collaboration.sql"
     ]
   },
   {

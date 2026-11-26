@@ -75,7 +75,7 @@ import {
   withPendingNextSampleWorkOrder,
 } from '@/lib/drafts/sample-work-order'
 import { useAuth } from '@/lib/supabase/auth'
-import { useBasicWorkAccess, canWriteDraft } from '@/lib/supabase/basic-work-access'
+import { useBasicWorkAccess, canWriteDraft, hasDraftOwnerAccess } from '@/lib/supabase/basic-work-access'
 import {
   formatSizeSpec,
   parseSizeSpec,
@@ -380,7 +380,10 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
     : EMPTY_STYLES
 
   const loaded = draftQuery.data
-  const editable = canWriteDraft(workAccess.access, isNew ? null : loaded ?? { createdBy: null }, form.brandId)
+  const editable = isNew
+    ? canWriteDraft(workAccess.access, null, form.brandId)
+    : Boolean(loaded && canWriteDraft(workAccess.access, loaded))
+  const deletable = Boolean(loaded && hasDraftOwnerAccess(workAccess.access, loaded))
   const hasBothNames = hasBothDraftNames(form)
   useEffect(() => {
     if (!loaded) return
@@ -539,7 +542,7 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
 
   const saveMutation = useMutation({
     mutationFn: async (next?: ProductDraftInput) => {
-      if (!editable) throw new Error('기획안은 작성자만 수정할 수 있습니다.')
+      if (!editable) throw new Error('기획안을 수정할 권한이 없습니다.')
       const source = next ?? form
       const creator = profile?.displayName?.trim() ?? ''
       const payload =
@@ -583,7 +586,7 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      if (!editable) throw new Error('기획안은 작성자만 삭제할 수 있습니다.')
+      if (!deletable) throw new Error('작성자와 지정된 운영 계정만 기획안을 삭제할 수 있습니다.')
       if (!draftId || isNew) return
       return deleteProductDraft(draftId)
     },
@@ -677,12 +680,12 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
               {savedAt} 저장됨
             </span>
           ) : null}
-          {!isNew && editable ? (
+          {!isNew && deletable ? (
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              disabled={!editable || deleteMutation.isPending}
+              disabled={deleteMutation.isPending}
               onClick={() => {
                 if (window.confirm('이 기획안을 삭제할까요?')) {
                   deleteMutation.mutate()
@@ -705,7 +708,7 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
         </div>
       </div>
 
-      {workAccess.error ? <p role="alert" className="mb-3 text-sm text-danger">{workAccess.error.message}</p> : !editable ? <p role="status" className="mb-3 text-sm text-muted-foreground">조회 전용 · 작성자와 지정된 운영 계정만 수정·삭제할 수 있습니다.</p> : null}
+      {workAccess.error ? <p role="alert" className="mb-3 text-sm text-danger">{workAccess.error.message}</p> : !editable ? <p role="status" className="mb-3 text-sm text-muted-foreground">조회 전용 · 기획부서, 작성자, 지정 운영 계정에서 수정할 수 있습니다.</p> : null}
       <fieldset disabled={!editable} className="min-w-0 border-0 p-0">
       {error ? (
         <p role="alert" className="mb-3 rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">

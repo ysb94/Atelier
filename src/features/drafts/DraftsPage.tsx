@@ -30,7 +30,7 @@ import { normalizeDraftManualPrice } from '@/lib/drafts/manual-price'
 import { receiveSample, registerNextReceivedSample } from '@/lib/drafts/sample-receipt'
 import { reopenDraftInformation, writeColorSpec } from '@/lib/drafts/color-spec'
 import { useAuth } from '@/lib/supabase/auth'
-import { useBasicWorkAccess, canWriteDraft } from '@/lib/supabase/basic-work-access'
+import { useBasicWorkAccess, canWriteDraft, hasDraftOwnerAccess } from '@/lib/supabase/basic-work-access'
 import { draftPriceError, type DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
 import { saveDraftColors, saveDraftReleaseFolder } from '@/lib/supabase/product-drafts'
 import { saveSeasonOpening } from '@/lib/supabase/seasons'
@@ -188,7 +188,7 @@ export function CompanyDraftsPage() {
         trace.step('check_access')
         const current = currentDraft(draftId)
         if (!current) throw new Error('기획안을 찾지 못했습니다.')
-        if (!canWriteDraft(workAccess.access,current)) throw new Error('작성자만 기획안을 수정할 수 있습니다.')
+        if (!canWriteDraft(workAccess.access, current)) throw new Error('기획안을 수정할 권한이 없습니다.')
         trace.step('validate_input')
         const updated = await trace.run('save', (context) => save(current, context))
         await trace.run('refresh_queries', async () => {
@@ -233,7 +233,7 @@ export function CompanyDraftsPage() {
     const creator = profile?.displayName?.trim()
     if (!creator) return
     for (const draft of drafts) {
-      if (draft.owner.trim() || ownerFillRef.current.has(draft.id)) continue
+      if (draft.owner.trim() || ownerFillRef.current.has(draft.id) || !hasDraftOwnerAccess(workAccess.access, draft)) continue
       ownerFillRef.current.add(draft.id)
       void saveDraftChange(draft.id, (current) => {
         const input = draftToInput(current)
@@ -244,7 +244,7 @@ export function CompanyDraftsPage() {
         console.warn('[drafts] 기획안 작성자 저장 실패', err)
       })
     }
-  }, [drafts, profile?.displayName])
+  }, [drafts, profile?.displayName, workAccess.access])
 
   const seasons = useMemo(
     () => flattenListQueries(seasonQueries),

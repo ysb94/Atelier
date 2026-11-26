@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import {readFile} from 'node:fs/promises'
 import path from 'node:path'
 import {createServer} from 'vite'
 import react from '@vitejs/plugin-react'
@@ -77,6 +78,7 @@ async function localApi(req,res){
 }
 try{
  await db.exec('reset role');for(const [name,id] of Object.entries(departments))await db.query('update public.departments set name=$2 where id=$1',[id,{planning:'기획팀',design:'Visual Team',md:'MD Team',logistics:'물류팀',china:'중국팀'}[name]])
+ await db.exec(await readFile('supabase/migrations/20261126081745_draft_planning_collaboration.sql','utf8'))
  const brandId = 'b0000000-0000-4000-8000-000000000001'
  const folderId = '20000000-0000-4000-8000-000000000001'
  await db.query("insert into public.seasons(id,brand_id,code,name,release_timing,year,status) values($1,$2,'TEST-FOLDER','출시 폴더 검증','',2030,'active')",[folderId,brandId])
@@ -218,6 +220,20 @@ try{
  assert.equal(await nameOnNewDraft.inputValue(),'')
  assert.equal(await draftBrand.inputValue(),'')
  assert.equal(await page.getByRole('textbox',{name:'영문명',exact:true}).inputValue(),'')
+ const collaborationDraft = (await db.query('select id,draft_no from public.product_drafts where name_ko=$1',['선택 폴더 신규 기획안'])).rows[0]
+ await page.goto(origin+'/drafts?actor=planner2',{waitUntil:'domcontentloaded',timeout:120000})
+ const collaborationFolder = page.getByRole('combobox',{name:`${collaborationDraft.draft_no} 출시 폴더`,exact:true})
+ await page.waitForFunction(label=>[...document.querySelectorAll('select')].some(select=>select.getAttribute('aria-label')===label&&!select.disabled),`${collaborationDraft.draft_no} 출시 폴더`)
+ assert.equal(await collaborationFolder.inputValue(),folderId)
+ await page.goto(origin+'/drafts/'+collaborationDraft.id+'?actor=planner2',{waitUntil:'domcontentloaded',timeout:120000})
+ const collaborationSave = page.getByRole('button',{name:'저장',exact:true})
+ await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(button=>button.textContent?.trim()==='저장'&&!button.disabled))
+ assert.equal(await page.getByRole('button',{name:'삭제',exact:true}).count(),0)
+ assert.equal(await page.getByLabel('1차 샘플 작업지시서 파일',{exact:true}).isEnabled(),true)
+ await page.goto(origin+'/drafts/'+collaborationDraft.id+'?actor=design',{waitUntil:'domcontentloaded',timeout:120000})
+ await page.getByText(/조회 전용/).waitFor()
+ assert.equal(await collaborationSave.isDisabled(),true)
+ assert.equal(await page.getByLabel('1차 샘플 작업지시서 파일',{exact:true}).count(),0)
  if(!draftCreationOnly){
  await page.goto(origin+'/drafts/new?actor=planner',{waitUntil:'domcontentloaded',timeout:120000})
  const draftNameKo=page.getByRole('textbox',{name:'한글명',exact:true})
@@ -331,7 +347,7 @@ try{
  await nextSample.getByRole('radio',{name:'3차 샘플 진행',exact:true}).waitFor()
  assert.equal(await sampleCard(1).getByRole('link',{name:'sample-1.pdf',exact:true}).count(),1)
  await page.getByRole('combobox',{name:'직원 계정 전환'}).selectOption('planner2')
- await page.waitForFunction(()=>[...document.querySelectorAll('button')].find(button=>button.textContent?.trim()==='저장')?.disabled===true)
+ await page.waitForFunction(()=>[...document.querySelectorAll('button')].find(button=>button.textContent?.trim()==='저장')?.disabled===false)
  assert.equal(await page.getByRole('button',{name:'삭제',exact:true}).count(),0)
  await page.getByRole('combobox',{name:'직원 계정 전환'}).selectOption('ceo')
  await page.waitForFunction(()=>[...document.querySelectorAll('button')].find(button=>button.textContent?.trim()==='저장')?.disabled===false)
@@ -357,7 +373,7 @@ try{
  }
  assert.deepEqual(errors,[])
  console.log(draftCreationOnly
-  ? 'Draft creation browser: image drop, picker, saved image, folder prefill, failed save keeps input, successful save closes the tab and reopens blank (local PostgreSQL)'
+  ? 'Draft creation browser: image drop, failed save, clean reopening, coworker folder and sample controls, and other-department read-only mode passed (local PostgreSQL)'
   : proposerOnly
   ? 'Draft proposer browser: create, edit, clear, search focus, failed attendance lookup independence, and saved reload passed (local PostgreSQL)'
   : 'work-requests-browser: real create/reload/attachment, two-window realtime refresh, same-department account switch, private chat, completion review/result confirmation, My home hub, desktop/mobile and draft creator/read-only/operator transition passed (local PostgreSQL, no production writes)')
