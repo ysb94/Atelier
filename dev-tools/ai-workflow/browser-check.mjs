@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createServer } from 'vite'
+import { createServer, normalizePath } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { chromium } from 'playwright-core'
@@ -17,7 +17,7 @@ export async function openFixture(root = process.cwd(),{scenario}={}) {
       }
     },configureServer(server){server.middlewares.use((req,res,next)=>{
       if(req.headers.accept?.includes('text/html')){
-        server.transformIndexHtml(req.url,`<!doctype html><html><head></head><body><div id="root"></div><script type="module" src="/@fs/${fixture}/${entry}"></script></body></html>`).then(html=>{res.setHeader('Content-Type','text/html');res.end(html)}).catch(next);return
+        server.transformIndexHtml(req.url,`<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module" src="/@fs/${normalizePath(path.join(fixture,entry))}"></script></body></html>`).then(html=>{res.setHeader('Content-Type','text/html; charset=utf-8');res.end(html)}).catch(next);return
       }next()
     })}},react(),tailwindcss()],
     resolve:{alias:[{find:'@/lib/supabase/auth',replacement:path.join(fixture,'auth.ts')},{find:'@/lib/supabase/client',replacement:path.join(fixture,'client.ts')},{find:'@',replacement:path.join(root,'src')}]},

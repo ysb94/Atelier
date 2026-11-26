@@ -3,9 +3,12 @@ const params = new URLSearchParams(location.search)
 const position = params.get('position') || '사원'
 export const profile = {
   id: 'fixture-user', email: params.get('email') || 'fixture@example.invalid', displayName: '검증 직원',
-  companyId: 'e0000000-0000-4000-8000-000000000001', departmentId: 'fixture-department', departmentName: params.get('department')??'운영지원팀',
+  companyId: 'e0000000-0000-4000-8000-000000000001', departmentId: params.get('departmentId')??'fixture-department', departmentName: params.get('department')??'운영지원팀',
   position, jobGrade: params.get('grade')??'사원', hireDate:params.get('hire')??null,status: params.get('status') || 'active', isAdmin: params.get('admin')==='true', capabilities: [], memberships: [],
   departmentPersonnelScope: 'company', nameConfirmedAt: '2026-01-01', requestedAt: '2026-01-01',
+  permissionGrants: params.has('organization-editor')
+    ? [{permission:'org.manage',scopeKind:'company',scopeId:'e0000000-0000-4000-8000-000000000001'}]
+    : [],
 }
 export function useAuth() { return { ready: true, profile, session: { user: { id: profile.id } }, email: profile.email } }
 export function canAccessBrand() { return true }

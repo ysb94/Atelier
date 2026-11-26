@@ -232,7 +232,6 @@ export function MembersPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [filter, setFilter] = useState<'all' | 'active' | 'disabled' | 'departed'>('all')
   const [employeeSearch, setEmployeeSearch] = useState('')
   const employeeSearchInput = useRef<HTMLInputElement>(null)
-  const [newDeptName, setNewDeptName] = useState('')
   const safeSession = Boolean(me?.id && me.id === session?.user.id && !isPreviewProfile(me))
   const canManageMembers = safeSession && canManagePersonnel(me)
   const canProcessDeparture = embedded && canManageMembers && !preview?.active
@@ -326,19 +325,6 @@ export function MembersPage({ embedded = false }: { embedded?: boolean } = {}) {
       ['department-work'], ['work-requests'], ['work-request-settings'], ['my-home-work-notices'], ['departure-handover'],
     ].map(queryKey => queryClient.invalidateQueries({ queryKey })))
   }
-
-  const createDeptMutation = useMutation({
-    mutationFn: () => createDepartment(newDeptName),
-    onSuccess: async () => {
-      setNewDeptName('')
-      await invalidate()
-    },
-    onError: (error) => {
-      console.warn('[members] 부서 저장 실패', {
-        message: error instanceof Error ? error.message : String(error),
-      })
-    },
-  })
 
   const brandName = (id: string) =>
     brands.find((b) => b.id === id)?.name ?? id.slice(0, 8)
@@ -485,133 +471,174 @@ export function MembersPage({ embedded = false }: { embedded?: boolean } = {}) {
       {departingEmployee && <EmployeeDepartureDialog key={departingEmployee.id} employee={departingEmployee} staff={profiles}
         onClose={() => setDepartureId(null)} onCompleted={departureCompleted} />}
 
-      {canEditAssignment ? (
-        <section className="mt-10 space-y-4">
-          <div>
-            <h2 className="text-lg font-semibold tracking-tight">회사 부서 추가</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              새 부서 이름을 입력하고 저장하면 아래 목록에 표시됩니다.
-            </p>
-          </div>
-
-          <div>
-            <form
-              className="flex flex-wrap gap-2"
-              onSubmit={(event) => {
-                event.preventDefault()
-                if (!newDeptName.trim() || createDeptMutation.isPending) return
-                createDeptMutation.mutate()
-              }}
-            >
-              <Input
-                className="max-w-xs"
-                placeholder="새 부서 이름"
-                aria-label="회사 부서 추가"
-                value={newDeptName}
-                aria-invalid={createDeptMutation.isError || undefined}
-                aria-describedby={
-                  createDeptMutation.isError ? 'new-department-error' : undefined
-                }
-                onChange={(e) => {
-                  setNewDeptName(e.target.value)
-                  if (createDeptMutation.isError) createDeptMutation.reset()
-                }}
-              />
-              <Button
-                type="submit"
-                disabled={!newDeptName.trim() || createDeptMutation.isPending}
-              >
-                저장
-              </Button>
-            </form>
-            {createDeptMutation.isError ? (
-              <p
-                id="new-department-error"
-                role="alert"
-                className="mt-2 text-sm text-danger"
-              >
-                {departmentCreateErrorText(createDeptMutation.error)}
-              </p>
-            ) : null}
-          </div>
-
-          <div className="space-y-2">
-            {departments.map((dept, index) => (
-              <div
-                key={dept.id}
-                className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2"
-              >
-                <Input
-                  className="max-w-xs"
-                  defaultValue={dept.name}
-                  onBlur={async (event) => {
-                    const next = event.target.value.trim()
-                    if (!next || next === dept.name) return
-                    await updateDepartment(dept.id, { name: next })
-                    await invalidate()
-                  }}
-                />
-                <Badge variant={dept.isActive ? 'outline' : 'muted'}>
-                  {dept.isActive ? '사용 중' : '중지'}
-                </Badge>
-                <div className="ml-auto flex gap-1">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    disabled={index === 0}
-                    onClick={async () => {
-                      const prev = departments[index - 1]
-                      if (!prev) return
-                      await updateDepartment(dept.id, {
-                        sortOrder: prev.sortOrder,
-                      })
-                      await updateDepartment(prev.id, {
-                        sortOrder: dept.sortOrder,
-                      })
-                      await invalidate()
-                    }}
-                  >
-                    위로
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    disabled={index === departments.length - 1}
-                    onClick={async () => {
-                      const next = departments[index + 1]
-                      if (!next) return
-                      await updateDepartment(dept.id, {
-                        sortOrder: next.sortOrder,
-                      })
-                      await updateDepartment(next.id, {
-                        sortOrder: dept.sortOrder,
-                      })
-                      await invalidate()
-                    }}
-                  >
-                    아래로
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={async () => {
-                      await updateDepartment(dept.id, {
-                        isActive: !dept.isActive,
-                      })
-                      await invalidate()
-                    }}
-                  >
-                    {dept.isActive ? '중지' : '사용'}
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
+      {!embedded && canEditAssignment && (
+        <div className="mt-10"><CompanyDepartmentsPanel /></div>
+      )}
     </div>
+  )
+}
+
+export function canManageCompanyDepartments(profile: Profile | null, sessionUserId?: string) {
+  return Boolean(profile?.id && profile.id === sessionUserId && !isPreviewProfile(profile) && canEditOrgAssignment(profile))
+}
+
+export function CompanyDepartmentsPanel() {
+  useRenderWatch('CompanyDepartmentsPanel')
+  const { profile, session } = useAuth()
+  const queryClient = useQueryClient()
+  const canManage = canManageCompanyDepartments(profile, session?.user.id)
+  const [newDeptName, setNewDeptName] = useState('')
+  const departmentsQuery = useQuery({
+    queryKey: ['departments', 'all'],
+    queryFn: () => listDepartments(false),
+    enabled: canManage,
+  })
+  const departments = departmentsQuery.data ?? []
+  const invalidate = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['manageable-profiles'] })
+    await queryClient.invalidateQueries({ queryKey: ['departments'] })
+  }
+
+  const createDeptMutation = useMutation({
+    mutationFn: () => createDepartment(newDeptName),
+    onSuccess: async () => {
+      setNewDeptName('')
+      await invalidate()
+    },
+    onError: (error) => {
+      console.warn('[company-departments] 부서 저장 실패', {
+        message: error instanceof Error ? error.message : String(error),
+      })
+    },
+  })
+
+  if (!canManage) return null
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold tracking-tight">회사 부서 추가</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          새 부서 이름을 입력하고 저장하면 아래 목록에 표시됩니다.
+        </p>
+      </div>
+
+      <div>
+        <form
+          className="flex flex-wrap gap-2"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (!newDeptName.trim() || createDeptMutation.isPending) return
+            createDeptMutation.mutate()
+          }}
+        >
+          <Input
+            className="max-w-xs"
+            placeholder="새 부서 이름"
+            aria-label="회사 부서 추가"
+            value={newDeptName}
+            aria-invalid={createDeptMutation.isError || undefined}
+            aria-describedby={
+              createDeptMutation.isError ? 'new-department-error' : undefined
+            }
+            onChange={(e) => {
+              setNewDeptName(e.target.value)
+              if (createDeptMutation.isError) createDeptMutation.reset()
+            }}
+          />
+          <Button
+            type="submit"
+            disabled={!newDeptName.trim() || createDeptMutation.isPending}
+          >
+            저장
+          </Button>
+        </form>
+        {createDeptMutation.isError ? (
+          <p
+            id="new-department-error"
+            role="alert"
+            className="mt-2 text-sm text-danger"
+          >
+            {departmentCreateErrorText(createDeptMutation.error)}
+          </p>
+        ) : null}
+      </div>
+
+      <div className="space-y-2">
+        {departments.map((dept, index) => (
+          <div
+            key={dept.id}
+            className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2"
+          >
+            <Input
+              className="max-w-xs"
+              defaultValue={dept.name}
+              onBlur={async (event) => {
+                const next = event.target.value.trim()
+                if (!next || next === dept.name) return
+                await updateDepartment(dept.id, { name: next })
+                await invalidate()
+              }}
+            />
+            <Badge variant={dept.isActive ? 'outline' : 'muted'}>
+              {dept.isActive ? '사용 중' : '중지'}
+            </Badge>
+            <div className="ml-auto flex gap-1">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={index === 0}
+                onClick={async () => {
+                  const prev = departments[index - 1]
+                  if (!prev) return
+                  await updateDepartment(dept.id, {
+                    sortOrder: prev.sortOrder,
+                  })
+                  await updateDepartment(prev.id, {
+                    sortOrder: dept.sortOrder,
+                  })
+                  await invalidate()
+                }}
+              >
+                위로
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={index === departments.length - 1}
+                onClick={async () => {
+                  const next = departments[index + 1]
+                  if (!next) return
+                  await updateDepartment(dept.id, {
+                    sortOrder: next.sortOrder,
+                  })
+                  await updateDepartment(next.id, {
+                    sortOrder: dept.sortOrder,
+                  })
+                  await invalidate()
+                }}
+              >
+                아래로
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  await updateDepartment(dept.id, {
+                    isActive: !dept.isActive,
+                  })
+                  await invalidate()
+                }}
+              >
+                {dept.isActive ? '중지' : '사용'}
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }

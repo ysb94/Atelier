@@ -28,6 +28,8 @@ export const loadCompanyLunch=async()=>({start:'12:00',end:'13:00',saved:true});
 export function useOvertimeActuals(){const {rows,setRows,fail}=useData();return {rows,ready:true,isPending:false,isError:false,refetch(){},save:{async mutateAsync(v){if(fail)throw Error('연결 오류: 입력을 유지합니다.');setRows(rows.filter(r=>r.requestId!==v.requestId).concat({...v,revision:v.revision+1,savedAt:'2026-11-03'}))}}}}
 export const useHolidayOvertimeCredits=(month)=>({rows:window.__holidayCredits&&month==='2026-11'?[{id:'holiday-credit',employeeId:'a',employeeName:'실제 입력 직원',departmentId:'d',departmentName:'디자인',date:'2026-11-07',minutes:135}]:[],isPending:false,isError:false,refetch(){}});
 export const MembersPage=()=>null;
+export const CompanyDepartmentsPanel=()=>null;
+export const canManageCompanyDepartments=()=>false;
 const roster=new Map([['a',{profile_id:'a',inclusive_overtime_hours:1}]]);
 const staff=[{id:'a',display_name:'실제 입력 직원',department_id:'d',hire_date:'2025-01-01'},{id:'late',display_name:'미신청 직원',department_id:'d',hire_date:'2025-01-01'}];
 window.__rosterWrites=[];

@@ -1,8 +1,17 @@
 import assert from 'node:assert/strict'
 export async function membersDepartmentScenario({page,origin}) {
-  await page.goto(origin+'/__fixture/members?admin=true&position='+encodeURIComponent('대표이사'))
+  await page.goto(origin+'/__fixture/members?people&peopleView=members&organization-editor',{waitUntil:'commit'})
+  const tabs=page.getByRole('group',{name:'조직·멤버 항목'})
+  await tabs.waitFor({timeout:90000})
+  assert.deepEqual(await tabs.getByRole('button').allTextContents(),['조직도','멤버','회사 부서'])
   const input=page.getByRole('textbox',{name:'회사 부서 추가',exact:true})
+  const employeeSearch=page.getByRole('textbox',{name:'직원 검색',exact:true})
+  await employeeSearch.waitFor()
+  assert.equal(await input.count(),0)
+  await tabs.getByRole('button',{name:'회사 부서',exact:true}).click()
+  await page.waitForURL(url=>url.searchParams.get('peopleView')==='departments')
   await input.waitFor()
+  assert.equal(await employeeSearch.count(),0)
   const save=input.locator('..').getByRole('button',{name:'저장',exact:true})
   assert.equal(await save.isDisabled(),true)
   await input.fill('합성 신규 부서');await save.click()
@@ -23,13 +32,25 @@ export async function membersDepartmentScenario({page,origin}) {
   const calls=await page.evaluate(()=>window.__fixtureDepartmentCalls)
   assert.equal(calls.filter(call=>call.kind==='insert').length,2)
   assert.equal(await page.getByRole('alert').count(),0)
+  await tabs.getByRole('button',{name:'멤버',exact:true}).click()
+  await employeeSearch.waitFor()
+  assert.equal(await input.count(),0)
+  await tabs.getByRole('button',{name:'회사 부서',exact:true}).click()
+  await page.locator('input[value="이름 변경 부서"]').waitFor()
+  await page.reload({waitUntil:'commit'})
+  await input.waitFor()
+  assert.equal(await tabs.getByRole('button',{name:'회사 부서',exact:true}).getAttribute('aria-pressed'),'true')
   const denied=await page.context().newPage(),errors=[]
   denied.on('pageerror',error=>errors.push(error.message))
   try{
-    await denied.goto(origin+'/__fixture/members?admin=false')
-    await denied.waitForURL(origin+'/')
+    await denied.goto(origin+'/__fixture/members?people&peopleView=members&departmentId=2e49ef43-75b9-4c89-b42d-9fd50ad9087b',{waitUntil:'commit'})
+    await denied.getByRole('textbox',{name:'직원 검색',exact:true}).waitFor()
+    assert.equal(await denied.getByRole('button',{name:'회사 부서',exact:true}).count(),0)
+    assert.equal(await denied.getByRole('textbox',{name:'회사 부서 추가',exact:true}).count(),0)
+    await denied.goto(origin+'/__fixture/members?people&peopleView=departments',{waitUntil:'commit'})
+    await denied.locator('#root > div').waitFor({state:'attached'})
     assert.equal(await denied.getByRole('textbox',{name:'회사 부서 추가',exact:true}).count(),0)
     assert.deepEqual(errors,[])
   }finally{await denied.close()}
-  return {method:'offline actual component and profiles API adapter',emptyBlocked:true,saved:true,errorPreservesInput:true,retry:true,rename:true,adminOnly:true,remoteWrites:false}
+  return {method:'offline actual component and profiles API adapter',tabOrder:true,memberListSeparate:true,deepLink:true,emptyBlocked:true,saved:true,errorPreservesInput:true,retry:true,rename:true,orgManagersOnly:true,remoteWrites:false}
 }
