@@ -270,6 +270,10 @@ function ColorDocumentButton({
     setError('')
     nextKey.current += 1
     setRows((current) => [...current, { key: nextKey.current, id: null, ...EMPTY_COLOR_NAMES }])
+    requestAnimationFrame(() => {
+      const list = listRef.current
+      if (list) list.scrollTop = list.scrollHeight
+    })
   }
 
   function removeRow(key: number) {

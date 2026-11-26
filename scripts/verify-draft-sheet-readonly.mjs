@@ -8,6 +8,7 @@ import {chromium,webkit} from 'playwright-core'
 const root=process.cwd()
 const stickyHeaderOnly=process.argv.includes('--sticky-header-only')
 const folderOnly=process.argv.includes('--folder-only')
+const colorCapacityOnly=process.argv.includes('--color-capacity-only')
 const useWebKit=process.argv.includes('--webkit')
 let server,browser
 const imageFixture='<svg xmlns="http://www.w3.org/2000/svg" width="16" height="12"><rect width="16" height="12" fill="red"/></svg>'
@@ -188,7 +189,36 @@ try{
  const page=await browser.newPage({viewport:{width:1800,height:950},timezoneId:'UTC'}),errors=[]
  page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(15000)
  await page.route('**/*',route=>route.request().url().startsWith(origin+'/')||route.request().url().startsWith('data:')?route.continue():route.abort())
- if(folderOnly){
+ if(colorCapacityOnly){
+   let payload
+   await page.route('**/rpc/save_draft_colors_with_names', async route => {
+     payload=route.request().postDataJSON()
+     await route.fulfill({json:{data:'2026-11-26T08:32:00+00:00',error:null}})
+   })
+   await page.goto(origin)
+   const colorDocument=page.getByRole('button',{name:'컬러 문서',exact:true})
+   await colorDocument.click()
+   const form=page.locator('.draft-color-add-form')
+   const add=form.getByRole('button',{name:'컬러 추가',exact:true})
+   const save=form.getByRole('button',{name:'저장',exact:true})
+   const rows=form.locator('[data-color-key]')
+   for(let index=(await rows.count())+1;index<=100;index++){
+     await add.click()
+     await form.getByRole('textbox',{name:`컬러 ${index} 한글명`,exact:true}).fill(`테스트 컬러 ${index}`)
+   }
+   assert.equal(await rows.count(),100)
+   assert.equal(await add.isDisabled(),true)
+   assert.ok(await form.locator('.draft-color-add-rows').evaluate(list=>list.scrollHeight>list.clientHeight&&list.scrollTop>0))
+   assert.equal(await save.isVisible(),true)
+   await save.click()
+   await form.waitFor({state:'detached'})
+   assert.equal(payload.p_colors.length,100)
+   assert.equal(payload.p_colors.at(-1).nameKo,'테스트 컬러 100')
+   await colorDocument.click()
+   assert.equal(await form.getByRole('textbox',{name:'컬러 100 한글명',exact:true}).inputValue(),'테스트 컬러 100')
+   assert.deepEqual(errors,[])
+   console.log('draft color capacity browser: 100 entries, scrollable input, saved order and reopening passed')
+ }else if(folderOnly){
    await verifyFolderCreatePlacement(page,origin)
    assert.deepEqual(errors,[])
    console.log('draft folders: mouse drag, keyboard reorder, fixed scope buttons, mobile creation and outside-click editing passed')

@@ -224,7 +224,8 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-color-tools{display:flex;gap:5px;align-items:flex-start;padding-inline:8px}
 .draft-color-add{position:relative}
 .draft-color-add-form{position:absolute;z-index:6;top:calc(100% + 6px);left:0;display:flex;flex-direction:column;gap:8px;width:min(34rem,calc(100vw - 1rem));padding:8px;border:1px solid #e5e5e2;border-radius:8px;background:var(--color-card);box-shadow:0 8px 24px #00000014}
-.draft-color-add-rows{display:flex;flex-direction:column;gap:8px}
+.draft-color-add-rows{display:flex;flex-direction:column;gap:8px;max-height:min(26rem,55dvh);overflow-y:auto;overscroll-behavior-y:contain}
+.draft-color-add-rows>.draft-color-add-row{flex-shrink:0}
 .draft-color-add-row{display:grid;grid-template-columns:6px 28px repeat(2,minmax(0,1fr)) 28px 8.5rem;align-items:center;gap:4px;border-radius:8px}
 .draft-color-add-header{color:var(--color-muted-foreground);font-size:11px;font-weight:600}
 .draft-color-add-header>span:first-child{grid-column:3}
