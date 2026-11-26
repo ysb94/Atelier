@@ -258,7 +258,7 @@ export async function runScenario(name,fixture) {
   const dir=path.resolve('dev-tools/ai-workflow/.state/browser');fs.mkdirSync(dir,{recursive:true})
   const screenshot=path.join(dir,`${name}.png`)
   await fixture.page.screenshot({path:screenshot,fullPage:true})
-  const sourceFiles=name==='members-department'?['src/features/operations-support/OperationsPeoplePanel.tsx','src/features/settings/MembersPage.tsx','src/lib/supabase/profiles.ts','src/lib/company/capabilities.ts']:['src/components/layout/workspace-tabs.tsx']
+  const sourceFiles=name==='members-department'?['src/features/operations-support/OperationsPeoplePanel.tsx','src/features/settings/MembersPage.tsx','src/features/settings/CompanyDepartmentWorkspace.tsx','src/lib/supabase/profiles.ts','src/lib/company/capabilities.ts']:['src/components/layout/workspace-tabs.tsx']
   const report={scenario:name,startedAt,finishedAt:new Date().toISOString(),passed:true,
     method:'Real app components in Chromium; synthetic profile and offline data; no actual login, production DB access or deployment.',
     results,sourceRoot:fixture.root,sourceHashes:fixture.root?Object.fromEntries(sourceFiles.map(file=>[file,createHash('sha256').update(fs.readFileSync(path.join(fixture.root,file))).digest('hex')])):undefined,screenshot,screenshotSha256:createHash('sha256').update(fs.readFileSync(screenshot)).digest('hex')}

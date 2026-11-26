@@ -36,6 +36,7 @@ import { usePagePreview } from '@/lib/company/page-preview-context'
 import { hasPermission } from '@/lib/company/permissions'
 import { listEmployeeDepartures } from '@/lib/supabase/employee-departure'
 import { EmployeeDepartureDialog } from './EmployeeDepartureDialog'
+import { CompanyDepartmentWorkspace } from './CompanyDepartmentWorkspace'
 
 const emptyTitles: PersonnelTitle[] = []
 
@@ -482,7 +483,7 @@ export function canManageCompanyDepartments(profile: Profile | null, sessionUser
   return Boolean(profile?.id && profile.id === sessionUserId && !isPreviewProfile(profile) && canEditOrgAssignment(profile))
 }
 
-export function CompanyDepartmentsPanel() {
+export function CompanyDepartmentsPanel({ uiOnly = false }: { uiOnly?: boolean } = {}) {
   useRenderWatch('CompanyDepartmentsPanel')
   const { profile, session } = useAuth()
   const queryClient = useQueryClient()
@@ -490,7 +491,16 @@ export function CompanyDepartmentsPanel() {
   const [newDeptName, setNewDeptName] = useState('')
   const departmentsQuery = useQuery({
     queryKey: ['departments', 'all'],
-    queryFn: () => listDepartments(false),
+    queryFn: async () => {
+      try {
+        return await listDepartments(false)
+      } catch (error) {
+        console.warn('[company-departments] 부서 목록 조회 실패', {
+          message: error instanceof Error ? error.message : '조회 실패',
+        })
+        throw error
+      }
+    },
     enabled: canManage,
   })
   const departments = departmentsQuery.data ?? []
@@ -513,6 +523,17 @@ export function CompanyDepartmentsPanel() {
   })
 
   if (!canManage) return null
+
+  if (uiOnly) {
+    if (departmentsQuery.isError) return (
+      <div role="alert" className="space-y-3">
+        <p className="text-sm text-danger">부서 목록을 불러오지 못했습니다.</p>
+        <Button type="button" variant="outline" onClick={() => void departmentsQuery.refetch()}>다시 불러오기</Button>
+      </div>
+    )
+    if (departmentsQuery.isPending) return <p role="status" className="text-sm text-muted-foreground">부서 목록을 불러오는 중입니다.</p>
+    return <CompanyDepartmentWorkspace key={profile?.id} departments={departments} />
+  }
 
   return (
     <section className="space-y-4">

@@ -33,6 +33,6 @@ export function OperationsPeoplePanel() {
     {tabs.length > 1 && <FilterTabs<PeopleView> ariaLabel="조직·멤버 항목" value={view ?? 'org'} onChange={setView} variant="underline" size="large" tabs={tabs} />}
     {view === 'org' && <OrgChartPage mode="manage" showHeading={false} />}
     {view === 'members' && <MembersPage embedded />}
-    {view === 'departments' && <CompanyDepartmentsPanel />}
+    {view === 'departments' && <CompanyDepartmentsPanel uiOnly />}
   </div>
 }

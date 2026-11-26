@@ -161,10 +161,10 @@
     "id": "permissions",
     "label": "회사, 브랜드, 권한 지정과 부서",
     "origin": "회사는 companies, 브랜드는 brands, 부서 이름·순서·사용 상태는 회사와 부서 ID로 연결된 departments가 기준이다. 배정된 접근 권한은 permission_grants 및 기존 브랜드 멤버십/업무 권한에서 확인한다.",
-    "write": "권한·담당자 설정과 브랜드 관리에서 기존 권한 검사를 거쳐 저장한다. 운영지원 → 조직·멤버 → 회사 부서 탭에서 기존 org.manage 권한으로 부서를 추가하고 이름·순서·사용 상태를 저장한다.",
-    "propagation": "메뉴 접근과 DB 조회·쓰기 검사는 각 회사·브랜드·대상 범위를 적용한다. 부서 저장 후 부서 목록과 관리 가능한 직원 목록의 캐시를 갱신한다. 퇴사 완료는 관련 권한과 세션을 종료한다.",
-    "copies": "현재 권한 배정과 권한 변경·인계 이력이 별도 역할을 가진다. 부서 탭은 같은 departments를 읽으며 별도 부서 목록을 저장하지 않는다.",
-    "reason": "현재 권한을 철회해도 과거 처리자와 업무 기록을 보존하기 위해서다.",
+    "write": "권한·담당자 설정과 브랜드 관리에서 기존 권한 검사를 거쳐 저장한다. 기존 독립 멤버 화면의 부서 저장 경로는 유지한다. 운영지원 → 조직·멤버 → 회사 부서 탭은 org.manage 권한으로 여는 UI 미리보기이며 부서 추가·업무 파트 추가·이름 변경·중지는 컴포넌트 메모리에서만 처리하고 DB에 저장하지 않는다.",
+    "propagation": "메뉴 접근과 DB 조회·쓰기 검사는 각 회사·브랜드·대상 범위를 적용한다. 기존 부서 실저장 후에는 부서 목록과 관리 가능한 직원 목록의 캐시를 갱신한다. 회사 부서 UI 미리보기의 편집값은 다른 화면·직원 소속·권한에 전파하지 않고 새로고침 또는 컴포넌트 해제 시 초기화한다. 퇴사 완료는 관련 권한과 세션을 종료한다.",
+    "copies": "현재 권한 배정과 권한 변경·인계 이력이 별도 역할을 가진다. 회사 부서 탭은 기존 departments 목록을 읽은 뒤 기획팀과 BAG·APPAREL 부서를 표시상 기획팀 하나로 묶고 백팩·어패럴 예시 파트를 둔다. MD팀에는 MD·AMD 예시 파트를 둔다. 부서와 파트의 미리보기 사본은 React 상태에만 두고 DB·localStorage·IndexedDB에는 저장하지 않는다.",
+    "reason": "현재 권한을 철회해도 과거 처리자와 업무 기록을 보존하기 위해서다. 부서 내부 업무 파트는 사용자 요청에 따라 UI를 먼저 검수하며 실제 부서 통합·직원 소속 변경·파트 저장 연결은 이후 별도 작업으로 남긴다.",
     "resources": [
       "table:public.companies",
       "table:public.brands",
@@ -176,6 +176,7 @@
       "docs/architecture/SUPABASE.md",
       "src/features/operations-support/OperationsPeoplePanel.tsx",
       "src/features/settings/MembersPage.tsx",
+      "src/features/settings/CompanyDepartmentWorkspace.tsx",
       "src/lib/supabase/profiles.ts",
       "supabase/migrations/20261021055942_permission_assignment_storage.sql"
     ]
