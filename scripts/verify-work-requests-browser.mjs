@@ -152,6 +152,32 @@ try{
  assert.equal(await nameOnNewDraft.inputValue(),'')
  await page.getByText('출시 폴더 · 출시 폴더 검증',{exact:true}).waitFor()
  await nameOnNewDraft.fill('선택 폴더 신규 기획안')
+ const newDraftPhoto = page.getByRole('button',{name:'사진 선택',exact:true})
+ const photoPreview = newDraftPhoto.locator('img')
+ const imageToDrop = await page.evaluateHandle(async () => {
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 2
+  canvas.getContext('2d').fillRect(0, 0, 2, 2)
+  const image = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+  const transfer = new DataTransfer()
+  transfer.items.add(new File([image], '대표 사진.png', { type:'image/png' }))
+  return transfer
+ })
+ await newDraftPhoto.dispatchEvent('dragover',{dataTransfer:imageToDrop})
+ await newDraftPhoto.dispatchEvent('drop',{dataTransfer:imageToDrop})
+ await imageToDrop.dispose()
+ await photoPreview.waitFor()
+ const uploadedImage = await photoPreview.getAttribute('src')
+ assert.match(uploadedImage,/^data:image\/png;base64,/)
+ const textToDrop = await page.evaluateHandle(() => {
+  const transfer = new DataTransfer()
+  transfer.items.add(new File(['test'], '메모.txt', { type:'text/plain' }))
+  return transfer
+ })
+ await newDraftPhoto.dispatchEvent('drop',{dataTransfer:textToDrop})
+ await textToDrop.dispose()
+ await page.getByRole('alert').filter({hasText:'대표 사진은 JPG, PNG, WebP 파일만 추가할 수 있습니다.'}).waitFor()
+ assert.equal(await photoPreview.getAttribute('src'),uploadedImage)
  const newDraftTab = page.getByRole('button',{name:'기획안 추가 탭 닫기',exact:true})
  const rpcPattern = '**/__work-test/rpc'
  async function failDraftSave(route) {
@@ -168,14 +194,20 @@ try{
  await page.waitForURL(url=>url.pathname==='/drafts' && url.searchParams.get('scope')==='atelier' && url.searchParams.get('folder')===folderId)
  await newDraftTab.waitFor({state:'detached'})
  await nameOnNewDraft.waitFor({state:'detached'})
- const storedDraft = await db.query('select brand_id, season_id from public.product_drafts where name_ko=$1',['선택 폴더 신규 기획안'])
- assert.deepEqual(storedDraft.rows,[{brand_id:brandId,season_id:folderId}])
+ const storedDraft = await db.query('select brand_id, season_id, image_url from public.product_drafts where name_ko=$1',['선택 폴더 신규 기획안'])
+ assert.deepEqual(storedDraft.rows,[{brand_id:brandId,season_id:folderId,image_url:uploadedImage}])
  await page.getByText('선택 폴더 신규 기획안',{exact:true}).first().waitFor()
  await page.getByRole('link',{name:'기획안 추가',exact:true}).click()
  await nameOnNewDraft.waitFor()
  assert.notEqual(new URL(page.url()).searchParams.get('entry'),folderParams.get('entry'))
  assert.equal(await nameOnNewDraft.inputValue(),'')
  assert.equal(await draftBrand.inputValue(),brandId)
+ assert.equal(await photoPreview.count(),0)
+ const choosingPhoto = page.waitForEvent('filechooser')
+ await newDraftPhoto.click()
+ await (await choosingPhoto).setFiles({ name:'대표 사진.png', mimeType:'image/png', buffer:Buffer.from(uploadedImage.split(',')[1], 'base64') })
+ await photoPreview.waitFor()
+ assert.equal(await photoPreview.getAttribute('src'),uploadedImage)
  await draftBrand.selectOption('')
  assert.equal(await page.getByText('출시 폴더 · 출시 폴더 검증',{exact:true}).count(),0)
  await page.getByRole('button',{name:'목록',exact:true}).click()
@@ -325,7 +357,7 @@ try{
  }
  assert.deepEqual(errors,[])
  console.log(draftCreationOnly
-  ? 'Draft creation browser: brand and folder prefill, failed save keeps input, successful save closes the workspace tab, reopening from the same or a different scope starts a blank form (local PostgreSQL)'
+  ? 'Draft creation browser: image drop, picker, saved image, folder prefill, failed save keeps input, successful save closes the tab and reopens blank (local PostgreSQL)'
   : proposerOnly
   ? 'Draft proposer browser: create, edit, clear, search focus, failed attendance lookup independence, and saved reload passed (local PostgreSQL)'
   : 'work-requests-browser: real create/reload/attachment, two-window realtime refresh, same-department account switch, private chat, completion review/result confirmation, My home hub, desktop/mobile and draft creator/read-only/operator transition passed (local PostgreSQL, no production writes)')

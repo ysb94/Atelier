@@ -86,6 +86,7 @@ import { cn, formatNumber } from '@/lib/utils'
 import { isUnassignedReleaseFolder } from './release-schedule-preview'
 
 const EMPTY_STYLES: Style[] = []
+const DRAFT_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp']
 
 const TEXT_SPEC_KEYS = ['fabric', 'coating'] as const satisfies DraftSpecKey[]
 
@@ -349,6 +350,8 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
   const [error, setError] = useState<string | null>(null)
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [editorPart, setEditorPart] = useState<'basic' | 'pending'>('basic')
+  const [draggingImage, setDraggingImage] = useState(false)
+  const [readingImage, setReadingImage] = useState(false)
   const partners = useDraftSabangnetPartners(form.brandId, editorPart === 'pending')
   const openChannelId = form.specs.openChannelTargetId ?? null
   const openChannel = withSavedDraftPartner(
@@ -408,6 +411,23 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
     setForm((prev) => ({ ...prev, ...next }))
     setError(null)
     setSavedAt(null)
+  }
+
+  async function selectImage(file: File | undefined) {
+    if (!file || imageInputDisabled) return
+    const supported = DRAFT_IMAGE_TYPES.includes(file.type) || (!file.type && /\.(?:png|jpe?g|webp)$/i.test(file.name))
+    if (!supported) {
+      setError('대표 사진은 JPG, PNG, WebP 파일만 추가할 수 있습니다.')
+      return
+    }
+    setReadingImage(true)
+    try {
+      patch({ imageUrl: await readImageFile(file) })
+    } catch {
+      setError('사진을 불러오지 못했습니다.')
+    } finally {
+      setReadingImage(false)
+    }
   }
 
   const workOrders = withPendingNextSampleWorkOrder(form.sampleWorkOrders)
@@ -559,6 +579,8 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
     })
   }
 
+  const imageInputDisabled = !editable || saveMutation.isPending || readingImage
+
   const deleteMutation = useMutation({
     mutationFn: async () => {
       if (!editable) throw new Error('기획안은 작성자만 삭제할 수 있습니다.')
@@ -674,7 +696,7 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
           <Button
             type="button"
             size="sm"
-            disabled={!editable || saveMutation.isPending}
+            disabled={!editable || saveMutation.isPending || readingImage}
             onClick={saveFromHeader}
           >
             <Save className="size-3.5" />
@@ -686,7 +708,7 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
       {workAccess.error ? <p role="alert" className="mb-3 text-sm text-danger">{workAccess.error.message}</p> : !editable ? <p role="status" className="mb-3 text-sm text-muted-foreground">조회 전용 · 작성자와 지정된 운영 계정만 수정·삭제할 수 있습니다.</p> : null}
       <fieldset disabled={!editable} className="min-w-0 border-0 p-0">
       {error ? (
-        <p className="mb-3 rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
+        <p role="alert" className="mb-3 rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
           {error}
         </p>
       ) : null}
@@ -701,35 +723,62 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/png,image/jpeg,image/webp"
+            accept={DRAFT_IMAGE_TYPES.join(',')}
             className="hidden"
-            onChange={async (event) => {
-              const file = event.target.files?.[0]
-              event.target.value = ''
-              if (!file) return
-              try {
-                patch({ imageUrl: await readImageFile(file) })
-              } catch {
-                setError('사진을 불러오지 못했습니다.')
-              }
+            disabled={imageInputDisabled}
+            onChange={event => {
+              const file = event.currentTarget.files?.[0]
+              event.currentTarget.value = ''
+              void selectImage(file)
             }}
           />
           <div className="grid items-start gap-4 sm:grid-cols-[auto_minmax(0,1fr)] sm:gap-6">
-            <div className="relative aspect-square w-32 sm:w-40 lg:w-48">
+            <div className="relative aspect-square w-32 sm:w-40 lg:w-48"
+              onDragOver={isNew ? event => {
+                if (!event.dataTransfer.types.includes('Files')) return
+                event.preventDefault()
+                event.dataTransfer.dropEffect = imageInputDisabled ? 'none' : 'copy'
+                setDraggingImage(!imageInputDisabled)
+              } : undefined}
+              onDragLeave={isNew ? event => {
+                if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setDraggingImage(false)
+              } : undefined}
+              onDrop={isNew ? event => {
+                if (!event.dataTransfer.types.includes('Files')) return
+                event.preventDefault()
+                setDraggingImage(false)
+                if (imageInputDisabled) return
+                if (event.dataTransfer.files.length > 1) {
+                  setError('대표 사진은 한 장만 추가할 수 있습니다.')
+                  return
+                }
+                void selectImage(event.dataTransfer.files[0])
+              } : undefined}
+            >
               <button
                 type="button"
+                aria-label="사진 선택"
+                aria-busy={readingImage}
                 title="사진 선택"
+                disabled={imageInputDisabled}
                 onClick={() => fileInputRef.current?.click()}
-                className="flex size-full items-center justify-center overflow-hidden rounded-xl border border-border bg-muted/40 transition-colors hover:bg-muted"
+                className={cn(
+                  'flex size-full flex-col items-center justify-center gap-2 overflow-hidden rounded-xl border border-border bg-muted/40 transition-colors hover:bg-muted',
+                  draggingImage && 'border-primary bg-primary/5',
+                )}
               >
                 {form.imageUrl ? (
                   <img
                     src={form.imageUrl}
                     alt=""
+                    draggable={false}
                     className="max-h-full max-w-full object-contain"
                   />
                 ) : (
-                  <ImagePlus className="size-8 text-muted-foreground" />
+                  <>
+                    <ImagePlus aria-hidden="true" className="size-8 text-muted-foreground" />
+                    {isNew && <span className="px-2 text-xs text-muted-foreground">사진을 끌어다 놓거나 클릭하세요</span>}
+                  </>
                 )}
               </button>
               {form.imageUrl ? (
@@ -737,6 +786,7 @@ function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
                   type="button"
                   aria-label="사진 제거"
                   title="사진 제거"
+                  disabled={imageInputDisabled}
                   onClick={() => patch({ imageUrl: null })}
                   className="absolute -right-1.5 -top-1.5 rounded-full border border-border bg-card p-1 text-muted-foreground shadow-sm hover:text-foreground"
                 >
