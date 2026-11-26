@@ -66,7 +66,14 @@ export function createModelViewer(host: HTMLElement, src: string, callbacks: {
   const pauseFrame = () => { cancelAnimationFrame(frame); frame = 0; lastTime = 0 }
   const resize = new ResizeObserver(() => {
     const width = Math.max(1, host.clientWidth)
-    renderer.setSize(width, width, false)
+    const height = Math.max(1, host.clientHeight)
+    const aspect = width / height
+    camera.right = 1.8 * Math.max(1, aspect)
+    camera.left = -camera.right
+    camera.top = 1.8 * Math.max(1, 1 / aspect)
+    camera.bottom = -camera.top
+    camera.updateProjectionMatrix()
+    renderer.setSize(width, height, false)
     schedule()
   })
   resize.observe(host)

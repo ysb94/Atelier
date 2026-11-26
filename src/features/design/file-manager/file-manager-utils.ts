@@ -1,4 +1,5 @@
 import { brandStorageRoot } from '@/lib/company/capabilities'
+import { publicModelViewerUrl } from '@/features/spin360/model-viewer-url'
 import {
   CDN_BASE,
   DEFAULT_FILE_ICON_META,
@@ -100,6 +101,11 @@ export function getItemDisplayUrl(
 ): string {
   const key = getItemStorageKey(item, type, activeFolder, activeBrowseType)
   return isVideoItem(item, type) ? buildWorkerAssetUrl(key) : buildPublicUrl(key)
+}
+
+export function getItemShareUrl(item: ServerFileItem, type: string, activeFolder?: string | null, activeBrowseType?: string | null): string {
+  const url = getItemPublicUrl(item, type, activeFolder, activeBrowseType)
+  return isModelItem(item) ? publicModelViewerUrl(url) : url
 }
 
 export function getRelativePath(
@@ -233,7 +239,7 @@ export function isVideoItem(item: ServerFileItem, type: string): boolean {
 }
 
 export function isModelItem(item: ServerFileItem): boolean {
-  return /\.glb$/i.test(getItemFileName(item))
+  return /\.glb$/i.test(item.key || getItemFileName(item))
 }
 
 export function isImageItem(item: ServerFileItem, type: string): boolean {
@@ -262,13 +268,16 @@ export function buildMediaTag(
   url: string,
   item: ServerFileItem | null = null,
 ): string {
+  if (item && isModelItem(item)) {
+    return `<iframe src="${publicModelViewerUrl(url)}" title="상품 360도 보기" loading="lazy" style="display:block; width:100%; height:clamp(320px, 75vw, 550px); border:0;"></iframe>`
+  }
   return item && isVideoItem(item, type) || type === 'video'
     ? `<video src="${url}" controls></video>`
     : `<img src="${url}">`
 }
 
 export function ensureTagBreak(tag: string): string {
-  return tag.endsWith('<br>') ? tag : `${tag}<br>`
+  return tag.endsWith('<br>') || tag.endsWith('</iframe>') ? tag : `${tag}<br>`
 }
 
 export function formatFileSize(bytes?: number): string {
