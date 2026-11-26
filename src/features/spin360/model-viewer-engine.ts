@@ -17,7 +17,7 @@ function disposeObject(object: THREE.Object3D) {
   }
 }
 
-export function createModelViewer(host: HTMLElement, src: string, callbacks: {
+export function createModelViewer(host: HTMLElement, src: string | ArrayBuffer, callbacks: {
   ready: () => void; error: (message: string) => void; angle: (degrees: number) => void
 }) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
@@ -106,12 +106,19 @@ export function createModelViewer(host: HTMLElement, src: string, callbacks: {
   canvas.addEventListener('webglcontextlost', lost)
   void (async () => {
     try {
-      const response = await fetch(src, { signal: controller.signal })
-      if (!response.ok) throw new Error(`모델 조회 실패 (HTTP ${response.status})`)
-      const data = await response.arrayBuffer()
+      let data: ArrayBuffer
+      let resourcePath = ''
+      if (typeof src === 'string') {
+        const response = await fetch(src, { signal: controller.signal })
+        if (!response.ok) throw new Error(`모델 조회 실패 (HTTP ${response.status})`)
+        data = await response.arrayBuffer()
+        const modelUrl = response.url || new URL(src, document.baseURI).href
+        resourcePath = new URL('.', modelUrl).href
+      } else {
+        data = src
+      }
       if (disposed) return
-      const modelUrl = response.url || new URL(src, document.baseURI).href
-      const gltf = await new GLTFLoader().parseAsync(data, new URL('.', modelUrl).href)
+      const gltf = await new GLTFLoader().parseAsync(data, resourcePath)
       if (disposed) { disposeObject(gltf.scene); return }
       const bounds = new THREE.Box3().setFromObject(gltf.scene)
       const size = bounds.getSize(new THREE.Vector3())
@@ -126,7 +133,7 @@ export function createModelViewer(host: HTMLElement, src: string, callbacks: {
       schedule()
     } catch (error) {
       if (disposed) return
-      console.warn('[spin360] 3D 모델 표시 실패', { src, error })
+      console.warn('[spin360] 3D 모델 표시 실패', { src: typeof src === 'string' ? src : 'embedded', error })
       callbacks.error('3D 모델을 불러오지 못했습니다. 연결을 확인하고 다시 불러와 주세요.')
     }
   })()

@@ -1,5 +1,8 @@
 // All generation and storage endpoints are mocked. No keys, paid API calls, or real cloud writes.
 import { createServer as reservePort } from 'node:net'
+import { createServer as httpServer } from 'node:http'
+import { pathToFileURL } from 'node:url'
+import { spinHtmlDownloadPlugin } from './tripo360/html-download-plugin.ts'
 import fs from 'node:fs/promises';import path from 'node:path';import assert from 'node:assert/strict';import {createServer} from 'vite';import react from '@vitejs/plugin-react';import tailwind from '@tailwindcss/vite';import {chromium} from 'playwright-core';
 const cloud={version:1,id:'tripo-test-result',title:'저장된 테스트 결과',createdAt:'2026-10-29T00:00:00Z',prefix:'spin360/tripo/tripo-test-result',frameCount:0,status:'success',cloud:{legacy:true}};
 const root=process.cwd(),entryId=path.join(root,'__tripo-form-test.tsx').replaceAll('\\','/');const entry=`import React from 'react';import {createRoot} from 'react-dom/client';import {BrowserRouter} from 'react-router-dom';import {Spin360Page} from '/src/features/spin360/Spin360Page.tsx';import {PreviewPanel} from '/src/features/design/file-manager/components/PreviewPanel.tsx';import {WorkspaceTabActivityContext} from '/src/components/layout/workspace-tab-activity.ts';import '/src/index.css';function Test(){const [active,setActive]=React.useState(true);return <BrowserRouter><button id="toggle-active" onClick={()=>setActive(v=>!v)}>활성 탭 전환</button><WorkspaceTabActivityContext value={active}><main className="mx-auto max-w-[1500px] p-4">{location.pathname==='/file-preview'?<PreviewPanel selection={{type:'spin360',item:{key:'spin360/model.glb',name:'model.glb'}}} onTag={()=>{}} onUrl={()=>{}} onOpen={()=>{}} resize={()=>{}}/>:<Spin360Page/>}</main></WorkspaceTabActivityContext></BrowserRouter>}createRoot(document.getElementById('root')).render(<Test/>);`;
@@ -8,9 +11,16 @@ const probe=reservePort();
 await new Promise((resolve,reject)=>{probe.once('error',reject);probe.listen(0,'127.0.0.1',resolve)});
 const fixturePort=probe.address().port;
 await new Promise((resolve,reject)=>probe.close(error=>error?reject(error):resolve()));
-const downloadPath=`/__atelier-spin360/job/${cloud.id}/model.glb?download=1`;
 let downloadBody;
-const server=await createServer({root,configFile:false,logLevel:'error',cacheDir:path.join(root,'node_modules/.cache/tripo-form/vite'),optimizeDeps:{noDiscovery:true,include:['react','react-dom/client','react/jsx-runtime','react-router-dom']},plugins:[{name:'tripo-form-test',resolveId(id){if(id==='/__tripo-form-test.tsx')return entryId},load(id){if(id===entryId)return entry},configureServer(v){v.middlewares.use((req,res,next)=>{if(req.method==='GET'&&req.url===downloadPath){res.writeHead(200,{'Content-Type':'model/gltf-binary','Content-Disposition':'attachment; filename="model.glb"'});res.end(downloadBody);return;}if(req.url.split('?')[0]==='/viewer.html'||!req.headers.accept?.includes('text/html'))return next();v.transformIndexHtml(req.url,'<html><meta charset="utf-8"><div id="root"></div><script type="module" src="/__tripo-form-test.tsx"></script></html>').then(html=>{res.setHeader('Content-Type','text/html');res.end(html)}).catch(next)})}},react(),tailwind()],resolve:{alias:{'@':path.join(root,'src')}},server:{host:'127.0.0.1',port:fixturePort,strictPort:true,hmr:false}});
+const modelService = httpServer((request, response) => {
+ if (request.url !== `/job/${cloud.id}/model.glb` || !downloadBody) return response.writeHead(404).end()
+ response.writeHead(200, { 'Content-Type': 'model/gltf-binary' })
+ response.write(downloadBody.subarray(0, 4))
+ setImmediate(() => response.end(downloadBody.subarray(4)))
+})
+await new Promise((resolve, reject) => { modelService.once('error', reject); modelService.listen(0, '127.0.0.1', resolve) })
+const modelServiceOrigin = `http://127.0.0.1:${modelService.address().port}`
+const server=await createServer({root,configFile:false,logLevel:'error',cacheDir:path.join(root,'node_modules/.cache/tripo-form/vite'),optimizeDeps:{noDiscovery:true,include:['react','react-dom/client','react/jsx-runtime','react-router-dom']},plugins:[spinHtmlDownloadPlugin(modelServiceOrigin),{name:'tripo-form-test',resolveId(id){if(id==='/__tripo-form-test.tsx')return entryId},load(id){if(id===entryId)return entry},configureServer(v){v.middlewares.use((req,res,next)=>{if(req.url.split('?')[0]==='/viewer.html'||!req.headers.accept?.includes('text/html'))return next();v.transformIndexHtml(req.url,'<html><meta charset="utf-8"><div id="root"></div><script type="module" src="/__tripo-form-test.tsx"></script></html>').then(html=>{res.setHeader('Content-Type','text/html');res.end(html)}).catch(next)})}},react(),tailwind()],resolve:{alias:{'@':path.join(root,'src')}},server:{host:'127.0.0.1',port:fixturePort,strictPort:true,hmr:false}});
 let browser;try{await server.listen();const origin='http://127.0.0.1:'+server.httpServer.address().port;browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});const page=await browser.newPage({viewport:{width:1440,height:1100}}),errors=[];page.on('pageerror',e=>errors.push(e.message));let submissions=0,localDown=false;
 page.setDefaultNavigationTimeout(120_000);
 let storageRequests=0,directRequests=0;
@@ -18,6 +28,7 @@ await page.route('http://127.0.0.1:4320/**',route=>{directRequests++;return rout
 await page.route(`${origin}/__atelier-spin360/**`,async route=>{
  if(localDown)return route.abort();
  const url=new URL(route.request().url()),headers={'Access-Control-Allow-Origin':origin};
+ if(url.pathname.endsWith('/model-360.html'))return route.continue();
  if(route.request().method()==='OPTIONS')return route.fulfill({status:204,headers:{...headers,'Access-Control-Allow-Methods':'GET, POST, OPTIONS','Access-Control-Allow-Headers':'Content-Type'}});
  if(url.pathname.endsWith('/model.glb')){if(url.searchParams.has('download'))return route.continue();modelReads++;return route.fulfill({headers,contentType:'model/gltf-binary',body:model})}
  if(route.request().method()==='POST'){assert.equal(url.pathname,'/__atelier-spin360/jobs','No extraction or publish calls allowed');submissions++;const body=route.request().postDataJSON();assert.equal(body.photos.length,4);assert.equal(body.title,'브라우저 폼 검증');return route.fulfill({headers,json:{id:body.id,title:body.title,status:'queued'}})}
@@ -34,7 +45,26 @@ await page.route('https://cdn2.auchee.com/**',route=>{const url=route.request().
 const ready=async()=>{await page.locator('canvas').scrollIntoViewIfNeeded();await page.locator('canvas[data-ready="true"]').waitFor({timeout:60000})};
 await page.goto(origin+'/test/spin360');await page.getByRole('heading',{name:'이 PC의 제작 결과',exact:true}).waitFor();await page.getByRole('button',{name:'결과 보기',exact:true}).first().waitFor({timeout:60000});assert.equal(await page.getByRole('button',{name:'영상·70프레임 생성'}).count(),0);assert.equal(await page.getByLabel('360 누끼 이미지').count(),0);assert.equal(await page.getByRole('button',{name:'중간 각도 4장 생성 · API 요금 발생'}).count(),0);
 await page.getByRole('button',{name:'결과 보기',exact:true}).first().click();await ready();
-const downloaded=page.waitForEvent('download');await page.getByRole('link',{name:'model.glb 다운로드',exact:true}).click();const file=await downloaded;assert.equal(file.suggestedFilename(),'model.glb');assert.deepEqual(await fs.readFile(await file.path()),model);assert.equal(await page.getByRole('button',{name:'사이트에 저장',exact:true}).count(),0);
+const downloaded = page.waitForEvent('download')
+await page.getByRole('link', { name: '360 HTML 다운로드', exact: true }).click()
+const file = await downloaded
+assert.equal(file.suggestedFilename(), 'model-360.html')
+const html = await fs.readFile(await file.path(), 'utf8')
+const modelParts = [...html.matchAll(/<script type="application\/octet-stream">([A-Za-z0-9+/=]+)<\/script>/g)]
+assert.deepEqual(Buffer.concat(modelParts.map(part => Buffer.from(part[1], 'base64'))), model)
+const htmlFile = path.resolve('node_modules/.cache/tripo-form/model-360.html')
+await file.saveAs(htmlFile)
+const offlinePage = await browser.newPage({ viewport: { width: 390, height: 420 } })
+const exportRequests = []
+offlinePage.on('request', req => { if (/^https?:/.test(req.url())) exportRequests.push(req.url()) })
+await offlinePage.context().setOffline(true)
+await offlinePage.goto(pathToFileURL(htmlFile).href)
+await offlinePage.locator('canvas[data-ready="true"]').waitFor({ timeout: 60000 })
+await offlinePage.getByRole('slider', { name: '3D 회전 각도' }).fill('90')
+await offlinePage.locator('canvas[data-angle="90.000"]').waitFor()
+assert.deepEqual(exportRequests, [], 'HTML file must work using only embedded model and renderer')
+await offlinePage.close()
+assert.equal(await page.getByRole('button',{name:'사이트에 저장',exact:true}).count(),0);
 const canvas=page.locator('canvas');const box=await canvas.boundingBox();await page.mouse.move(box.x+box.width*.4,box.y+box.height*.5);await page.mouse.down();await page.mouse.move(box.x+box.width*.6,box.y+box.height*.5,{steps:12});await page.mouse.up();await page.waitForFunction(()=>Number(document.querySelector('canvas').dataset.angle)>30);assert.equal(oldViewerReads,0);
 await page.getByRole('button',{name:'자동 회전',exact:true}).click();const before=await canvas.getAttribute('data-angle');await page.waitForFunction(value=>document.querySelector('canvas').dataset.angle!==value,before);await page.getByRole('button',{name:'회전 멈춤',exact:true}).click();
 await page.getByRole('slider',{name:'3D 회전 각도'}).fill('123.4');await page.waitForFunction(()=>Math.abs(Number(document.querySelector('canvas').dataset.angle)-123.4)<.01);
@@ -79,4 +109,4 @@ await page.goto(origin+'/viewer.html?model=https%3A%2F%2Fexample.invalid%2Fmodel
 await page.getByRole('alert').getByText('올바른 상품 3D 모델 주소를 지정해 주세요.').waitFor()
 assert.equal(await page.locator('canvas').count(),0)
 localDown=true;await page.goto(origin+'/test/spin360');await page.getByText('이 PC의 제작 서버에 연결하지 못했습니다.',{exact:false}).waitFor();assert.equal(directRequests,0);assert.equal(storageRequests,0);assert.equal(oldViewerReads,0);assert.equal(submissions,1);assert.deepEqual(errors,[]);console.log('PASS local GLB viewer, rotation, pause/resume, download, preview/retry, GLB share URL and embedded viewer, non-GLB tags, rejected external model and mobile; no storage writes or paid generation');
-}finally{await browser?.close();await server.close()}
+}finally{await browser?.close();await server.close();await new Promise(resolve=>modelService.close(resolve))}

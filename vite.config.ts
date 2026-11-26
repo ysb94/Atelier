@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath, URL } from 'node:url'
 import { mdPriceBrowserPlugin } from './scripts/md-price-browser/vite-plugin.ts'
 import { windowsOutputCleanupPlugin } from './scripts/vite-windows-output-cleanup.ts'
+import { spinHtmlDownloadPlugin } from './scripts/tripo360/html-download-plugin.ts'
 
 const spin360Prefix = '/__atelier-spin360'
 const spin360Service = 'http://127.0.0.1:4320'
@@ -14,7 +15,7 @@ export default defineConfig(({command, isPreview, mode}) => ({
     'import.meta.env.VITE_ATELIER_RELEASE': JSON.stringify(process.env.CF_PAGES_COMMIT_SHA ?? process.env.GITHUB_SHA ?? 'local'),
     'import.meta.env.VITE_ATELIER_BUILT_AT': JSON.stringify(new Date().toISOString()),
   },
-  plugins: [windowsOutputCleanupPlugin(), react(), tailwindcss(), mdPriceBrowserPlugin(loadEnv(mode,process.cwd(),''))],
+  plugins: [windowsOutputCleanupPlugin(), react(), tailwindcss(), mdPriceBrowserPlugin(loadEnv(mode,process.cwd(),'')), spinHtmlDownloadPlugin(spin360Service)],
   build: {
     rolldownOptions: {
       input: {
