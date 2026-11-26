@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useDraftLoading } from './DraftLoading'
 import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
@@ -57,6 +58,7 @@ export function DraftReleaseScheduleDialog({
   const [certainty, setCertainty] = useState<ReleaseCertainty>('tentative')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  useDraftLoading(open && saving && '출시 일정을 저장하는 중…', true)
 
   const brandGroups = useMemo(
     () => groups.filter((group) => group.brandId === brandId),

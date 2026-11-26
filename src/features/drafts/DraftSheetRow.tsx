@@ -27,6 +27,7 @@ import { DRAFT_STATUS_LABEL, type Brand, type DraftColorImageChoice, type DraftC
 import { cn, formatNumber } from '@/lib/utils'
 import { UNASSIGNED_DRAFT_FOLDER_LABEL } from './draft-folder-filter'
 import { formatReleaseGroupLabel } from './release-schedule-preview'
+import { useDraftLoading } from './DraftLoading'
 import './draft-board.css'
 import { DraftSampleProgress } from './DraftSampleProgress'
 import { DraftColorSampleProgress } from './DraftColorSampleProgress'
@@ -58,6 +59,7 @@ function SampleWorkOrderButton({
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
+  useDraftLoading(busy && '작업지시서를 올리는 중…', true)
   const [error, setError] = useState('')
 
   return (
@@ -126,6 +128,7 @@ function SheetConfirmButton({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const tone = confirmed && doneStyle ? 'is-done' : 'is-neutral'
+  useDraftLoading(busy && '기획안 확정 상태를 저장하는 중…', true)
   return (
     <>
       <button
@@ -225,6 +228,8 @@ function ColorDocumentButton({
   const [rows, setRows] = useState<ColorFormRow[]>([{ key: 1, id: null, ...EMPTY_COLOR_NAMES }])
   const [busy, setBusy] = useState(false)
   const [preparingPhotoKey, setPreparingPhotoKey] = useState<number | null>(null)
+  useDraftLoading(preparingPhotoKey !== null && '컬러 사진을 준비하는 중…', true)
+  useDraftLoading(busy && '컬러 구성을 저장하는 중…', true)
   const [error, setError] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
@@ -265,6 +270,10 @@ function ColorDocumentButton({
     setError('')
     nextKey.current += 1
     setRows((current) => [...current, { key: nextKey.current, id: null, ...EMPTY_COLOR_NAMES }])
+    requestAnimationFrame(() => {
+      const list = listRef.current
+      if (list) list.scrollTop = list.scrollHeight
+    })
   }
 
   function removeRow(key: number) {
@@ -587,6 +596,7 @@ function SheetInlineField({
   const [busy, setBusy] = useState(false)
   const revertRef = useRef(false)
   const busyRef = useRef(false)
+  useDraftLoading(busy && '기획안 입력값을 저장하는 중…', true)
 
   useEffect(() => {
     if (!readOnly && inputRef.current && document.activeElement === inputRef.current) return
@@ -766,6 +776,7 @@ function DraftReleaseFolderSelect({ draft, folders, readOnly, onChange }: {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const selected = folders.find((folder) => folder.id === draft.seasonId)
+  useDraftLoading(saving && '출시 폴더를 저장하는 중…', true)
 
   async function selectFolder(seasonId: string) {
     setSaving(true)
@@ -796,11 +807,12 @@ function DraftReleaseFolderSelect({ draft, folders, readOnly, onChange }: {
   </>
 }
 
-export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout = DEFAULT_DRAFT_SHEET_LAYOUT, brand, releaseFolders, onChangeReleaseFolder, price, teamWork, visualBoard, informationEditorId, informationTemporaryStore, specDocumentTemporarySource, onOpen, onNextSample, onSaveColors, onSharedPhotoChange, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onReopenInformation, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout = DEFAULT_DRAFT_SHEET_LAYOUT, brand, rowPosition, releaseFolders, onChangeReleaseFolder, price, teamWork, visualBoard, informationEditorId, informationTemporaryStore, specDocumentTemporarySource, onOpen, onNextSample, onSaveColors, onSharedPhotoChange, onRenameColor, onSaveSheetValue, onSaveSpecDocument, onReopenInformation, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
   readOnly?: boolean
   mode?: DraftBoardMode
   layout?: DraftSheetLayout
   draft: ProductDraft; brand: Brand | undefined
+  rowPosition?: ReactNode
   releaseFolders: Pick<Season, 'id' | 'name' | 'releaseTiming' | 'opening' | 'brandId'>[]
   onChangeReleaseFolder: (seasonId: string | null) => Promise<void>
   price?: DraftPriceControls
@@ -851,6 +863,7 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
   const colorSampleReceived = Boolean(latestColorRound?.receivedAt)
   const doneColorIds = new Set(latestColorRound ? draft.specs.colorSampleDone?.[latestColorRound.id] ?? [] : [])
   const [pendingDone, setPendingDone] = useState<Record<string, boolean>>({})
+  useDraftLoading(Object.keys(pendingDone).length > 0 && '컬러샘플 진행 상태를 저장하는 중…', true)
   const informationId = useId()
   const [information, setInformation] = useState<{
     anchor: HTMLButtonElement
@@ -1009,9 +1022,9 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
     </>
 
   if (mode === 'card') {
-    return <article className="draft-board-card" aria-label={`${draft.draftNo} ${name}`}>
+    return <article className="draft-board-card" aria-label={`${draft.draftNo} ${name}`} data-draft-order-row={rowPosition ? draft.id : undefined}>
       <header className="draft-board-card-grid bg-primary text-primary-foreground">
-        <span>BRAND</span><span>SAMPLE</span>
+        <span className="flex items-center gap-2">{rowPosition}BRAND</span><span>SAMPLE</span>
       </header>
       <div className="draft-board-card-grid">
         <div className="draft-board-card-brand">{brandContent}</div>
@@ -1139,7 +1152,8 @@ export function DraftSheetRow({ draft, readOnly = false, mode = 'table', layout 
     ect: <td hidden={hidden.has('ect')} />,
   }
 
-  return <><tr className="draft-sheet-row">
+  return <><tr className="draft-sheet-row" data-draft-order-row={rowPosition ? draft.id : undefined}>
+      {rowPosition && <td className="draft-row-position-cell">{rowPosition}</td>}
       {layout.map(({ id }) => {
         const cell = cells[id]
         return <Fragment key={id}>{id === lastVisibleColumn ? cloneElement(cell, {}, cell.props.children,

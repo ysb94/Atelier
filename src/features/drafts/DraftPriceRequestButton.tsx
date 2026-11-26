@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { useDraftLoading } from './DraftLoading'
 import { createPortal } from 'react-dom'
 import { Heart } from 'lucide-react'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
@@ -26,6 +27,7 @@ export type DraftPriceControls = {
   saveManual?: (price: Omit<DraftManualPrice, 'savedAt'>) => Promise<void>
   destinations?: {
     rows?: readonly SharedDraftPriceDestination[]
+    loading?: boolean
     ready: boolean
     error: string
     retry: () => void
@@ -96,6 +98,9 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
     colors.every(color => parseDraftManualAmount(manualAmounts[color.id] ?? '') !== null))
   const visible = open && active && (!readOnly || Boolean(latest || manualPrice))
   const showingConfirmation = visible && !readOnly && Boolean(pendingDestination)
+  useDraftLoading(visible && controls?.loading && '단가요청을 불러오는 중…')
+  useDraftLoading(visible && !waiting && !readOnly && destinations?.loading && '공용 제조처를 불러오는 중…')
+  useDraftLoading(busy && '단가 정보를 저장하는 중…', true)
 
   useEffect(() => {
     if (!visible) return

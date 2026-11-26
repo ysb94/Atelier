@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useDraftLoading } from './DraftLoading'
 import { createPortal } from 'react-dom'
 import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -13,6 +14,7 @@ function AssigneeDialog({ board, onClose }: { board: DraftVisualBoardRow; onClos
   const [error, setError] = useState('')
   const changedElsewhere = revision !== (board.status?.assignee_revision ?? null)
   const employees = board.employees
+  useDraftLoading(saving && 'Visual 팀 담당자를 저장하는 중…', true)
   const inactive = employees ? selected.filter(id => !employees.some(member => member.id === id)) : []
 
   useEffect(() => { dialog.current?.showModal() }, [])

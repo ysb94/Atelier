@@ -1,4 +1,5 @@
 import { useId, useState } from 'react'
+import { useDraftLoading } from './DraftLoading'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { SeasonOpening } from '@/lib/types'
@@ -12,6 +13,7 @@ export function DraftFolderOpeningDate({ opening, editable, onSave }: {
   const inputId = useId()
   const [edit, setEdit] = useState<{ value: string; expected: SeasonOpening }>()
   const [busy, setBusy] = useState(false)
+  useDraftLoading(busy && '폴더 오픈 예정일을 저장하는 중…', true)
   const [error, setError] = useState('')
   const value = edit?.value ?? opening?.date ?? ''
   const confirmed = Boolean(opening?.confirmed && !edit)

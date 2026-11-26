@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { useDraftLoading } from './DraftLoading'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { DraftTeamRecord, DraftTeamValues } from '@/lib/supabase/draft-team-work'
@@ -60,6 +61,7 @@ export function DraftAmdCell({ colors, readOnly, hidden, teamWork, children }: {
   const amd = teamWork.records?.get('amd') as DraftTeamRecord<'amd'> | undefined
   const saved: AmdValues = amd?.payload ?? { collection: '', colors: {} }
   const [saving, setSaving] = useState<string | null>(null)
+  useDraftLoading(saving !== null && 'AMD 번호를 저장하는 중…', true)
   const [error, setError] = useState('')
   const locked = readOnly || !teamWork.ready || saving !== null
 

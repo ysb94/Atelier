@@ -381,7 +381,7 @@ function CompanyWorkspaceMain() {
         >
           <ReleasePageGate>
             <ImpersonationViewRestore />
-            <WorkspaceTabPanels tabs={visibleTabs} activeId={activeId} />
+            <WorkspaceTabPanels tabs={visibleTabs} activeId={activeId} onClose={closeTab} />
           </ReleasePageGate>
         </div>
       </div>

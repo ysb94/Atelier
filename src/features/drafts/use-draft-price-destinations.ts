@@ -69,6 +69,7 @@ export function useDraftPriceDestinations(companyId: string, actorId: string | u
 
   return {
     rows: enabled ? query.data : undefined,
+    loading: query.isLoading,
     error,
     ready: enabled && query.isSuccess,
     retry: () => { void query.refetch() },

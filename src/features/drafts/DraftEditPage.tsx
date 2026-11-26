@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
+import { useCloseWorkspaceTab } from '@/components/layout/workspace-tab-activity'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -46,6 +47,7 @@ import {
   DRAFT_OPEN_TYPE_OPTIONS,
   DRAFT_REGISTER_TYPE_OPTIONS,
   DRAFT_SPEC_LABEL,
+  formatSeasonLabel,
   type CostCurrency,
   type DraftSpecKey,
   type ProductDraft,
@@ -55,7 +57,7 @@ import {
 } from '@/lib/types'
 import { DEFAULT_COMPANY_ID } from '@/lib/company/capabilities'
 import {
-  DRAFT_NAMES_REQUIRED, hasBothDraftNames, requiresDraftBrand,
+  DRAFT_NAMES_REQUIRED, hasBothDraftNames, requiresDraftBrand, UNASSIGNED_DRAFT_BRAND,
 } from '@/lib/drafts/company-draft'
 import {
   colorWorkOrderFileName,
@@ -73,17 +75,19 @@ import {
   withPendingNextSampleWorkOrder,
 } from '@/lib/drafts/sample-work-order'
 import { useAuth } from '@/lib/supabase/auth'
-import { useBasicWorkAccess, canWriteDraft } from '@/lib/supabase/basic-work-access'
+import { useBasicWorkAccess, canWriteDraft, hasDraftOwnerAccess } from '@/lib/supabase/basic-work-access'
 import {
   formatSizeSpec,
   parseSizeSpec,
 } from '@/lib/drafts/spec-format'
-import { draftDetailPath } from '@/lib/workspace/company-paths'
+import { draftDetailPath, withSearch } from '@/lib/workspace/company-paths'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { cn, formatNumber } from '@/lib/utils'
+import { isUnassignedReleaseFolder } from './release-schedule-preview'
+import { DraftLoadingProvider, useDraftLoading } from './DraftLoading'
 
-const EMPTY_SEASONS: Season[] = []
 const EMPTY_STYLES: Style[] = []
+const DRAFT_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp']
 
 const TEXT_SPEC_KEYS = ['fabric', 'coating'] as const satisfies DraftSpecKey[]
 
@@ -271,31 +275,65 @@ function formatWeightSpec(value: string) {
   return value ? `${value} g` : ''
 }
 
-function listPathForSeason(seasonId: string | null, seasons: Season[]) {
-  if (!seasonId) return '/drafts?season=unassigned'
-  const season = seasons.find((item) => item.id === seasonId)
-  if (!season) return '/drafts'
-  return `/drafts?season=${encodeURIComponent(season.code)}`
-}
-
-function seasonIdFromQuery(
-  value: string | null,
-  seasons: Season[],
-): string | null | undefined {
-  if (value == null) return undefined
-  if (value === '' || value === 'none') return null
-  if (seasons.some((season) => season.id === value)) return value
-  return undefined
-}
-
 export function DraftEditPage() {
+  const { draftId } = useParams()
+  const { search } = useLocation()
+  return <DraftLoadingProvider>{!draftId || draftId === 'new'
+    ? <NewDraft key={search} />
+    : <DraftEditor key={draftId} />}</DraftLoadingProvider>
+}
+
+function NewDraft() {
+  const [params] = useSearchParams()
+  const navigate = useNavigate()
+  const { brandBySlug, loading, error } = useCompanyBrandScope()
+  const brandSlug = params.get('brand')?.trim()
+  const brand = brandSlug ? brandBySlug.get(brandSlug) : undefined
+  const folderId = params.get('season')
+  const needsFolder = Boolean(brandSlug && folderId && folderId !== 'none')
+  const seasons = useQuery({
+    queryKey: ['seasons', brand?.id],
+    queryFn: () => getSeasonsByBrand(brand!.id),
+    enabled: Boolean(brand && needsFolder),
+  })
+  const loadingLocation = Boolean((brandSlug && !brand && loading) || (needsFolder && brand && seasons.isPending))
+  useDraftLoading(loadingLocation && '기획안 추가 위치를 불러오는 중…')
+  if (loadingLocation) {
+    return <p role="status" className="py-16 text-center text-sm text-muted-foreground">기획안 추가 위치를 불러오는 중입니다.</p>
+  }
+  const folder = needsFolder ? seasons.data?.find(item =>
+    item.id === folderId && item.brandId === brand?.id && !isUnassignedReleaseFolder(item)
+  ) : undefined
+  const listPath = withSearch('/drafts', {
+    scope: brandSlug ?? (params.get('scope') === UNASSIGNED_DRAFT_BRAND ? UNASSIGNED_DRAFT_BRAND : null),
+    folder: folder?.id ?? (brand && folderId === 'none' ? 'unassigned' : null),
+  })
+  if ((brandSlug && !brand) || (needsFolder && !folder)) {
+    const failed = (!brand && error) || (needsFolder && seasons.isError)
+    return (
+      <div className="space-y-4 py-16 text-center">
+        <p role="alert" className="text-sm text-danger">{failed
+          ? '기획안 추가 위치를 불러오지 못했습니다. 목록에서 다시 열어 주세요.'
+          : '선택한 브랜드 또는 출시 폴더를 찾을 수 없습니다. 목록에서 다시 선택해 주세요.'}</p>
+        <Button type="button" variant="outline" onClick={() => navigate(brand ? listPath : '/drafts')}>기획안 목록으로</Button>
+      </div>
+    )
+  }
+  return <DraftEditor initialBrandId={brand?.id} initialFolder={folder} initialListPath={listPath} />
+}
+
+function DraftEditor({ initialBrandId, initialFolder, initialListPath }: {
+  initialBrandId?: string
+  initialFolder?: Season
+  initialListPath?: string
+}) {
   useRenderWatch('DraftEditPage')
-  const { brands, brandById, brandBySlug } = useCompanyBrandScope()
+  const { brands, brandById } = useCompanyBrandScope()
   const { profile } = useAuth()
   const workAccess = useBasicWorkAccess()
   const { draftId } = useParams()
-  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+  const closeWorkspaceTab = useCloseWorkspaceTab()
   const queryClient = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const location = useLocation()
@@ -307,12 +345,16 @@ export function DraftEditPage() {
   const companyId = profile?.companyId ?? DEFAULT_COMPANY_ID
 
   const isNew = !draftId || draftId === 'new'
-  const [form, setForm] = useState<ProductDraftInput>(() => emptyDraftInput())
+  const [form, setForm] = useState<ProductDraftInput>(() => ({
+    ...emptyDraftInput(),
+    brandId: initialBrandId ?? null,
+    seasonId: initialFolder?.id ?? null,
+  }))
   const [error, setError] = useState<string | null>(null)
   const [savedAt, setSavedAt] = useState<string | null>(null)
-  const [seasonPrefillDone, setSeasonPrefillDone] = useState(false)
-  const [seasonFromQueryDone, setSeasonFromQueryDone] = useState(false)
   const [editorPart, setEditorPart] = useState<'basic' | 'pending'>('basic')
+  const [draggingImage, setDraggingImage] = useState(false)
+  const [readingImage, setReadingImage] = useState(false)
   const partners = useDraftSabangnetPartners(form.brandId, editorPart === 'pending')
   const openChannelId = form.specs.openChannelTargetId ?? null
   const openChannel = withSavedDraftPartner(
@@ -331,15 +373,6 @@ export function DraftEditPage() {
     retry: 1,
   })
 
-  const seasonsQuery = useQuery({
-    queryKey: ['seasons', form.brandId],
-    queryFn: () => getSeasonsByBrand(form.brandId ?? ''),
-    enabled: Boolean(form.brandId),
-  })
-  const seasons = form.brandId
-    ? (seasonsQuery.data ?? EMPTY_SEASONS)
-    : EMPTY_SEASONS
-
   const stylesQuery = useQuery({
     queryKey: ['styles', form.brandId],
     queryFn: () => getStylesByBrand(form.brandId ?? ''),
@@ -350,7 +383,10 @@ export function DraftEditPage() {
     : EMPTY_STYLES
 
   const loaded = draftQuery.data
-  const editable = canWriteDraft(workAccess.access, isNew ? null : loaded ?? { createdBy: null }, form.brandId)
+  const editable = isNew
+    ? canWriteDraft(workAccess.access, null, form.brandId)
+    : Boolean(loaded && canWriteDraft(workAccess.access, loaded))
+  const deletable = Boolean(loaded && hasDraftOwnerAccess(workAccess.access, loaded))
   const hasBothNames = hasBothDraftNames(form)
   useEffect(() => {
     if (!loaded) return
@@ -366,42 +402,10 @@ export function DraftEditPage() {
     setForm(rest)
   }, [loaded])
 
-  useEffect(() => {
-    if (!isNew || seasonPrefillDone) return
-    const requestedBrand = searchParams.get('brand')?.trim() ?? ''
-    const brand = requestedBrand ? brandBySlug.get(requestedBrand) : undefined
-    if (requestedBrand && !brand && brands.length === 0) return
-    setForm((prev) => ({ ...prev, brandId: brand?.id ?? null }))
-    setSeasonPrefillDone(true)
-  }, [brandBySlug, brands.length, isNew, searchParams, seasonPrefillDone])
-
-  useEffect(() => {
-    if (
-      !isNew ||
-      seasonFromQueryDone ||
-      !form.brandId ||
-      seasonsQuery.isLoading
-    ) {
-      return
-    }
-    const fromQuery = seasonIdFromQuery(
-      searchParams.get('season'),
-      seasonsQuery.data ?? [],
-    )
-    if (fromQuery !== undefined) {
-      setForm((prev) => ({ ...prev, seasonId: fromQuery }))
-    }
-    setSeasonFromQueryDone(true)
-  }, [
-    form.brandId,
-    isNew,
-    searchParams,
-    seasonFromQueryDone,
-    seasonsQuery.data,
-    seasonsQuery.isLoading,
-  ])
-
-  const listPath = listPathForSeason(form.seasonId, seasons)
+  const listPath = initialListPath ?? withSearch('/drafts', {
+    scope: selectedBrand?.slug ?? UNASSIGNED_DRAFT_BRAND,
+    folder: form.seasonId ?? 'unassigned',
+  })
 
   const totalQty = useMemo(
     () => form.colors.reduce((sum, color) => sum + (color.orderQty ?? 0), 0),
@@ -413,6 +417,23 @@ export function DraftEditPage() {
     setForm((prev) => ({ ...prev, ...next }))
     setError(null)
     setSavedAt(null)
+  }
+
+  async function selectImage(file: File | undefined) {
+    if (!file || imageInputDisabled) return
+    const supported = DRAFT_IMAGE_TYPES.includes(file.type) || (!file.type && /\.(?:png|jpe?g|webp)$/i.test(file.name))
+    if (!supported) {
+      setError('대표 사진은 JPG, PNG, WebP 파일만 추가할 수 있습니다.')
+      return
+    }
+    setReadingImage(true)
+    try {
+      patch({ imageUrl: await readImageFile(file) })
+    } catch {
+      setError('사진을 불러오지 못했습니다.')
+    } finally {
+      setReadingImage(false)
+    }
   }
 
   const workOrders = withPendingNextSampleWorkOrder(form.sampleWorkOrders)
@@ -437,7 +458,8 @@ export function DraftEditPage() {
   async function saveSampleAttachment(nextForm: ProductDraftInput) {
     if (saveMutation.isPending) throw new Error('기획안 저장이 끝난 뒤 다시 등록해 주세요.')
     const saved = await saveMutation.mutateAsync(nextForm)
-    if (!isNew) setForm(draftToInput(saved))
+    if (isNew) navigate(draftDetailPath(saved.id), { replace: true })
+    else setForm(draftToInput(saved))
   }
 
   async function registerFirstSample(file: SampleWorkOrderFile) {
@@ -523,7 +545,7 @@ export function DraftEditPage() {
 
   const saveMutation = useMutation({
     mutationFn: async (next?: ProductDraftInput) => {
-      if (!editable) throw new Error('기획안은 작성자만 수정할 수 있습니다.')
+      if (!editable) throw new Error('기획안을 수정할 권한이 없습니다.')
       const source = next ?? form
       const creator = profile?.displayName?.trim() ?? ''
       const payload =
@@ -542,23 +564,32 @@ export function DraftEditPage() {
       if (!draftId) throw new Error('기획안을 찾을 수 없습니다.')
       return updateProductDraft(draftId, { ...payload, expectedUpdatedAt: payload.expectedUpdatedAt ?? loaded?.updatedAt })
     },
-    onSuccess: async (saved) => {
+    onSuccess: async () => {
       setError(null)
       setSavedAt(new Date().toLocaleTimeString('ko-KR'))
       await queryClient.invalidateQueries({ queryKey: ['product-drafts'] })
       await queryClient.invalidateQueries({ queryKey: ['product-draft'] })
-      if (isNew) {
-        navigate(draftDetailPath(saved.id), { replace: true })
-      }
     },
     onError: (err) => {
       setError(err instanceof Error ? err.message : '저장에 실패했습니다.')
     },
   })
 
+  function saveFromHeader() {
+    saveMutation.mutate(form, {
+      onSuccess: () => {
+        if (!isNew) return
+        if (closeWorkspaceTab) closeWorkspaceTab(listPath)
+        else navigate(listPath, { replace: true })
+      },
+    })
+  }
+
+  const imageInputDisabled = !editable || saveMutation.isPending || readingImage
+
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      if (!editable) throw new Error('기획안은 작성자만 삭제할 수 있습니다.')
+      if (!deletable) throw new Error('작성자와 지정된 운영 계정만 기획안을 삭제할 수 있습니다.')
       if (!draftId || isNew) return
       return deleteProductDraft(draftId)
     },
@@ -570,6 +601,13 @@ export function DraftEditPage() {
       setError(err instanceof Error ? err.message : '삭제에 실패했습니다.')
     },
   })
+
+  useDraftLoading(!isNew && draftQuery.isFetching && !draftQuery.data && '기획안을 불러오는 중…')
+  useDraftLoading(workAccess.isLoading && '기획안 권한을 확인하는 중…')
+  useDraftLoading(Boolean(form.brandId) && stylesQuery.isLoading && '연결할 상품을 불러오는 중…')
+  useDraftLoading(readingImage && '대표 사진을 준비하는 중…', true)
+  useDraftLoading(saveMutation.isPending && '기획안을 저장하는 중…', true)
+  useDraftLoading(deleteMutation.isPending && '기획안을 삭제하는 중…', true)
 
   if (!isNew && draftQuery.isPending) {
     return (
@@ -652,12 +690,12 @@ export function DraftEditPage() {
               {savedAt} 저장됨
             </span>
           ) : null}
-          {!isNew && editable ? (
+          {!isNew && deletable ? (
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              disabled={!editable || deleteMutation.isPending}
+              disabled={deleteMutation.isPending}
               onClick={() => {
                 if (window.confirm('이 기획안을 삭제할까요?')) {
                   deleteMutation.mutate()
@@ -671,8 +709,8 @@ export function DraftEditPage() {
           <Button
             type="button"
             size="sm"
-            disabled={!editable || saveMutation.isPending}
-            onClick={() => saveMutation.mutate(form)}
+            disabled={!editable || saveMutation.isPending || readingImage}
+            onClick={saveFromHeader}
           >
             <Save className="size-3.5" />
             {saveMutation.isPending ? '저장 중...' : '저장'}
@@ -680,10 +718,10 @@ export function DraftEditPage() {
         </div>
       </div>
 
-      {workAccess.error ? <p role="alert" className="mb-3 text-sm text-danger">{workAccess.error.message}</p> : !editable ? <p role="status" className="mb-3 text-sm text-muted-foreground">조회 전용 · 작성자와 지정된 운영 계정만 수정·삭제할 수 있습니다.</p> : null}
+      {workAccess.error ? <p role="alert" className="mb-3 text-sm text-danger">{workAccess.error.message}</p> : !editable ? <p role="status" className="mb-3 text-sm text-muted-foreground">조회 전용 · 기획부서, 작성자, 지정 운영 계정에서 수정할 수 있습니다.</p> : null}
       <fieldset disabled={!editable} className="min-w-0 border-0 p-0">
       {error ? (
-        <p className="mb-3 rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
+        <p role="alert" className="mb-3 rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
           {error}
         </p>
       ) : null}
@@ -698,35 +736,62 @@ export function DraftEditPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/png,image/jpeg,image/webp"
+            accept={DRAFT_IMAGE_TYPES.join(',')}
             className="hidden"
-            onChange={async (event) => {
-              const file = event.target.files?.[0]
-              event.target.value = ''
-              if (!file) return
-              try {
-                patch({ imageUrl: await readImageFile(file) })
-              } catch {
-                setError('사진을 불러오지 못했습니다.')
-              }
+            disabled={imageInputDisabled}
+            onChange={event => {
+              const file = event.currentTarget.files?.[0]
+              event.currentTarget.value = ''
+              void selectImage(file)
             }}
           />
           <div className="grid items-start gap-4 sm:grid-cols-[auto_minmax(0,1fr)] sm:gap-6">
-            <div className="relative aspect-square w-32 sm:w-40 lg:w-48">
+            <div className="relative aspect-square w-32 sm:w-40 lg:w-48"
+              onDragOver={isNew ? event => {
+                if (!event.dataTransfer.types.includes('Files')) return
+                event.preventDefault()
+                event.dataTransfer.dropEffect = imageInputDisabled ? 'none' : 'copy'
+                setDraggingImage(!imageInputDisabled)
+              } : undefined}
+              onDragLeave={isNew ? event => {
+                if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setDraggingImage(false)
+              } : undefined}
+              onDrop={isNew ? event => {
+                if (!event.dataTransfer.types.includes('Files')) return
+                event.preventDefault()
+                setDraggingImage(false)
+                if (imageInputDisabled) return
+                if (event.dataTransfer.files.length > 1) {
+                  setError('대표 사진은 한 장만 추가할 수 있습니다.')
+                  return
+                }
+                void selectImage(event.dataTransfer.files[0])
+              } : undefined}
+            >
               <button
                 type="button"
+                aria-label="사진 선택"
+                aria-busy={readingImage}
                 title="사진 선택"
+                disabled={imageInputDisabled}
                 onClick={() => fileInputRef.current?.click()}
-                className="flex size-full items-center justify-center overflow-hidden rounded-xl border border-border bg-muted/40 transition-colors hover:bg-muted"
+                className={cn(
+                  'flex size-full flex-col items-center justify-center gap-2 overflow-hidden rounded-xl border border-border bg-muted/40 transition-colors hover:bg-muted',
+                  draggingImage && 'border-primary bg-primary/5',
+                )}
               >
                 {form.imageUrl ? (
                   <img
                     src={form.imageUrl}
                     alt=""
+                    draggable={false}
                     className="max-h-full max-w-full object-contain"
                   />
                 ) : (
-                  <ImagePlus className="size-8 text-muted-foreground" />
+                  <>
+                    <ImagePlus aria-hidden="true" className="size-8 text-muted-foreground" />
+                    {isNew && <span className="px-2 text-xs text-muted-foreground">사진을 끌어다 놓거나 클릭하세요</span>}
+                  </>
                 )}
               </button>
               {form.imageUrl ? (
@@ -734,6 +799,7 @@ export function DraftEditPage() {
                   type="button"
                   aria-label="사진 제거"
                   title="사진 제거"
+                  disabled={imageInputDisabled}
                   onClick={() => patch({ imageUrl: null })}
                   className="absolute -right-1.5 -top-1.5 rounded-full border border-border bg-card p-1 text-muted-foreground shadow-sm hover:text-foreground"
                 >
@@ -812,8 +878,6 @@ export function DraftEditPage() {
               <Select aria-label="브랜드 선택" className="h-8 w-full text-xs" value={form.brandId ?? ''}
                 disabled={!isNew || !editable || saveMutation.isPending}
                 onChange={event => {
-                  setSeasonPrefillDone(true)
-                  setSeasonFromQueryDone(true)
                   patch({
                     brandId: event.target.value || null, seasonId: null,
                     ...(form.specs.openChannelTargetId
@@ -825,6 +889,9 @@ export function DraftEditPage() {
                 {brands.map(brand => <option key={brand.id} value={brand.id}
                   disabled={isNew && !canWriteDraft(workAccess.access, null, brand.id)}>{brand.name}</option>)}
               </Select>
+              {initialFolder && form.seasonId === initialFolder.id && (
+                <p className="text-xs text-muted-foreground">출시 폴더 · {formatSeasonLabel(initialFolder)}</p>
+              )}
               {savedSamples.length === 0 && <SampleDestinationSelect value={form.originCountry}
                 disabled={!editable || saveMutation.isPending} onChange={originCountry => {
                   const sampleWorkOrders = applySampleOrigin(form.sampleWorkOrders, originCountry)
@@ -1069,7 +1136,11 @@ export function DraftEditPage() {
                             aria-label="저장"
                             title="저장"
                             disabled={saveMutation.isPending}
-                            onClick={() => saveMutation.mutate(form)}
+                            onClick={() => saveMutation.mutate(form, {
+                              onSuccess: (saved) => {
+                                if (isNew) navigate(draftDetailPath(saved.id), { replace: true })
+                              },
+                            })}
                           >
                             <Save className="size-3.5" />
                           </Button>

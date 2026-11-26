@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { useDraftLoading } from './DraftLoading'
 import { getCodeUsageTargetFolders } from '@/lib/api'
 import { descendantFolderIds, folderPath } from '@/lib/codes/outbound-folder'
 import { listCodeUsageTargetOptions } from '@/lib/supabase/code-usage-targets'
@@ -44,6 +45,7 @@ export function useDraftSabangnetPartners(brandId: string | null, enabled: boole
   }, [folders.data, targets.data])
 
   let placeholder = '사방넷 업체 선택'
+  useDraftLoading((targets.isLoading || folders.isLoading) && '사방넷 업체 목록을 불러오는 중…')
   if (!brandId) placeholder = '브랜드를 먼저 선택하세요'
   else if (targets.isLoading || folders.isLoading) placeholder = '사방넷 업체 불러오는 중…'
   else if (targets.isError || folders.isError) placeholder = '사방넷 업체 조회 실패'

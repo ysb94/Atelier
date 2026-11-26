@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { DraftLoadingProvider, useDraftLoading } from './DraftLoading'
 import { Link } from 'react-router-dom'
 import {
   Archive,
@@ -52,6 +53,10 @@ const STATUS_ORDER: SeasonStatus[] = ['active', 'archived']
 const DEFAULT_HIDDEN_STATUSES = new Set<SeasonStatus>(['archived'])
 
 export function DraftSeasonPickerPage() {
+  return <DraftLoadingProvider><DraftSeasonPickerContent /></DraftLoadingProvider>
+}
+
+function DraftSeasonPickerContent() {
   const { brand } = useBrand()
   const queryClient = useQueryClient()
   const [creating, setCreating] = useState(false)
@@ -210,6 +215,10 @@ export function DraftSeasonPickerPage() {
   }
 
   const loading = seasonsQuery.isLoading || draftsQuery.isLoading
+  useDraftLoading(loading && '출시 기획과 기획안 목록을 불러오는 중…')
+  useDraftLoading(createMutation.isPending && '출시 기획을 만드는 중…', true)
+  useDraftLoading(updateMutation.isPending && '출시 기획을 저장하는 중…', true)
+  useDraftLoading(deleteMutation.isPending && '출시 기획을 삭제하는 중…', true)
   const hasSeasons = seasons.length > 0
 
   useEffect(() => {

@@ -30,7 +30,7 @@ import { normalizeDraftManualPrice } from '@/lib/drafts/manual-price'
 import { receiveSample, registerNextReceivedSample } from '@/lib/drafts/sample-receipt'
 import { reopenDraftInformation, writeColorSpec } from '@/lib/drafts/color-spec'
 import { useAuth } from '@/lib/supabase/auth'
-import { useBasicWorkAccess, canWriteDraft } from '@/lib/supabase/basic-work-access'
+import { useBasicWorkAccess, canWriteDraft, hasDraftOwnerAccess } from '@/lib/supabase/basic-work-access'
 import { draftPriceError, type DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
 import { saveDraftColors, saveDraftReleaseFolder } from '@/lib/supabase/product-drafts'
 import { saveSeasonOpening } from '@/lib/supabase/seasons'
@@ -46,9 +46,11 @@ import { DraftBrandScopeBar, countScheduleRows } from './DraftBrandScopeBar'
 import { DraftFolderBar, DraftFolderHeading } from './DraftFolderBar'
 import { DraftFolderOpeningDate } from './DraftFolderOpeningDate'
 import { useDraftFolderOrder } from './use-draft-folder-order'
+import { useDraftFolderRowOrder } from './use-draft-folder-row-order'
 import { matchesDraftFolder, UNASSIGNED_DRAFT_FOLDER_LABEL } from './draft-folder-filter'
 import { DraftSheetRow, type DraftConfirmFlag } from './DraftSheetRow'
 import { DraftBoardView } from './DraftBoardView'
+import { DraftLoadingProvider, useDraftLoading } from './DraftLoading'
 import { useDraftSheetLayout } from './draft-sheet-layout'
 import { useDraftPriceRequests } from './useDraftPriceRequests'
 import { useDraftPriceDestinations } from './use-draft-price-destinations'
@@ -103,8 +105,12 @@ function emptyMessage(
 }
 
 export function CompanyDraftsPage() {
+  return <DraftLoadingProvider><CompanyDraftsContent /></DraftLoadingProvider>
+}
+
+function CompanyDraftsContent() {
   useRenderWatch('CompanyDraftsPage')
-  const { brands, brandById } = useCompanyBrandScope()
+  const { brands, brandById, loading: brandsLoading } = useCompanyBrandScope()
   const { profile, session } = useAuth()
   const workAccess = useBasicWorkAccess()
   const navigate = useNavigate()
@@ -113,6 +119,7 @@ export function CompanyDraftsPage() {
   const [boardFilter, setBoardFilter] = useState<BoardFilter>('all')
   const [myOnly, setMyOnly] = useState(false)
   const [completedFolderId, setCompletedFolderId] = useState<string | null>(null)
+  const [rowOrderFailure, setRowOrderFailure] = useState<{ folderId: string; message: string } | null>(null)
   const folderParam = searchParams.get('folder')
   const requestedFolder = folderParam ?? searchParams.get('season') ?? 'all'
   const brandScope = (searchParams.get('scope') ?? 'all') as DraftBrandScope
@@ -186,7 +193,7 @@ export function CompanyDraftsPage() {
         trace.step('check_access')
         const current = currentDraft(draftId)
         if (!current) throw new Error('기획안을 찾지 못했습니다.')
-        if (!canWriteDraft(workAccess.access,current)) throw new Error('작성자만 기획안을 수정할 수 있습니다.')
+        if (!canWriteDraft(workAccess.access, current)) throw new Error('기획안을 수정할 권한이 없습니다.')
         trace.step('validate_input')
         const updated = await trace.run('save', (context) => save(current, context))
         await trace.run('refresh_queries', async () => {
@@ -231,7 +238,7 @@ export function CompanyDraftsPage() {
     const creator = profile?.displayName?.trim()
     if (!creator) return
     for (const draft of drafts) {
-      if (draft.owner.trim() || ownerFillRef.current.has(draft.id)) continue
+      if (draft.owner.trim() || ownerFillRef.current.has(draft.id) || !hasDraftOwnerAccess(workAccess.access, draft)) continue
       ownerFillRef.current.add(draft.id)
       void saveDraftChange(draft.id, (current) => {
         const input = draftToInput(current)
@@ -242,7 +249,7 @@ export function CompanyDraftsPage() {
         console.warn('[drafts] 기획안 작성자 저장 실패', err)
       })
     }
-  }, [drafts, profile?.displayName])
+  }, [drafts, profile?.displayName, workAccess.access])
 
   const seasons = useMemo(
     () => flattenListQueries(seasonQueries),
@@ -290,10 +297,8 @@ export function CompanyDraftsPage() {
     [brandIdBySlug, brandScope, ownerAllDrafts],
   )
 
-  const scopedBrand =
-    brandScope !== 'all' && brandScope !== UNASSIGNED_DRAFT_BRAND
-      ? brands.find((item) => item.slug === brandScope)
-      : undefined
+  const targetBrandSlug = brandScope !== 'all' && brandScope !== UNASSIGNED_DRAFT_BRAND ? brandScope : undefined
+  const scopedBrand = targetBrandSlug ? brands.find(item => item.slug === targetBrandSlug) : undefined
   const folderOrder = useDraftFolderOrder(scopedBrand?.id,
     profile?.status === 'active' && profile.id === session?.user.id ? profile.id : undefined, companyId)
   const canReorderFolders = Boolean(scopedBrand &&
@@ -364,6 +369,37 @@ export function CompanyDraftsPage() {
     ? null
     : folderItems.find((folder) => selectedFolderIds.includes(folder.id)) ?? null
   const showingCompleted = activeFolder !== null && activeFolder.id === completedFolderId
+  const rowFolder = !showingCompleted && selectedFolderIds.length === 1 ? activeFolder : null
+  const rowFolderId = rowFolder?.id
+  const rowFolderBrand = rowFolder?.brandId
+  const rowOrder = useDraftFolderRowOrder(rowFolderId,
+    profile?.status === 'active' && profile.id === session?.user.id ? profile.id : undefined, companyId)
+  const canReorderRows = Boolean(rowFolderBrand &&
+    (workAccess.access?.legacyEdit || workAccess.access?.operator || canWriteDraft(workAccess.access, null, rowFolderBrand)))
+  const folderRowIds = useMemo(() => {
+    if (!rowFolderId) return []
+    const remaining = new Set(drafts.filter(draft => draft.seasonId === rowFolderId && draft.brandId === rowFolderBrand).map(draft => draft.id))
+    const saved = (rowOrder.ids ?? []).filter(id => remaining.delete(id))
+    return [...saved, ...remaining]
+  }, [drafts, rowFolderId, rowFolderBrand, rowOrder.ids])
+  const rowRanks = useMemo(() => new Map(folderRowIds.map((id, index) => [id, index + 1])), [folderRowIds])
+  const canDragRows = canReorderRows && rowOrder.ready && !rowOrder.isPending && !draftsQuery.isFetching && folderRowIds.length > 1
+
+  async function moveDraftPosition(draftId: string, targetId: string, after: boolean) {
+    if (!rowFolderId || !canDragRows || !rowRanks.has(draftId) || draftId === targetId) return
+    const next = folderRowIds.filter(id => id !== draftId)
+    const target = next.indexOf(targetId)
+    if (target === -1) return
+    next.splice(target + Number(after), 0, draftId)
+    if (next.every((id, index) => id === folderRowIds[index])) return
+    setRowOrderFailure(null)
+    try {
+      await rowOrder.reorder(next)
+    } catch (cause) {
+      setRowOrderFailure({ folderId: rowFolderId, message: cause instanceof Error ? cause.message : '순번을 저장하지 못했습니다.' })
+    }
+  }
+
   const unassignedFolderCount = ownerDrafts.filter(draft =>
     matchesDraftFolder(scheduleByDraft.get(draft.id)?.group?.id, 'unassigned'),
   ).length
@@ -390,13 +426,15 @@ export function CompanyDraftsPage() {
   }, [folderDrafts, scheduleByDraft])
 
   const visible = useMemo(() => {
-    return folderDrafts.filter((draft) => {
+    const filtered = folderDrafts.filter((draft) => {
       const scheduled = Boolean(scheduleByDraft.get(draft.id)?.group)
       if (boardFilter === 'unassigned' && scheduled) return false
       if (boardFilter === 'scheduled' && !scheduled) return false
       return true
     })
-  }, [boardFilter, folderDrafts, scheduleByDraft])
+    const unranked = rowRanks.size + 1
+    return rowRanks.size ? filtered.sort((a, b) => (rowRanks.get(a.id) ?? unranked) - (rowRanks.get(b.id) ?? unranked)) : filtered
+  }, [boardFilter, folderDrafts, rowRanks, scheduleByDraft])
   const teamWork = useDraftTeamWork(profileId, visible, !showingCompleted)
   const visualBoard = useDraftVisualBoard(profileId, visible, !showingCompleted)
   const editableVisible = useMemo(() => showingCompleted ? [] : visible.filter(draft => canWriteDraft(workAccess.access, draft)),
@@ -405,16 +443,24 @@ export function CompanyDraftsPage() {
 
   const loading =
     draftsQuery.isLoading || seasonQueries.loading
+  useDraftLoading((loading || brandsLoading) && '기획안과 폴더를 불러오는 중…')
+  useDraftLoading(workAccess.isLoading && '기획안 권한을 확인하는 중…')
+  useDraftLoading(!showingCompleted && (prices.query.isLoading || teamWork.query.isLoading || visualBoard.query.isLoading) &&
+    '단가와 팀별 작업 상태를 불러오는 중…')
 
-  const selectedSeason = seasons.find(season =>
-    !isUnassignedReleaseFolder(season) &&
-    (!scopedBrand || season.brandId === scopedBrand.id) &&
-    matchesDraftFolder(season.id, folderFilter, !folderParam ? season.code : undefined) &&
-    folderFilter !== 'all' && folderFilter !== 'unassigned',
-  )
-  const newHref = draftNewPath(scopedBrand?.slug ?? (selectedSeason ? brandById.get(selectedSeason.brandId)?.slug : undefined), {
-    season: folderFilter === 'unassigned' ? 'none' : selectedSeason?.id ?? null,
-  })
+  const scopedFolderPending = (brandsLoading || seasonQueries.loading) && Boolean(targetBrandSlug)
+    && (!scopedBrand || (folderFilter !== 'all' && folderFilter !== 'unassigned' && !activeFolder))
+  function newDraftHref(entry: string | null = null) {
+    // Keep an explicit selection even when its lookup fails. The editor checks the target before allowing a save.
+    const season = !targetBrandSlug || folderFilter === 'all'
+      ? null
+      : folderFilter === 'unassigned' ? 'none' : activeFolder?.id ?? folderFilter
+    return draftNewPath(targetBrandSlug, {
+      season,
+      scope: brandScope === UNASSIGNED_DRAFT_BRAND ? UNASSIGNED_DRAFT_BRAND : null,
+      entry,
+    })
+  }
 
   function setFolderFilter(value: string) {
     setBoardFilter('all')
@@ -465,6 +511,7 @@ export function CompanyDraftsPage() {
         brandCards={brandCards}
         unassignedScopeCounts={unassignedScopeCounts}
         onSelect={setBrandScope}
+        showUnassigned
         unassignedFirst
       />
 
@@ -529,8 +576,14 @@ export function CompanyDraftsPage() {
               }}
             />
           )}
-          {canWriteDraft(workAccess.access) && <Link
-            to={newHref}
+          {!scopedFolderPending && canWriteDraft(workAccess.access) && <Link
+            to={newDraftHref()}
+            onClick={event => {
+              if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return
+              event.preventDefault()
+              // The workspace keeps this tab alive. A deliberate new draft starts a new form.
+              navigate(newDraftHref(crypto.randomUUID()))
+            }}
             className="ml-auto inline-flex h-7 shrink-0 items-center gap-1 self-end rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 lg:self-start"
           >
             <Plus className="size-3" aria-hidden="true" />
@@ -552,11 +605,16 @@ export function CompanyDraftsPage() {
       {draftsQuery.isError ? (
         <p className="mb-3 text-sm text-danger">기획안을 불러오지 못했습니다.</p>
       ) : null}
+      {rowFolderId && rowOrder.error && <p role="status" className="mb-2 text-xs text-muted-foreground">{rowOrder.error}</p>}
+      {rowFolderId && rowOrderFailure?.folderId === rowFolderId &&
+        <p role="alert" className="mb-2 text-xs text-danger">{rowOrderFailure.message}</p>}
 
       <DraftBoardView
         key={profileId}
         accountId={profileId}
         layout={sheetLayout}
+        showRowOrder={Boolean(rowFolderId)}
+        onMoveRow={canDragRows ? (id, target, after) => { void moveDraftPosition(id, target, after) } : undefined}
         label={showingCompleted ? '완료된 기획안 목록' : '기획안 목록'}
         emptyMessage={showingCompleted ? '이 폴더에 완료된 기획안이 없습니다.'
           : loading ? '불러오는 중...'
@@ -622,12 +680,26 @@ export function CompanyDraftsPage() {
         renderRows={mode => visible.map(draft => {
                 const brand = draft.brandId ? brandById.get(draft.brandId) : undefined
                 const price = priceByDraft.get(draft.id)
+                const position = rowRanks.get(draft.id)
                 return (
                   <DraftSheetRow
                     key={draft.id}
                     mode={mode}
                     layout={sheetLayout}
                     draft={draft}
+                    rowPosition={rowFolderId && (canReorderRows && position && folderRowIds.length > 1
+                      ? <button type="button" className="draft-row-position-handle" draggable={canDragRows} data-draft-order-handle
+                          aria-disabled={!canDragRows}
+                          aria-label={`${draft.draftNo} 순번 ${position}`} aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+                          title="끌어서 순서 변경 · Alt + 위/아래 방향키"
+                          onKeyDown={event => {
+                            const after = event.key === 'ArrowDown'
+                            if (!event.altKey || (!after && event.key !== 'ArrowUp')) return
+                            event.preventDefault()
+                            const target = folderRowIds[position - 1 + (after ? 1 : -1)]
+                            if (target) void moveDraftPosition(draft.id, target, after)
+                          }}>{position}</button>
+                      : <span className="tabular-nums" aria-label={`${draft.draftNo} 순번 ${position ?? ''}`}>{position}</span>)}
                     teamWork={teamWork.forDraft(draft.id)}
                     visualBoard={visualBoard.forDraft(draft.id)}
                     readOnly={!canWriteDraft(workAccess.access,draft)}

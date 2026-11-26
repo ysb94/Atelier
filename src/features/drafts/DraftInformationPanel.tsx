@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { useDraftLoading } from './DraftLoading'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, FileText, ImagePlus, X } from 'lucide-react'
@@ -191,6 +192,7 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
   const [editing, setEditing] = useState(false)
   const [error, setError] = useState('')
   const locked = readOnly || busy
+  useDraftLoading(busy && '컬러 정보를 저장하는 중…', true)
   const colorName = color.name.trim() || '컬러 미정'
   const fieldLabel = DRAFT_INFORMATION_LABELS[field]
   function valueFor(key: ColorSpecField) {
@@ -354,6 +356,7 @@ function SpecDocumentForm({ draft, readOnly, showWriteActions, edits, saved, onE
   const canConfirm = hasChanges || (Boolean(text.trim()) && !confirmed)
   const showModify = Boolean(text.trim()) && confirmed && !canConfirm && !editing && !temporaryChanged
   const locked = readOnly || busy
+  useDraftLoading(busy && '스펙 문서를 저장하는 중…', true)
   const legacy = draft.colors.flatMap(color => {
     const note = draft.specs.colorSpecs[color.id]?.specDoc.trim()
     return note && note !== value.trim() ? [{ id: color.id, name: color.name, note }] : []
@@ -571,6 +574,7 @@ function HtmlPreviewDialog({ title, html, onClose }: { title: string; html: stri
   const titleId = useId()
   const [documentHtml, setDocumentHtml] = useState<string>()
   const [failed, setFailed] = useState(false)
+  useDraftLoading(documentHtml === undefined && !failed && 'HTML 미리보기를 준비하는 중…')
 
   useEffect(() => {
     dialog.current?.showModal()
@@ -617,6 +621,7 @@ function VisualHtmlRow({ color, index, visualPhoto, colorPhoto, readOnly, canSav
   const [edit, setEdit] = useState<{ text: string; revision: string | null }>()
   const [codeOpen, setCodeOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  useDraftLoading(saving && 'HTML을 저장하는 중…', true)
   const [error, setError] = useState('')
   const [preview, setPreview] = useState<{ title: string; html: string }>()
   const codeId = useId()
@@ -743,6 +748,8 @@ export function DraftInformationPanel({
     retry: false,
   })
   const loadingTemporary = temporaryEnabled && temporary.isPending
+  useDraftLoading(visualTab && visual.isLoading && '비주얼 정보를 불러오는 중…')
+  useDraftLoading(temporaryEnabled && temporary.isLoading && '임시 저장 내용을 불러오는 중…')
   const canSaveTemporary = temporaryEnabled && temporary.isSuccess
   const temporaryErrorCode = (temporary.error as { code?: string } | null)?.code
   const missingTemporary = temporaryErrorCode === 'PGRST205' || temporaryErrorCode === '42P01'

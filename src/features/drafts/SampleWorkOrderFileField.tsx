@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
+import { useDraftLoading } from './DraftLoading'
 import { Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { readFileAsDataUrl } from '@/lib/images'
@@ -23,6 +24,8 @@ export function SampleWorkOrderFileField({ label, savedFile, side, readOnly, sav
   const [file, setFile] = useState<SampleWorkOrderFile | null>(null)
   const [reading, setReading] = useState(false)
   const [registering, setRegistering] = useState(false)
+  useDraftLoading(reading && '작업지시서 파일을 읽는 중…', true)
+  useDraftLoading(registering && '작업지시서를 등록하는 중…', true)
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState('')
   const editable = !readOnly && Boolean(onRegister)

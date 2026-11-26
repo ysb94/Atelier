@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { useDraftLoading } from './DraftLoading'
 import { RELEASE_VISUAL_ID } from '@/lib/company/release-access'
 import { listDraftVisualStatus, saveDraftVisualContent, type DraftVisualStatus } from '@/lib/supabase/draft-visual-content'
 import { listOrgChartMembers } from '@/lib/supabase/profiles'
@@ -28,6 +29,7 @@ export function useDraftVisualBoard(actorId: string | undefined, drafts: readonl
   const byDraft = useMemo(() => new Map(query.data?.map(row => [row.draft_id, row])), [query.data])
   const directory = useQuery({ queryKey: ['orgChartMembers', actorId], queryFn: listOrgChartMembers, retry: false, staleTime: 15_000,
     enabled: active && enabled && Boolean(actorId) && (directoryRequested || Boolean(query.data?.some(row => row.assignee_ids.length))) })
+  useDraftLoading(directory.isLoading && 'Visual 팀 담당자를 불러오는 중…')
   const employees = useMemo(() => directory.data?.flatMap(member => {
     const name = member.displayName?.trim()
     return member.departmentId === RELEASE_VISUAL_ID && name ? [{ id: member.id, name }] : []

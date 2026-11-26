@@ -1,4 +1,5 @@
 import { useContext, useMemo, useState, type ReactNode } from 'react'
+import { useDraftLoading } from './DraftLoading'
 import { useQuery } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
@@ -80,6 +81,7 @@ function MdAssigneeSelect({ actorId, value, disabled, confirmed, onChange }: {
     const label = member.displayName?.trim()
     return member.departmentId === RELEASE_MD_ID && label ? [{ id: member.id, label }] : []
   })
+  useDraftLoading(directory.isLoading && 'MD 담당자 목록을 불러오는 중…')
   let placeholder = 'select'
   if (directory.isLoading) placeholder = '불러오는 중…'
   else if (directory.isError && !directory.data) placeholder = '조회 실패'
