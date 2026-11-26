@@ -6,6 +6,7 @@ import type { MeetingAvailability } from '@/features/meetings/meeting-availabili
 import type { MeetingParticipationRow } from '@/features/meetings/meeting-participation'
 import { diagnosticQuery } from './diagnostic-query'
 import { diagnosticOperation, startWorkflow, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
+import { legacyMeetingNoticeContext, type MeetingNoticeContext } from '@/features/meetings/meeting-notices'
 
 const BUCKET='company-meetings'
 function fail(action:string,error:{message:string}):never {
@@ -48,6 +49,20 @@ export async function confirmCompanyMeeting(series:MeetingSeries,revision:number
 export const respondToMeeting=(round:string,version:number,status:'available'|'unavailable',context?:DiagnosticContext)=>checked<void>('respond_to_meeting',getSupabase().rpc('respond_to_meeting',{p_round:round,p_version:version,p_status:status}),context)
 export const manuallyConfirmMeetingRound=(round:string,revision:number,version:number,excluded:string[],context?:DiagnosticContext)=>checked<number>('manually_confirm_meeting_round',getSupabase().rpc('manually_confirm_meeting_round',{p_round:round,p_revision:revision,p_version:version,p_excluded:excluded}),context)
 export const listMeetingInvitations=()=>checked<InboxNotification[]>('list_my_meeting_invitations',getSupabase().rpc('list_my_meeting_invitations'))
+let checkNoticeContextAfter = 0
+export async function listMeetingNoticeContext(personId: string, loadFullList: () => Promise<MeetingSeries[]>): Promise<MeetingNoticeContext> {
+  if (Date.now() >= checkNoticeContextAfter) {
+    try {
+      return await checked<MeetingNoticeContext>('list_my_meeting_notice_context', getSupabase().rpc('list_my_meeting_notice_context'))
+    } catch (error) {
+      const cause = error instanceof Error ? error.cause as { code?: string; message?: string } | undefined : undefined
+      if (cause?.code !== 'PGRST202' || !cause.message?.includes('list_my_meeting_notice_context')) throw error
+      checkNoticeContextAfter = Date.now() + 5 * 60_000
+    }
+  }
+  const [invitations, meetings] = await Promise.all([listMeetingInvitations(), loadFullList()])
+  return legacyMeetingNoticeContext(invitations, meetings, personId)
+}
 export const readMeetingInvitation=(id:string|null)=>checked<void>('read_meeting_invitation',getSupabase().rpc('read_meeting_invitation',{p_id:id}))
 export const openMeetingGroup=(id:string,context?:DiagnosticContext)=>checked<string>('open_meeting_group',getSupabase().rpc('open_meeting_group',{p_series:id}),context)
 export async function deleteCompanyMeeting(series:MeetingSeries,context?:DiagnosticContext):Promise<void> {

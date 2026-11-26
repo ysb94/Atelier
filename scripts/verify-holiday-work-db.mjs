@@ -377,5 +377,56 @@ try {
   assert.equal(await value('select count(*)::int from app.employee_extra_leave where note=$1', ['휴일근무 보상휴가 · 2026-10-17']), 1)
   assert.equal(await value('select count(*)::int from app.holiday_work_policy'),0)
   assert.deepEqual(await oldSnapshot(), beforeConfirmed.original)
+  await verifyNotificationReadCost()
   console.log('holiday-work isolated DB: legacy records, both choices, unsigned settlement, leave ledger, overtime credits, retries, and access passed')
 } catch (error) { console.error('holiday-work DB verification failed:', error.message, error.code, error.where ?? '', error.position ?? ''); process.exitCode=1 } finally { await db.close() }
+
+// Exercise the public reader against the same accumulated work, versions, and
+// reads on each side of the migration. All counters are local to this transaction.
+async function verifyNotificationReadCost() {
+  await db.exec("reset role; begin; set local track_functions='all'")
+  async function calls() {
+    return Number(await value(`select coalesce(sum(calls),0) from pg_stat_xact_user_functions
+      where schemaname='app' and funcname in ('holiday_work_can_view','holiday_work_ops','holiday_work_review')`))
+  }
+  async function measure(actor) {
+    await as(actor)
+    const before = await calls()
+    const rows = await notices()
+    const checks = (await calls()) - before
+    const times = []
+    for (let i = 0; i < 11; i++) {
+      const plan = await value('explain (analyze,format json,timing off) select public.list_my_home_work_notifications()')
+      if (i > 0) times.push(plan[0]['Execution Time'])
+    }
+    const medianMs = times.toSorted((a,b) => a-b)[Math.floor(times.length/2)]
+    return { rows, checks, medianMs }
+  }
+  async function sample() {
+    const metrics = {}
+    for (const [role, id] of Object.entries({ staff, peer, approver, ops, foreign })) {
+      metrics[role] = await measure(id)
+    }
+    return metrics
+  }
+  const before = await sample()
+  await db.exec('reset role')
+  await db.exec(await readFile('supabase/migrations/20261126063000_reuse_holiday_notice_audiences.sql','utf8'))
+  const after = await sample()
+  for (const role of Object.keys(before)) {
+    assert.deepEqual(after[role].rows, before[role].rows, role + ' ordered events, pending actions and read versions')
+  }
+  assert.ok(after.staff.rows.filter(n => n.event_type?.startsWith('holiday-')).length > 5)
+  assert.ok(after.staff.checks < before.staff.checks, 'ordinary employee with work history performs fewer actual permission checks')
+  assert.ok(after.peer.checks < before.peer.checks, 'unrelated ordinary employee performs fewer actual permission checks')
+  await db.exec('reset role;delete from app.test_approvers')
+  await as(approver)
+  assert.ok(!(await notices()).some(n => n.tab === 'approvals'), 'access revocation applies at the next read')
+  await db.exec('reset role;rollback')
+  console.log('Holiday notification permission calls per fetch', Object.fromEntries(
+    Object.keys(before).map(role=>[role,{
+      before:before[role].checks, after:after[role].checks,
+      beforeMedianMs:before[role].medianMs, afterMedianMs:after[role].medianMs,
+    }])
+  ))
+}

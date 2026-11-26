@@ -5,11 +5,11 @@ import { Button } from '@/components/ui/button'
 import { useAttendanceEntry } from '@/features/home/attendance-entry-context'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
-import { listCompanyMeetings, listMeetingRooms } from '@/lib/supabase/meetings'
+import { listMeetingRooms } from '@/lib/supabase/meetings'
 import { emptyList } from '@/lib/utils'
-import { sharedReadPolicy, readPollInterval } from '@/lib/query/shared-read-policy'
-import type { MeetingRoom, MeetingSeries } from './meeting-schedule'
-import { MEETING_REMINDER_LEAD_MS, meetingNoticeDue, meetingNoticeStorageKey, upcomingMeetingNotices, type MeetingStartNotice } from './meeting-start-reminders'
+import type { MeetingRoom } from './meeting-schedule'
+import { MEETING_REMINDER_LEAD_MS, meetingNoticeDue, meetingNoticeStorageKey, startNoticesFromSchedule, type MeetingStartNotice } from './meeting-start-reminders'
+import { useMeetingNoticeContext } from './use-meeting-notice-context'
 
 /** 라우트·KeepAlive 탭 밖에서 한 번만 실행한다. 실제 로그인 계정의 기존 조회 권한을 사용한다. */
 export function MeetingStartReminder() {
@@ -17,33 +17,33 @@ export function MeetingStartReminder() {
   const { profile } = useAuth()
   const entry = useAttendanceEntry()
   const enabled = profile?.status === 'active'
-  const meetings = useQuery({
-    queryKey: ['company-meetings', profile?.id, profile?.companyId], queryFn: listCompanyMeetings,
-    ...sharedReadPolicy, enabled, refetchInterval: readPollInterval(30_000, Boolean(enabled)),
-  })
-  const rooms = useQuery({ queryKey: ['meeting-rooms', profile?.companyId], queryFn: listMeetingRooms, enabled })
-  const notices = useMemo(() => upcomingMeetingNotices(meetings.data ?? emptyList<MeetingSeries>(), profile?.id ?? ''), [meetings.data, profile?.id])
+  const meetings = useMeetingNoticeContext(enabled, true)
+  const notices = useMemo(() => startNoticesFromSchedule(meetings.data?.starts ?? []), [meetings.data?.starts])
+  const rooms = useQuery({ queryKey: ['meeting-rooms', profile?.companyId], queryFn: listMeetingRooms, enabled: enabled && notices.length > 0 })
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled || !notices.length) return
     const current = Date.now()
     const next = notices.flatMap(notice => [notice.startsAtMs - MEETING_REMINDER_LEAD_MS, notice.startsAtMs]).filter(time => time > current)
-    // 30분 경계와 시작 순간에는 정확히 갱신하고, 나머지는 30초 단위로 남은 시간을 갱신한다.
-    const delay = Math.min(30_000, ...next.map(time => time - current))
+    if (!next.length) return
+    const countingDown = notices.some(notice => meetingNoticeDue(notice, current))
+    const delay = next.reduce((earliest, time) => Math.min(earliest, time - current), countingDown ? 30_000 : 2_147_483_647)
     const timer = window.setTimeout(() => setNow(Date.now()), Math.max(10, delay))
     return () => window.clearTimeout(timer)
   }, [enabled, notices, now])
   const refresh = meetings.refetch
   useEffect(() => {
     if (!enabled) return
+    let timer: number | undefined
     const visible = () => {
       if (document.visibilityState !== 'visible') return
-      // 이 조회만 갱신한다. 전역 window focus 재조회는 켜지 않는다.
-      void refresh().then(() => setNow(Date.now())).catch(error => console.warn('[meetings] 복귀 후 시작 알림 조회 실패', { error }))
+      setNow(Date.now())
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => { void refresh({ cancelRefetch: false }) }, 150)
     }
     document.addEventListener('visibilitychange', visible)
     window.addEventListener('focus', visible)
-    return () => { document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible) }
+    return () => { window.clearTimeout(timer); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible) }
   }, [enabled, refresh])
   useEffect(() => {
     if (meetings.error) console.warn('[meetings] 시작 알림 일정 조회 실패', { error: meetings.error })
@@ -51,7 +51,7 @@ export function MeetingStartReminder() {
   }, [meetings.error, rooms.error])
   if (!enabled || !profile?.companyId || meetings.isError || !meetings.data || (entry && (entry.phase !== 'ready' || entry.checkoutOpen))) return null
   return <MeetingReminderConfirmation key={`${profile.companyId}:${profile.id}`} companyId={profile.companyId} personId={profile.id}
-    notices={notices} rooms={rooms.data ?? emptyList<MeetingRoom>()} now={now} />
+    notices={notices} rooms={rooms.data ?? emptyList<MeetingRoom>()} now={Math.max(now, Date.now())} />
 }
 
 function MeetingReminderConfirmation({ companyId, personId, notices, rooms, now }: {

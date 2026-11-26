@@ -38,7 +38,10 @@ export function useMeetingRealtime(enabled: boolean, personId?: string, companyI
           setConnected(false)
         }
       })
-    const visible = () => { if (document.visibilityState === 'visible') refresh() }
+    // The global reminder refetches the shared notice context when the tab regains focus.
+    const visible = () => {
+      if (document.visibilityState === 'visible') void cache.invalidateQueries({ queryKey: ['company-meetings', personId, companyId] })
+    }
     document.addEventListener('visibilitychange', visible)
     return () => {
       disposed = true

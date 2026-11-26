@@ -265,20 +265,27 @@
   {
     "id": "notifications",
     "label": "종합 알림, 읽음, 처리 대기, PC 알림",
-    "origin": "서버 업무 이벤트와 본인 읽음 기록이 기준이다. 읽음과 실제 승인·참석 응답·확인 처리는 독립 상태다.",
+    "origin": "서버 업무 이벤트와 본인 읽음 기록이 기준이다. 내 업무 피드백은 수신자별 최근 목록에서 표시할 값만 읽고, 본문과 회차 확인에 쓸 버전은 상세에서 조회한다. 읽음과 실제 승인·참석 응답·확인 처리는 독립 상태다.",
     "write": "권한 확인 후 상세 표시가 끝나면 정확한 이벤트 버전을 읽음 저장한다. 실제 처리는 각 업무 API를 사용한다.",
-    "propagation": "종합 알림과 각 탭은 같은 이벤트·읽음 상태를 공유한다. 브라우저 PC 알림은 같은 조회의 현재 미확인 이벤트를 사용한다.",
+    "propagation": "종합 알림과 각 탭은 같은 이벤트·읽음 상태를 공유한다. 주말근무 알림은 한 번의 조회 안에서 같은 직원·수신 역할의 권한 판정을 재사용하며 다음 조회 때 다시 확인한다. 회의 초대와 시작 안내는 본인 계정의 공통 조회 결과를 사용한다. 브라우저 PC 알림은 같은 조회의 현재 미확인 이벤트를 사용한다.",
     "copies": "서버에는 결과 이벤트의 당시 내용과 읽음을 남긴다. 브라우저는 전달 중복을 막는 식별자와 시각을 IndexedDB에 보관한다.",
     "reason": "업무 진행과 열람을 구분하고 여러 탭의 동일 시스템 알림을 한 번만 표시한다.",
     "resources": [
       "table:public.my_home_notification_reads",
       "table:public.my_home_request_events",
+      "table:public.personal_work_feedback_notices",
       "rpc:public.list_my_managed_work_notifications",
+      "rpc:app.holiday_work_notifications",
+      "rpc:public.list_my_meeting_notice_context",
       "browser:indexedDB"
     ],
     "evidence": [
       "docs/architecture/MY_HOME_NOTIFICATIONS.md",
-      "docs/architecture/DESKTOP_NOTIFICATIONS.md"
+      "docs/architecture/DESKTOP_NOTIFICATIONS.md",
+      "src/features/settings/use-my-home-notifications.ts",
+      "src/features/settings/use-personal-work-feedback-notices.ts",
+      "src/lib/supabase/request-policy.ts",
+      "supabase/migrations/20261126063000_reuse_holiday_notice_audiences.sql"
     ]
   },
   {
@@ -286,7 +293,7 @@
     "label": "회의 회차, 참석자, 공유 결과, 회의 채팅",
     "origin": "회의의 유효 회차와 역할·초대·일정 버전이 참석·응답 조회의 기준이다. 결과 초안과 공개 결과의 수신 범위가 구분된다.",
     "write": "호스트가 회차 명단·일정을 변경하고 결과 초안을 저장하거나 공개한다. 참석자의 응답은 해당 회차·버전에 연결된다.",
-    "propagation": "회의 상세·캘린더·종합 알림은 해당 회차를 사용한다. 단체채팅은 가장 최근 공개한 회차의 참석자로 맞춘다.",
+    "propagation": "회의 상세와 캘린더는 회의 목록을 사용한다. 종합 알림과 회의 시작 안내는 같은 회차에서 알림에 필요한 항목을 30초 주기로 조회하고, 실시간 변경도 반영한다. 단체채팅은 가장 최근 공개한 회차의 참석자로 맞춘다.",
     "copies": "후속 회차에 명단을 승계하고, 공개 결과는 버전·수신자와 함께 보관한다.",
     "reason": "과거 회차와 이미 공유받은 내용에 이후 명단·초안 변경이 소급되지 않게 한다.",
     "resources": [
@@ -294,11 +301,20 @@
       "table:public.meeting_rounds",
       "table:public.meeting_round_notices",
       "table:app.meeting_result_versions",
-      "rpc:public.list_company_meetings"
+      "rpc:public.list_company_meetings",
+      "rpc:public.list_my_meeting_notice_context",
+      "rpc:app.meeting_notice_context"
     ],
     "evidence": [
       "docs/architecture/MEETING_ROUND_PEOPLE.md",
-      "docs/architecture/MEETING_GROUP_CHAT.md"
+      "docs/architecture/MEETING_GROUP_CHAT.md",
+      "src/features/home/use-home-calendar-events.ts",
+      "src/features/meetings/MeetingStartReminder.tsx",
+      "src/features/meetings/use-meeting-notice-context.ts",
+      "src/features/meetings/use-meeting-notices.ts",
+      "src/features/meetings/use-meeting-realtime.ts",
+      "src/features/meetings/use-read-meeting-round-notices.ts",
+      "supabase/migrations/20261126062000_meeting_notice_context.sql"
     ]
   },
   {
