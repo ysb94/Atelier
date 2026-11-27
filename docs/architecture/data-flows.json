@@ -490,14 +490,18 @@
   {
     "id": "warehouse-fixed-locations",
     "label": "고정 자리, 방별리스트, 전체 상품 M번호",
-    "origin": "자리와 시트 표기 상품명은 네임변경!E3:F에서 읽는다. 품번은 같은 브랜드의 styles를 조회해 정규화한 이름이 고유하게 일치하는 경우 가져온다.",
+    "origin": "자리와 시트 표기 상품명은 네임변경!E3:F에서 읽는다. 품번은 같은 브랜드의 styles를 조회해 정규화한 이름이 고유하게 일치하는 경우 가져온다. 방별리스트의 현 재고 위치는 브랜드와 활성 재고 세트 안에서 warehouse_stock_positions.source_product_name을 앞뒤 공백 제거·NFC로 대조하고 warehouse_locations에서 위치를 읽는다.",
     "write": "warehouse-fixed-locations가 원본 시트를 읽고 save_warehouse_fixed_location_snapshot을 통해 저장한다.",
-    "propagation": "창고 관리와 방별리스트는 DB에 저장된 목록과 같은 브랜드의 SKU 참조를 사용한다. 이름이 일치하는 SKU가 없거나 복수면 품번을 비운다.",
-    "copies": "시트 자리·상품명과 동기화 시각은 DB 스냅샷에 둔다. 화면에서 해석한 품번은 그 스냅샷에 추가로 쓰지 않는다.",
+    "propagation": "창고 관리와 방별리스트는 DB에 저장된 목록과 같은 브랜드의 SKU 참조를 사용한다. 이름이 일치하는 SKU가 없거나 복수면 품번을 비운다. 방별리스트는 폴더 열기와 상품명 확정 시 list_room_list_stock_positions에서 목록의 상품만 조회한다. 성공한 위치는 표에 표시하고 전체 위치·SKU 조회가 완료되면 방별 분류와 피킹표에 반영한다.",
+    "copies": "시트 자리·상품명과 동기화 시각은 DB 스냅샷에 둔다. 화면에서 해석한 품번은 그 스냅샷에 추가로 쓰지 않는다. 위치 조회 결과는 계정·브랜드·활성 세트·상품명 묶음별로 브라우저 메모리에 캐시한다.",
     "reason": "시트 조회가 중단되어도 마지막 목록을 유지하고, DB 상품과 시트 표기가 다른 경우 품번을 임의로 붙이지 않기 위해서다.",
     "resources": [
       "table:public.warehouse_fixed_location_snapshots",
       "table:public.styles",
+      "table:public.warehouse_stock_positions",
+      "table:public.warehouse_inventory_sets",
+      "table:public.warehouse_locations",
+      "rpc:public.list_room_list_stock_positions",
       "rpc:public.save_warehouse_fixed_location_snapshot",
       "function:warehouse-fixed-locations",
       "external:sheets.googleapis.com"
@@ -505,6 +509,11 @@
     "evidence": [
       "docs/architecture/WAREHOUSE_FIXED_LOCATIONS.md",
       "src/lib/supabase/warehouse-fixed-locations.ts",
+      "src/lib/supabase/warehouse-stock.ts",
+      "src/lib/supabase/request-policy.ts",
+      "src/features/logistics/RoomListPage.tsx",
+      "src/features/logistics/use-room-list-warehouse-locations.ts",
+      "supabase/migrations/20261127033501_room_list_stock_positions.sql",
       "supabase/functions/warehouse-fixed-locations/index.ts"
     ]
   },

@@ -981,6 +981,11 @@ export type WarehouseStockPosition = {
   updatedAt: string
 }
 
+export type RoomListStockPosition = Pick<WarehouseStockPosition,
+  'brandId' | 'warehouseId' | 'zone' | 'locationCode' | 'styleId' | 'styleNo' | 'styleName' |
+  'sourceStyleNo' | 'receivedOn' | 'receivedOnRaw' | 'createdAt' | 'sourceRowNumber' |
+  'quantityStatus' | 'unitsPerBox' | 'remainingBoxes' | 'openedUnits'>
+
 export type WarehouseBox = {
   id: string
   brandId: string
