@@ -49,8 +49,13 @@ function stockErrorCode(error: Error | null) {
   return typeof cause === 'object' && cause !== null && 'code' in cause ? cause.code : undefined
 }
 
+function latestFailureAt(results: UseQueryResult[]) {
+  return results.reduce((latest, result) => result.isError ? Math.max(latest, result.errorUpdatedAt) : latest, 0)
+}
+
 function combineStock(results: UseQueryResult<RoomListStockPosition[]>[]) {
   return {
+    failureAt: latestFailureAt(results),
     data: results.map(result => ['P0002', '42501', 'PGRST301', 'PGRST303'].includes(String(stockErrorCode(result.error)))
       ? undefined : result.data),
     states: results.map(result => ({
@@ -63,6 +68,7 @@ function combineStock(results: UseQueryResult<RoomListStockPosition[]>[]) {
 
 function combineSets(results: UseQueryResult<WarehouseInventorySet | null>[]) {
   return {
+    failureAt: latestFailureAt(results),
     sets: results.flatMap(result => result.data ? [result.data] : []),
     loading: results.some(result => result.isLoading || result.isPaused || (result.isError && result.isFetching)),
     error: results.some(result => result.isError),
@@ -141,6 +147,11 @@ export function useRoomListWarehouseLocations(userId: string, names: readonly st
   const sourceLoading = loading || sets.loading || (fixedBrandSelected &&
     (fixed.isLoading || fixed.isPaused || (fixed.isError && fixed.isFetching)))
   const sourceError = error || sets.error || inactiveBrands.size > 0 || (fixedBrandSelected && fixed.isError)
+  const failureAt = Math.max(
+    error ? cache.getQueryState(['brands'])?.errorUpdatedAt ?? 0 : 0,
+    sets.failureAt, stock.failureAt,
+    fixedBrandSelected ? latestFailureAt([fixed, styleLookup]) : 0,
+  )
   function retryFailed(queryKey: QueryKey) {
     return cache.invalidateQueries({
       queryKey, exact: true,
@@ -155,6 +166,7 @@ export function useRoomListWarehouseLocations(userId: string, names: readonly st
     loading: sourceLoading || unavailableNames.loadingNames.size > 0 || (fixedBrandSelected && (styleLookup.isLoading || styleLookup.isPaused)),
     error: sourceError || unavailableNames.failedNames.size > 0,
     styleLookupError: fixedBrandSelected && styleLookup.isError,
+    failureAt,
     sourceLoading,
     sourceError,
     ...unavailableNames,
