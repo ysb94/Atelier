@@ -1,4 +1,4 @@
-import { useMemo, useState, type ClipboardEvent } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent } from 'react'
 import { Printer } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { compareWarehouseLocationCodeNatural } from '@/lib/invoice/product-list-warehouse'
 import { roomListProductName } from './room-list-locations'
 import {
@@ -57,10 +58,26 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
   const [showGroups, setShowGroups] = useState(false)
   const [printScope, setPrintScope] = useState<'selection' | RoomArea | null>(null)
   const [roomSaveFailed, setRoomSaveFailed] = useState(false)
-  const hasNames = rows.some(([name]) => Boolean(name.trim()))
-  const warehouse = useRoomListWarehouseLocations(hasNames)
+  const [pendingFailureAt, setPendingFailureAt] = useState(0)
+  const [confirmedFailureAt, setConfirmedFailureAt] = useState(0)
+  // Keep the committed name in the request until the product field loses focus.
+  const namesKey = JSON.stringify([...new Set(rows.map(([name], index) =>
+    editingName?.sourceIndex === index ? editingName.name : roomListProductName(name),
+  ).filter(Boolean))].sort())
+  const names = useMemo(() => JSON.parse(namesKey) as string[], [namesKey])
+  const hasNames = names.length > 0
+  const warehouse = useRoomListWarehouseLocations(userId, names)
   const { locationCodes, latestPositions, styleNumbers } = warehouse
+  const currentFailureAt = hasNames ? warehouse.failureAt : 0
+  const failureToConfirm = Math.max(pendingFailureAt, currentFailureAt)
+  const needsConfirmation = failureToConfirm > confirmedFailureAt
+  useEffect(() => {
+    if (currentFailureAt <= confirmedFailureAt) return
+    setPendingFailureAt(previous => Math.max(previous, currentFailureAt))
+    setPrintScope(null)
+  }, [confirmedFailureAt, currentFailureAt])
   const locationsReady = !warehouse.error && !warehouse.loading
+  const pickingReady = locationsReady && !warehouse.styleLookupError && !needsConfirmation && !editingName
   const visibleRows = useMemo(() => {
     const missing = []
     const zero = []
@@ -83,7 +100,7 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
   ), [roomGroups])
   const rooms = useMemo(() => {
     const grouped = new Map<string, RoomPickingRoom>()
-    if (!locationsReady) return grouped
+    if (!pickingReady) return grouped
     for (const item of visibleRows) {
       if (!item.name) continue
       const styleNo = styleNumbers.get(item.name) ?? ''
@@ -110,7 +127,7 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
       group.lines.sort((left, right) => compareWarehouseLocationCodeNatural(left.location, right.location))
     }
     return grouped
-  }, [locationsReady, groupsByPrefix, latestPositions, styleNumbers, visibleRows])
+  }, [pickingReady, groupsByPrefix, latestPositions, styleNumbers, visibleRows])
   const roomTabs = useMemo(() => [...rooms.values()].sort((a, b) =>
     Number(b.key === 'missing') - Number(a.key === 'missing') || ROOM_ORDER.compare(a.name, b.name),
   ), [rooms])
@@ -232,7 +249,8 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
       />
       {hasNames && (warehouse.error || warehouse.styleLookupError) && (
         <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-danger" role="alert">
-          {warehouse.error ? '일부 창고 위치를 불러오지 못했습니다.' : '고정 자리의 최신 M번호를 불러오지 못했습니다.'}
+          <span>{warehouse.error ? '일부 창고 위치를 불러오지 못했습니다.' : '고정 자리의 최신 M번호를 불러오지 못했습니다.'}{' '}
+            모든 조회가 끝날 때까지 피킹표와 출력을 사용할 수 없습니다.</span>
           <Button type="button" size="sm" variant="outline" onClick={() => void warehouse.refresh()}>다시 조회</Button>
         </div>
       )}
@@ -324,10 +342,13 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
                     {locationColumns.map(index => (
                       <td key={index} className="break-all border-b border-r border-border px-3 py-2 align-top tabular-nums last:border-r-0">
                         {matches?.[index]}
-                        {name && index === 0 && !warehouse.error && (
-                          matches?.length ? null
-                            : warehouse.loading ? <span className="text-xs text-muted-foreground">조회 중…</span>
-                              : <span className="text-xs text-muted-foreground">위치 없음</span>
+                        {name && index === 0 && !matches?.length && (
+                          <span className="text-xs text-muted-foreground">
+                            {editingName?.sourceIndex === sourceIndex ? null
+                              : warehouse.sourceLoading || warehouse.loadingNames.has(name) ? '조회 중…'
+                                : warehouse.sourceError || warehouse.failedNames.has(name) ? '위치 확인 필요'
+                                  : '위치 없음'}
+                          </span>
                         )}
                       </td>
                     ))}
@@ -346,6 +367,37 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
           title={printScope === 'selection' ? undefined : `${printScope} 피킹표 미리보기 및 출력`}
           onClose={() => setPrintScope(null)} />
       )}
+      {needsConfirmation && (
+        <WorkspaceTabOverlay>
+          <RoomListLookupAlert onConfirm={() => setConfirmedFailureAt(failureToConfirm)} />
+        </WorkspaceTabOverlay>
+      )}
     </>
+  )
+}
+
+function RoomListLookupAlert({ onConfirm }: { onConfirm: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const titleId = useId()
+  const descriptionId = useId()
+  useEffect(() => {
+    const dialog = dialogRef.current
+    dialog?.showModal()
+    return () => dialog?.close()
+  }, [])
+
+  return (
+    <dialog ref={dialogRef} role="alertdialog" aria-labelledby={titleId} aria-describedby={descriptionId}
+      className="fixed inset-0 m-auto w-[90vw] max-w-sm rounded-xl border border-border bg-card p-5 text-foreground shadow-xl backdrop:bg-foreground/40"
+      onCancel={event => event.preventDefault()}>
+      <h2 id={titleId} className="font-semibold text-danger">창고 위치 조회 실패</h2>
+      <p id={descriptionId} className="mt-2 text-sm text-muted-foreground">
+        창고 위치 또는 M번호를 모두 확인하지 못했습니다. 출고 누락을 막기 위해 피킹표와 출력을 잠갔습니다.
+        확인 후 오류가 남아 있으면 ‘다시 조회’를 눌러 주세요.
+      </p>
+      <div className="mt-4 flex justify-end">
+        <Button type="button" onClick={onConfirm}>확인</Button>
+      </div>
+    </dialog>
   )
 }
