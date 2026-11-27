@@ -16,8 +16,13 @@ try {
     create schema app;
     create role anon; create role authenticated; create role service_role;
     grant usage on schema app to authenticated;
-    create function app.can_read_brand(uuid) returns boolean language sql stable
-      as $$ select $1 = '${brand}'::uuid $$;
+    create sequence app.brand_check_calls;
+    grant usage, select on app.brand_check_calls to authenticated;
+    create function app.can_read_brand(uuid) returns boolean language plpgsql stable
+      as $$ begin
+        perform nextval('app.brand_check_calls');
+        return $1 = '${brand}'::uuid;
+      end $$;
     create table warehouse_inventory_sets (id uuid primary key, brand_id uuid, kind text, status text);
     create table warehouse_locations (id uuid primary key, zone text, code text, visible boolean default true);
     create table warehouse_stock_positions (
@@ -26,6 +31,8 @@ try {
       received_on_raw text, quantity_status text, units_per_box integer, remaining_boxes integer,
       opened_units integer, source_row_number integer, created_at timestamptz, note text
     );
+    create index warehouse_stock_positions_finder_name_idx
+      on warehouse_stock_positions (brand_id, set_id, source_product_name text_pattern_ops);
     grant select on warehouse_inventory_sets, warehouse_locations, warehouse_stock_positions to authenticated;
     alter table warehouse_inventory_sets enable row level security;
     alter table warehouse_locations enable row level security;
@@ -58,6 +65,24 @@ try {
   await insert(specialName + ' 추가', brand, set, 1100)
   await insert(longName, brand, set, 1)
 
+  await db.exec('analyze warehouse_stock_positions; set role authenticated')
+  const priorPages = [
+    ...await lookup([specialName]),
+    ...await lookup([specialName], 250),
+  ]
+  const checkCount = async () => Number((await db.query('select last_value from app.brand_check_calls')).rows[0].last_value)
+  const checksForRareName = async () => {
+    const start = await checkCount()
+    assert.equal((await lookup([longName])).length, 1)
+    return await checkCount() - start
+  }
+  const priorChecks = await checksForRareName()
+  await db.exec('reset role')
+  await db.exec(await readFile(new URL('../supabase/migrations/20261127044112_room_list_indexed_source_names.sql', import.meta.url), 'utf8'))
+
+  const importedName = '검증 가방'
+  const paddedName = '\u3000' + importedName.normalize('NFD') + '\u205f'
+  await insert(paddedName, brand, set, 1)
   await db.exec('set role anon')
   await assert.rejects(lookup([specialName]), { code: '42501' })
   await db.exec('reset role; set role authenticated')
@@ -66,12 +91,14 @@ try {
   await assert.rejects(lookup(Array.from({ length: 101 }, (_, index) => `상품 ${index}`)), { code: '22023' })
   assert.deepEqual(await lookup([]), [])
   assert.deepEqual(await lookup(['가방']), [])
-  assert.equal((await lookup([longName])).length, 1)
+  const indexedChecks = await checksForRareName()
+  assert.ok(indexedChecks < priorChecks / 2, `unrelated stock still triggers brand checks: ${indexedChecks} vs ${priorChecks}`)
   const page1 = await lookup([specialName, specialName.normalize('NFD')])
   const page2 = await lookup([specialName], 250)
   assert.equal(page1.length, 250)
   assert.equal(page2.length, 12)
   const rows = [...page1, ...page2]
+  assert.deepEqual(rows, priorPages, 'the migration preserves every field and the order across pages')
   assert.equal(new Set(rows.map(row => row.id)).size, 262, 'stable paging even when source row numbers tie')
   assert.ok(rows.every(row => roomListProductName(row.source_product_name) === specialName))
 
@@ -92,9 +119,31 @@ try {
     indexRoomListLocations(old.map(adapt)).locations.get(specialName))
   assert.equal(indexRoomListStyleNumbers([], rows.map(adapt)).get(specialName), undefined,
     'a conflicting second SKU suppresses the M-number')
+
+  const imported = await lookup([importedName])
+  assert.equal(imported.length, 1)
+  assert.equal(imported[0].source_product_name, paddedName)
+  const renamed = importedName + ' 추가'
+  await db.exec('reset role')
+  await db.query('update warehouse_stock_positions set source_product_name=$1 where id=$2', [renamed, imported[0].id])
+  await db.exec('set role authenticated')
+  assert.deepEqual(await lookup([importedName]), [], 'a longer name must not match its former name')
+  assert.deepEqual((await lookup([renamed])).map(row => row.id), [imported[0].id])
+
+  await db.exec('reset role')
+  await db.query('update warehouse_stock_positions set source_product_name=$1 where id=$2', [paddedName, imported[0].id])
+  await db.exec('set role authenticated')
+  assert.deepEqual(await lookup([renamed]), [])
+  assert.deepEqual(await lookup([importedName, paddedName]), imported, 'an edited raw variant is returned exactly once')
+
+  await db.exec('reset role')
+  await db.query('delete from warehouse_stock_positions where id=$1', [imported[0].id])
+  await db.exec('set role authenticated')
+  assert.deepEqual(await lookup([importedName]), [], 'deleted stock must disappear from the lookup')
+
   const bytes = data => Buffer.byteLength(JSON.stringify(data))
   assert.ok(bytes(rows) < bytes(old))
-  console.log(`Room list DB: exact normalized matches, stable pagination, brand isolation and position parity. Fixture rows ${old.length} → ${rows.length}, bytes ${bytes(old)} → ${bytes(rows)}.`)
+  console.log(`Room list DB: exact normalized matches, stable pagination, brand isolation and position parity. Rare-name brand checks ${priorChecks} → ${indexedChecks}. Fixture rows ${old.length} → ${rows.length}, bytes ${bytes(old)} → ${bytes(rows)}.`)
 } finally {
   await db.close()
 }
