@@ -370,7 +370,7 @@ export function CompanyAiAssistant() {
         aria-label={open ? 'E&J 닫기' : 'E&J 열기'}
         title="E&J"
         onClick={() => (open ? closePanel() : openPanel())}
-        className="pointer-events-auto inline-flex size-14 items-center justify-center rounded-full bg-[linear-gradient(180deg,#c4b5fd_0%,#7c3aed_100%)] text-white shadow-lg transition-opacity hover:opacity-95"
+        className="pointer-events-auto inline-flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-opacity hover:opacity-95"
       >
         <span className="relative inline-flex size-6 items-center justify-center">
           <Bot className="size-6" />

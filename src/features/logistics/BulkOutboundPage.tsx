@@ -1085,7 +1085,7 @@ function ConvertMatchColumnSettingsDialog({
           className={cn(
             'rounded-full bg-primary transition-all duration-150 ease-out',
             active
-              ? 'h-9 w-1.5 opacity-100 shadow-[0_0_0_3px_hsl(var(--primary)/0.25)]'
+              ? 'h-9 w-1.5 opacity-100'
               : 'h-0 w-0 opacity-0',
           )}
         />

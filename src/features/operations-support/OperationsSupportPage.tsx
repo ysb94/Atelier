@@ -30,7 +30,7 @@ export function OperationsSupportPage() {
 
   // Hide the entire subtree so denied users never mount employee/attendance queries.
   if (!canViewOperationsSection(profile, section)) {
-    return <p role="status" className="rounded-xl border border-border bg-card px-5 py-6 text-sm text-muted-foreground shadow-sm">운영지원 기능 또는 회사 현황 조회 권한이 필요합니다.</p>
+    return <p role="status" className="rounded-xl border border-border bg-card px-5 py-6 text-sm text-muted-foreground">운영지원 기능 또는 회사 현황 조회 권한이 필요합니다.</p>
   }
 
   const current = OPERATIONS_SECTIONS.find(item => item.id === section) ?? OPERATIONS_SECTIONS[0]

@@ -17,7 +17,7 @@ function shiftDate(value: string, days: number) {
 }
 function stamp(value: string) { return new Date(value).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false }) }
 function reviewTone(status: IpReviewStatus) {
-  return status === 'company' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : status === 'external' ? 'bg-slate-500/10 text-muted-foreground' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+  return status === 'company' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : status === 'external' ? 'bg-muted text-muted-foreground' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
 }
 
 export function AccessIpRecordsPage() {
