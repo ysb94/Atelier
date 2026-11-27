@@ -31,7 +31,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     )
   }
 
-  if (sessionError) return <div role="alert" className="m-6 space-y-4 rounded-xl border border-border bg-card p-6 shadow-sm"><p>{sessionError}</p><Button type="button" variant="outline" onClick={retrySession}>로그인 상태 다시 확인</Button></div>
+  if (sessionError) return <div role="alert" className="m-6 space-y-4 rounded-xl border border-border bg-card p-6"><p>{sessionError}</p><Button type="button" variant="outline" onClick={retrySession}>로그인 상태 다시 확인</Button></div>
 
   if (!session) return <LoginPage />
 

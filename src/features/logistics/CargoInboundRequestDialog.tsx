@@ -182,14 +182,14 @@ export function CargoInboundRequestDialog({
         <button
           type="button"
           aria-label="요청 사항 닫기"
-          className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
+          className="absolute inset-0 bg-foreground/60"
           onClick={() => void handleClose()}
         />
         <div
           role="dialog"
           aria-modal="true"
           aria-labelledby="cargo-inbound-request-title"
-          className="relative z-10 flex max-h-[92vh] w-full max-w-[min(96vw,80rem)] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-lg"
+          className="relative z-10 flex max-h-[92vh] w-full max-w-[min(96vw,80rem)] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-md"
           onKeyDown={(event) => {
             if (event.key === 'Escape') void handleClose()
           }}

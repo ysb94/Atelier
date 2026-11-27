@@ -900,7 +900,7 @@ function CargoInboundRow({
 }) {
   const preview = previewLabel(item)
   return (
-    <Card className="group relative overflow-hidden shadow-none transition-[border-color,box-shadow] duration-200 hover:border-foreground/20 hover:shadow-md motion-reduce:transition-none">
+    <Card className="group relative overflow-hidden shadow-none transition-colors duration-200 hover:border-foreground/20 motion-reduce:transition-none">
       <span
         aria-hidden
         className={cn('absolute inset-y-0 left-0 w-1', STAGE_ACCENT[item.stage])}

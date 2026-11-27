@@ -135,7 +135,7 @@ function AdditionalLeaveInputs({ name, employeeId, entries, events, available, r
       <span className="tabular-nums">{!baseRegistered ? '기본 연차 미등록' : available === undefined ? '조회 대기' : `${available}일`}</span>
       <Button type="button" variant="outline" size="sm" className="size-8 p-0" aria-label={`${name} 추가 연차 추가`} aria-haspopup="dialog" aria-expanded={open} onClick={() => { dialog.current?.showModal(); setOpen(true) }}>+</Button>
     </div>
-    <dialog ref={dialog} onClose={() => setOpen(false)} aria-label={`${name} 추가 연차 입력`} className="fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-md space-y-4 overflow-auto rounded-xl border border-border bg-card p-5 text-card-foreground shadow-lg backdrop:bg-black/40">
+    <dialog ref={dialog} onClose={() => setOpen(false)} aria-label={`${name} 추가 연차 입력`} className="fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-md space-y-4 overflow-auto rounded-xl border border-border bg-card p-5 text-card-foreground shadow-md backdrop:bg-black/40">
       <h3 className="font-semibold">{name} · 추가 연차</h3>
       <form className="space-y-3" onSubmit={event => {
         event.preventDefault()

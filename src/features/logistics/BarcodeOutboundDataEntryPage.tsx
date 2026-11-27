@@ -127,7 +127,7 @@ function VisiblePartnerSettingsDialog({
       <div
         role="dialog"
         aria-modal="true"
-        className="relative z-10 flex max-h-[min(80vh,40rem)] w-full max-w-lg flex-col rounded-xl border border-border bg-card shadow-lg"
+        className="relative z-10 flex max-h-[min(80vh,40rem)] w-full max-w-lg flex-col rounded-xl border border-border bg-card shadow-md"
       >
         <div className="border-b border-border px-5 py-4">
           <h2 className="text-base font-semibold">표시할 출고업체</h2>

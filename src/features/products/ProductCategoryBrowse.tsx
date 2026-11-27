@@ -205,7 +205,7 @@ export function ProductCategoryBrowse({
       </Card>
 
       <div className="min-w-0 space-y-5">
-        <Card className="overflow-hidden bg-gradient-to-br from-card via-card to-muted/50 p-5 sm:p-6">
+        <Card className="overflow-hidden bg-card p-5 sm:p-6">
           <div className="flex items-start gap-3">
             <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Layers3 className="size-5" />
@@ -241,7 +241,7 @@ export function ProductCategoryBrowse({
                     key={category.id}
                     type="button"
                     onClick={() => onSelectCategory(category.id)}
-                    className="group flex items-center gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-accent/30"
+                    className="group flex items-center gap-3 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-accent/30"
                   >
                     <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground group-hover:text-primary">
                       <FolderOpen className="size-5" />
@@ -278,7 +278,7 @@ export function ProductCategoryBrowse({
                   key={`${style.brandId}:${style.id}`}
                   type="button"
                   onClick={() => onOpenStyle(style)}
-                  className="group min-w-0 overflow-hidden rounded-xl border border-border bg-card text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+                  className="group min-w-0 overflow-hidden rounded-xl border border-border bg-card text-left transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-sm"
                 >
                   <div className="flex h-48 items-center justify-center bg-muted/50">
                     <ProductThumb

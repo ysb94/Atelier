@@ -225,7 +225,7 @@ function BoxLabelingForm({ userId }: { userId: string }) {
 
   return (
     <div className="grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_17rem]">
-      <Card className="min-w-0">
+      <Card className="min-w-0 shadow-none">
         <CardContent className="space-y-3 p-3 sm:p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-base font-semibold">라벨 입력</h2>
@@ -314,7 +314,7 @@ function BoxLabelingForm({ userId }: { userId: string }) {
           </div>
         </CardContent>
       </Card>
-      <Card className="w-full min-w-0 max-w-sm xl:max-w-none">
+      <Card className="w-full min-w-0 max-w-sm shadow-none xl:max-w-none">
         <CardContent className="space-y-3 p-3">
           <div>
             <h2 className="text-base font-semibold">A4 4칸 미리보기</h2>

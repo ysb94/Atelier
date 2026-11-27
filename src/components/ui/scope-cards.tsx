@@ -40,7 +40,7 @@ export function ScopeCards<T extends string>({
             onClick={() => onChange(active && first !== undefined ? first : card.value)}
             className={cn(
               'inline-flex min-w-[150px] items-center gap-2 rounded-full border bg-card py-1 pl-1.5 pr-4 text-left transition-colors',
-              active ? 'border-foreground shadow-sm' : 'border-border hover:border-foreground/30',
+              active ? 'border-foreground' : 'border-border hover:border-foreground/30',
             )}
           >
             <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-full bg-foreground text-[10px] font-bold text-background">

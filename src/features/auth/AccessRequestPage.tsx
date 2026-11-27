@@ -35,7 +35,7 @@ export function AccessRequestPage({ onSubmitted }: { onSubmitted?: () => void })
         </div>
 
         <form
-          className="space-y-4 rounded-xl border border-border bg-card p-5 shadow-sm"
+          className="space-y-4 rounded-xl border border-border bg-card p-5"
           onSubmit={async (event) => {
             event.preventDefault()
             setError(null)

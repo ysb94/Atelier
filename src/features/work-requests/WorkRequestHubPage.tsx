@@ -51,7 +51,7 @@ export function WorkRequestHubPage() {
         {canRequest && (
           <div className="grid gap-3 sm:grid-cols-4">
             {destinations.map(target => (
-              <Link key={target} className="rounded-xl border border-border bg-card p-4 text-sm font-medium text-primary shadow-sm"
+              <Link key={target} className="rounded-xl border border-border bg-card p-4 text-sm font-medium text-primary shadow-none"
                 to={buildPersonalWorkRequestSearch(searchParams, target, { kind: 'new' })}>
                 {WORK_REQUEST_CONFIG[target].label}에 요청하기
               </Link>

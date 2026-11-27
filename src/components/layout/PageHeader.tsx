@@ -42,7 +42,7 @@ export function PageHeader({
     <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
         {section ? (
-          <p className="mb-1 text-[11px] font-semibold tracking-[0.12em] text-primary">
+          <p className="mb-1 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground">
             {section}
           </p>
         ) : null}

@@ -149,7 +149,7 @@ function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error,
   return <dialog ref={dialog} aria-label="외근 건 전체 진행" onCancel={event => {
     event.preventDefault()
     if (!submitting.current) close()
-  }} className="fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-auto rounded-xl border border-border bg-card p-5 text-card-foreground shadow-lg backdrop:bg-black/40">
+  }} className="fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-auto rounded-xl border border-border bg-card p-5 text-card-foreground shadow-md backdrop:bg-black/40">
     <div className="space-y-4">
       <header><h3 className="text-base font-semibold">{request.employeeName} · 외근 처리 진행</h3><p className="text-sm text-muted-foreground">{request.from}{request.from !== request.to && ` ~ ${request.to}`}</p></header>
       {!ended && <p className="text-sm">승인되고 종료된 외근부터 정산할 수 있습니다.</p>}

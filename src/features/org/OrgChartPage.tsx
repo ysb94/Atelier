@@ -1454,7 +1454,7 @@ function AssignmentEditor({
         event.preventDefault()
         if (!mutation.isPending) onClose()
       }}
-      className="fixed inset-0 m-auto max-h-[85dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto rounded-xl border border-border bg-card p-0 text-foreground shadow-2xl backdrop:bg-black/35 backdrop:backdrop-blur-sm"
+      className="fixed inset-0 m-auto max-h-[85dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto rounded-xl border border-border bg-card p-0 text-foreground shadow-md backdrop:bg-black/35"
     >
       <form
         className="p-6"

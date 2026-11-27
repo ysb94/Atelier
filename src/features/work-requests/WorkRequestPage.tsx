@@ -1740,7 +1740,7 @@ export function RequestBodyEditor({
 
   return (
     <div role={visualTitle ? 'group' : undefined} aria-label={visualTitle}
-      className={cn('space-y-2', visualTitle && 'rounded-xl border border-border bg-card p-5 shadow-sm sm:p-7',
+      className={cn('space-y-2', visualTitle && 'rounded-xl border border-border bg-card p-5 shadow-none sm:p-7',
       visualAnswer && 'relative min-h-8 space-y-0 pr-9')}>
       {visualAnswer ? visualAnswer.control : visualTitle ? <h2 className="text-sm font-semibold">{visualTitle}</h2> : (
       <span className="flex items-center gap-1 text-sm font-medium">
@@ -3729,7 +3729,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
             <div
               role="dialog"
               aria-modal="true"
-              className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-2xl"
+              className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-lg"
             >
               <h2 className="text-base font-semibold">검토를 시작할까요?</h2>
               <p className="mt-2 text-sm text-muted-foreground">
@@ -4292,7 +4292,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
             busy={storage.saving} categoryId={categoryId}
           />}
         /> : (
-          <aside className="absolute inset-y-0 right-0 flex w-full max-w-xl flex-col border-l border-border bg-card shadow-2xl">
+          <aside className="absolute inset-y-0 right-0 flex w-full max-w-xl flex-col border-l border-border bg-card shadow-lg">
             {legacyHeader}
             <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">{notice}{management}</div>
           </aside>

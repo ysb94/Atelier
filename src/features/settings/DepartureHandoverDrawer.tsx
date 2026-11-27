@@ -72,7 +72,7 @@ export function DepartureHandoverDrawer({ actor, employee, onClose }: { actor: s
   }
 
   return <dialog ref={dialog} aria-labelledby={heading} onCancel={event => { event.preventDefault(); if (!save.isPending) onClose() }}
-    className="fixed inset-y-0 right-0 left-auto m-0 h-dvh max-h-none w-full max-w-2xl border-l border-border bg-card text-card-foreground shadow-2xl backdrop:bg-black/20">
+    className="fixed inset-y-0 right-0 left-auto m-0 h-dvh max-h-none w-full max-w-2xl border-l border-border bg-card text-card-foreground shadow-sm backdrop:bg-black/20">
     <form className="flex h-full min-w-0 flex-col" onSubmit={submit}>
       <header className="flex items-start justify-between gap-3 border-b border-border px-5 py-5 sm:px-8">
         <div><h2 id={heading} className="text-xl font-semibold">퇴사 인계</h2>

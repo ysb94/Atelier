@@ -265,7 +265,7 @@ function MaterialRequestReview({ request, roundNumber, brandName, isWorker, busy
   const confirmed = isWorker ? round.assigneeRead : Boolean(round.reviewedAt)
   return (
     <dialog ref={dialog} aria-labelledby="material-review-title" onCancel={event => { if (busy) event.preventDefault(); else onClose() }}
-      className="fixed inset-y-0 left-auto right-0 m-0 h-dvh max-h-none w-full max-w-3xl overflow-hidden border-l border-border bg-card p-0 text-card-foreground shadow-lg backdrop:bg-foreground/30">
+      className="fixed inset-y-0 left-auto right-0 m-0 h-dvh max-h-none w-full max-w-3xl overflow-hidden border-l border-border bg-card p-0 text-card-foreground shadow-md backdrop:bg-foreground/30">
       <div className="flex h-full flex-col">
         <header className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
           <h2 id="material-review-title" className="text-base font-semibold">{request.rounds.at(-1)?.title || request.title}</h2>

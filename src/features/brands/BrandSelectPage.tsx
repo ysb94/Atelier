@@ -265,8 +265,8 @@ function BrandSelectPageContent() {
               return (
                 <Card
                   key={brand.id}
-                  className={`group relative h-full transition-all hover:border-foreground/20 hover:shadow-md${
-                    selected ? ' border-foreground/30 shadow-md' : ''
+                  className={`group relative h-full transition-all shadow-none ${
+                    selected ? 'border-primary/45' : 'hover:border-foreground/20'
                   }`}
                 >
                   {canEdit || isAdmin ? (
@@ -276,7 +276,7 @@ function BrandSelectPageContent() {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="bg-card/90 shadow-sm"
+                          className="bg-card"
                           aria-label={`${brand.name} 수정`}
                           onClick={() => openEdit(brand)}
                         >
@@ -288,7 +288,7 @@ function BrandSelectPageContent() {
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="bg-card/90 text-danger shadow-sm hover:bg-danger/10 hover:text-danger"
+                          className="bg-card text-danger hover:bg-danger/10 hover:text-danger"
                           aria-label={`${brand.name} 삭제`}
                           disabled={deletingId === brand.id}
                           onClick={() => handleDelete(brand)}

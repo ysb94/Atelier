@@ -28,7 +28,7 @@ export function PendingApprovalPage({
 
   return (
     <div className="flex min-h-full items-center justify-center bg-background px-6 py-12">
-      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-sm">
+      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6">
         <p className="mb-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
           E&J
         </p>

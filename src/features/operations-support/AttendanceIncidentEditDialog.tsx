@@ -42,7 +42,7 @@ export function AttendanceIncidentEditDialog({ target, adjustment, onSave, onClo
     }
   }
 
-  return <dialog ref={dialog} aria-label={`${kind} 수정`} className="m-auto w-[min(92vw,420px)] rounded-xl border border-border bg-card p-5 text-foreground shadow-lg backdrop:bg-black/40" onCancel={event => { event.preventDefault(); if (!busy) onClose() }}>
+  return <dialog ref={dialog} aria-label={`${kind} 수정`} className="m-auto w-[min(92vw,420px)] rounded-xl border border-border bg-card p-5 text-foreground shadow-md backdrop:bg-black/40" onCancel={event => { event.preventDefault(); if (!busy) onClose() }}>
     <form className="space-y-4" onSubmit={event => { event.preventDefault(); void submit() }}>
       <header>
         <h2 className="text-base font-semibold">{kind} 수정</h2>

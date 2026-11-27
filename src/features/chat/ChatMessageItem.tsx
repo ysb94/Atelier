@@ -160,7 +160,7 @@ export function ChatMessageItem({
       </button>
       {openPanel === 'menu' ? (
         <div className={cn(
-          'absolute bottom-full z-20 mb-1 min-w-24 rounded-md border border-border bg-card p-1 shadow-lg',
+          'absolute bottom-full z-20 mb-1 min-w-24 rounded-md border border-border bg-card p-1 shadow-sm',
           message.mine ? 'right-0' : 'left-0',
         )}>
           <button
@@ -174,7 +174,7 @@ export function ChatMessageItem({
       ) : null}
       {openPanel === 'reactions' ? (
         <div className={cn(
-          'absolute bottom-full z-20 mb-1 flex gap-0.5 rounded-full border border-border bg-card p-1 shadow-lg',
+          'absolute bottom-full z-20 mb-1 flex gap-0.5 rounded-full border border-border bg-card p-1 shadow-sm',
           message.mine ? 'right-0' : 'left-0',
         )}>
           {CHAT_REACTION_EMOJIS.map((emoji) => (

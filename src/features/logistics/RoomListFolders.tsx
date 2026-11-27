@@ -388,7 +388,7 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
                   {expanded && (
                     <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                       {group.map(folder => (
-                        <Card key={folder.id} className="flex items-start">
+                        <Card key={folder.id} className="flex items-start shadow-none">
                           <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 p-4">
                             <input type="checkbox" className="mt-1 size-4 shrink-0 accent-primary" checked={selected.has(folder.id)}
                               aria-label={`${folder.title} 선택`} disabled={open.isPending}
@@ -437,7 +437,7 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
         <WorkspaceTabOverlay>
           <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
             <div role="alertdialog" aria-modal="true" aria-labelledby={deleteTitleId} aria-describedby={deleteDescriptionId}
-              className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-lg"
+              className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-md"
               onKeyDown={event => {
                 if (event.key === 'Escape' && !remove.isPending) setDeleteTarget(null)
               }}>

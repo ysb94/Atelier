@@ -210,7 +210,7 @@ function SharedPopularLocations({ brandId, viewerId, month, onMonthChange }: Pop
   }
 
   return (
-    <details className="group mb-3 rounded-xl border border-border bg-card text-card-foreground shadow-sm"
+    <details className="group mb-3 rounded-xl border border-border bg-card text-card-foreground"
       onToggle={event => {
         const expanded = event.currentTarget.open
         setOpen(expanded)

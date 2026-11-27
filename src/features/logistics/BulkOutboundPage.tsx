@@ -1085,7 +1085,7 @@ function ConvertMatchColumnSettingsDialog({
           className={cn(
             'rounded-full bg-primary transition-all duration-150 ease-out',
             active
-              ? 'h-9 w-1.5 opacity-100 shadow-[0_0_0_3px_hsl(var(--primary)/0.25),0_0_12px_hsl(var(--primary)/0.55)]'
+              ? 'h-9 w-1.5 opacity-100 shadow-[0_0_0_3px_hsl(var(--primary)/0.25)]'
               : 'h-0 w-0 opacity-0',
           )}
         />
@@ -4486,7 +4486,7 @@ export function BulkOutboundPage() {
                       {tabOpenJobs.map((job) => {
                         const own = isOwnJob(job)
                         return (
-                          <div key={job.id} className="rounded-xl border border-border bg-card shadow-sm">
+                          <div key={job.id} className="rounded-xl border border-border bg-card">
                             <button type="button" onClick={() => openJob(job.id)} className="w-full px-4 py-3.5 text-left">
                               <div className="flex items-start justify-between gap-2">
                                 <p className="min-w-0 truncate text-base font-semibold">{job.title}</p>

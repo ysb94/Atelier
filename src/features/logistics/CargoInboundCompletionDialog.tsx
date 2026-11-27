@@ -41,7 +41,7 @@ export function CargoInboundCompletionDialog({
       ref={dialogRef}
       aria-labelledby={titleId}
       aria-describedby={descriptionId}
-      className="fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-1.5rem)] max-w-md overflow-auto rounded-xl border border-border bg-card p-0 text-card-foreground shadow-lg backdrop:bg-black/60 backdrop:backdrop-blur-[2px]"
+      className="fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-1.5rem)] max-w-md overflow-auto rounded-xl border border-border bg-card p-0 text-card-foreground shadow-md backdrop:bg-foreground/60"
       onCancel={(event) => {
         event.preventDefault()
         close()

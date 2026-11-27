@@ -27,8 +27,7 @@
 /* 마지막 열(월 검토)만 블루: 기획안·자재요청 표와 같은 규칙. */
 .attendance-summary-table thead th:last-child { background: var(--color-blue-800, #193cb8); }
 .attendance-summary-table tbody th { position: sticky; left: 0; z-index: 1; width: 210px; min-width: 210px; background: var(--color-card); border-right: 1px solid var(--color-border); text-align: left; font-weight: 400; }
-/* 행 사이 로즈색 선: 기획안·중국 업무 표와 같은 레드 옅은 선. */
-.attendance-summary-table tbody th, .attendance-summary-table td { padding: 14px; border-bottom: 1px solid color-mix(in srgb, var(--color-primary) 45%, white); }
+.attendance-summary-table tbody th, .attendance-summary-table td { padding: 14px; border-bottom: 1px solid var(--color-border); }
 .attendance-person { display: flex; align-items: center; gap: 10px; }
 .attendance-avatar { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 999px; background: var(--color-muted); color: var(--color-foreground); font-size: 12px; font-weight: 700; }
 /* 이니셜은 CSS로만 그려 이름 칸 글자(복사·엑셀·검증)에 섞이지 않게 한다. */

@@ -27,7 +27,7 @@ export function StatTile({
   return (
     <div
       className={cn(
-        'flex items-start gap-3 rounded-xl border border-border bg-card px-4 py-4 shadow-sm sm:px-5',
+        'flex items-start gap-3 rounded-xl border border-border bg-card px-4 py-4 sm:px-5',
         accent && 'border-t-[3px] border-t-primary',
         className,
       )}

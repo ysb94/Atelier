@@ -158,7 +158,7 @@ export function LateArrivalAppealNoticeDialog() {
     setParams(current => { const next = new URLSearchParams(current); next.delete('lateAppeal'); return next }, { replace: true })
   }
   return <div className="fixed inset-0 z-[70] grid place-items-center bg-background/75 p-4" role="dialog" aria-modal="true" aria-label="지각 이의신청 상세">
-    <section className="max-h-[90dvh] w-full max-w-lg space-y-3 overflow-auto rounded-xl border border-border bg-card p-5 shadow-lg">
+    <section className="max-h-[90dvh] w-full max-w-lg space-y-3 overflow-auto rounded-xl border border-border bg-card p-5 shadow-sm">
       <header className="flex items-center justify-between gap-3"><h2 className="font-semibold">지각 이의신청</h2><Button type="button" size="sm" variant="outline" onClick={close}>닫기</Button></header>
       {query.isPending ? <p role="status">불러오는 중입니다.</p> : row
         ? <LateAppealDetail key={`${profile?.id}:${row.id}:${row.status}`} row={row} />

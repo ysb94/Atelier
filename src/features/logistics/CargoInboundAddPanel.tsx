@@ -160,14 +160,14 @@ function CargoShipDateDialog({
         <button
           type="button"
           aria-label="선적일 등록 취소"
-          className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
+          className="absolute inset-0 bg-foreground/50"
           onClick={onClose}
         />
         <div
           role="dialog"
           aria-modal="true"
           aria-labelledby="cargo-ship-date-title"
-          className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-card shadow-lg"
+          className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-card shadow-md"
           onKeyDown={(event) => {
             if (event.key === 'Escape') onClose()
           }}

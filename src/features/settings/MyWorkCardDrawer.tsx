@@ -75,7 +75,7 @@ export function MyWorkCardDrawer({ actorId, card, statusLabel, feedbackNotice, o
   }
 
   return <dialog ref={dialog} aria-labelledby={headingId}
-    className="fixed inset-y-0 right-0 left-auto m-0 h-dvh max-h-none w-full max-w-2xl border-l border-border bg-card text-card-foreground shadow-2xl backdrop:bg-black/20"
+    className="fixed inset-y-0 right-0 left-auto m-0 h-dvh max-h-none w-full max-w-2xl border-l border-border bg-card text-card-foreground shadow-sm backdrop:bg-black/20"
     onCancel={event => { event.preventDefault(); close() }}>
     <form className="flex h-full min-w-0 flex-col" onSubmit={event => {
       event.preventDefault()

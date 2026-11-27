@@ -102,7 +102,7 @@ export function SheetTable({
   const topOffset = ownerGroups.length > 0 ? 28 : 0
 
   return (
-    <div className="overflow-auto rounded-lg border border-border bg-card shadow-sm">
+    <div className="overflow-auto rounded-lg border border-border bg-card">
       <table className="min-w-full border-separate border-spacing-0 text-left text-[13px] tabular-nums">
         <thead>
           {ownerGroups.length > 0 ? (

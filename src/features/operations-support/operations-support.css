@@ -1,9 +1,9 @@
-/* 운영지원 화면 공통: 표의 행 사이 선을 기획안·중국 업무 표와 같은 레드 옅은 로즈색으로 맞춘다. */
+/* 운영지원 표의 행 구분선은 공용 경계선 색을 쓴다. */
 .operations-support tbody tr {
-  border-color: color-mix(in srgb, var(--color-primary) 45%, white);
+  border-color: var(--color-border);
 }
 .operations-support tbody tr > * {
-  border-bottom-color: color-mix(in srgb, var(--color-primary) 45%, white);
+  border-bottom-color: var(--color-border);
 }
 /* 마지막 열(처리·검토)만 블루: 자재요청 표의 HISTORY·기획안 표의 MD TEAM과 같은 색(Tailwind blue-800). */
 .operations-support thead tr > th:last-child {

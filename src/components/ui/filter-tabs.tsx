@@ -57,7 +57,7 @@ export function FilterTabs<T extends string>({
               underline
                 ? cn('shrink-0 whitespace-nowrap border-b-2', size === 'large' ? 'min-w-32 justify-center px-6 py-4 text-base' : 'px-4 py-3 text-sm', tab.aboveCount !== undefined && 'items-end py-2', active ? 'border-primary font-semibold text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')
                 : cn('border', size === 'compact' ? 'h-7 whitespace-nowrap rounded-md px-2 text-xs' : 'rounded-lg px-3 py-1.5 text-sm',
-                  active ? 'border-foreground bg-card font-semibold text-foreground shadow-sm' : 'border-border text-muted-foreground hover:bg-card hover:text-foreground'),
+                  active ? 'border-foreground bg-card font-semibold text-foreground' : 'border-border text-muted-foreground hover:bg-card hover:text-foreground'),
               tab.count === 0 && !active && 'opacity-50',
               interaction?.className,
             )}

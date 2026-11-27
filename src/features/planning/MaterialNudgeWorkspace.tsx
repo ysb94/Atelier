@@ -165,7 +165,7 @@ export function MaterialNudgeDetailDialog({ accountId, target, onClose }: {
 
   return <dialog ref={dialog} aria-labelledby={titleId}
     onCancel={event => { event.preventDefault(); onClose() }}
-    className="fixed inset-y-0 left-auto right-0 m-0 h-dvh max-h-none w-full max-w-3xl overflow-hidden border-l border-border bg-card p-0 text-card-foreground shadow-lg backdrop:bg-foreground/30">
+    className="fixed inset-y-0 left-auto right-0 m-0 h-dvh max-h-none w-full max-w-3xl overflow-hidden border-l border-border bg-card p-0 text-card-foreground shadow-md backdrop:bg-foreground/30">
     <div className="flex h-full flex-col">
       <header className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
         <h2 id={titleId} className="font-semibold">자재요청 상세 보기</h2>

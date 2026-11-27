@@ -84,5 +84,5 @@ function NewEmployeesContent({departments,duties,grades}:Props){
 }
 function OnboardingDetail({title,busy,onClose,children}:{title:string;busy:boolean;onClose:()=>void;children:React.ReactNode}){
   const dialog=useRef<HTMLDialogElement>(null),id=useId();useEffect(()=>{dialog.current?.showModal()},[])
-  return <dialog ref={dialog} aria-labelledby={id} onClose={onClose} onCancel={event=>{if(busy)event.preventDefault()}} className="m-auto max-h-[90dvh] w-[calc(100%_-_2rem)] max-w-3xl overflow-y-auto rounded-xl border border-border bg-card p-5 text-foreground shadow-lg backdrop:bg-black/35"><div className="mb-4 flex items-center justify-between gap-3"><h3 id={id} className="font-semibold">{title}</h3><Button size="sm" variant="outline" disabled={busy} onClick={onClose}>닫기</Button></div>{children}</dialog>
+  return <dialog ref={dialog} aria-labelledby={id} onClose={onClose} onCancel={event=>{if(busy)event.preventDefault()}} className="m-auto max-h-[90dvh] w-[calc(100%_-_2rem)] max-w-3xl overflow-y-auto rounded-xl border border-border bg-card p-5 text-foreground shadow-md backdrop:bg-black/35"><div className="mb-4 flex items-center justify-between gap-3"><h3 id={id} className="font-semibold">{title}</h3><Button size="sm" variant="outline" disabled={busy} onClick={onClose}>닫기</Button></div>{children}</dialog>
 }

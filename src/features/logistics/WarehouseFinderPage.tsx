@@ -364,7 +364,7 @@ export function WarehouseFinderPage() {
               id="warehouse-finder-product-suggestions"
               role="listbox"
               aria-label="상품명 연관 검색어"
-              className="absolute left-0 top-full z-30 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border bg-card py-1 shadow-sm"
+              className="absolute left-0 top-full z-30 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border bg-card py-1 shadow-xs"
             >
               {searchQuery.isFetching && productSuggestions.length === 0 ? (
                 <p className="px-3 py-2 text-xs text-muted-foreground">

@@ -61,7 +61,7 @@ export function WorkRequestCompletedPanel({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
+      <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3 shadow-none">
         <div>
           <p className="font-semibold">완료 기간</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
@@ -160,7 +160,7 @@ export function WorkRequestCompletedPanel({
             {groups.map((group) => (
               <section
                 key={group.member.id}
-                className="flex max-h-[28rem] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm"
+                className="flex max-h-[28rem] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-none"
               >
                 <div className="border-b border-border px-3 py-2">
                   <p className="truncate text-xs font-semibold">
@@ -217,7 +217,7 @@ export function WorkRequestCompletedPanel({
           </div>
         </>
       ) : filtered.length > 0 ? (
-        <div className="max-h-[40rem] overflow-auto rounded-xl border border-border bg-card shadow-sm">
+        <div className="max-h-[40rem] overflow-auto rounded-xl border border-border bg-card shadow-none">
           <table className="w-full min-w-[40rem] border-collapse text-left text-xs">
             <thead className="sticky top-0 z-10 bg-primary text-[11px] text-primary-foreground">
               <tr>

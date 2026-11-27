@@ -101,7 +101,7 @@ export function MaterialRequestDialog({ initial, brands, onClose, onSave, roundN
 
   return (
     <dialog ref={dialog} aria-labelledby="material-request-title" onCancel={event => { if (saving) event.preventDefault(); else onClose() }}
-      className="fixed inset-y-0 left-auto right-0 m-0 h-dvh max-h-none w-full max-w-3xl overflow-hidden border-l border-border bg-card p-0 text-card-foreground shadow-lg backdrop:bg-foreground/30">
+      className="fixed inset-y-0 left-auto right-0 m-0 h-dvh max-h-none w-full max-w-3xl overflow-hidden border-l border-border bg-card p-0 text-card-foreground shadow-md backdrop:bg-foreground/30">
       <form onSubmit={submit} className="flex h-full flex-col">
         <header className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
           <h2 id="material-request-title" className="text-base font-semibold">{roundNumber ? `${roundNumber}차 요청 작성` : '자재 요청 작성'}</h2>

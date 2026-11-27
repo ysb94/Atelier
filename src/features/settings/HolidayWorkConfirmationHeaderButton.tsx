@@ -27,7 +27,7 @@ export function HolidayWorkConfirmationHeaderButton() {
 
   return <>
     {(requests.length > 0 || success) && <div className="flex flex-col items-center gap-1">
-      {requests.length > 0 && <Button type="button" size="lg" className="px-7 text-base font-semibold shadow-md"
+      {requests.length > 0 && <Button type="button" size="lg" className="px-7 text-base font-semibold shadow-none"
         aria-haspopup="dialog" onClick={() => { setSuccess(''); setSelectedKey(requests[0].event_key) }}>
         휴일근무 보상 확인서 작성{requests.length > 1 ? ` (${requests.length})` : ''}
       </Button>}

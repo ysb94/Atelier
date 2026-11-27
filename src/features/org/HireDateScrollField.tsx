@@ -227,7 +227,7 @@ export function HireDateScrollField({
       ref={panelRef}
       role="dialog"
       aria-label={`${label} 선택`}
-      className="fixed z-[200] w-[292px] rounded-xl border border-border bg-card p-3 shadow-lg"
+      className="fixed z-[200] w-[292px] rounded-xl border border-border bg-card p-3 shadow-md"
       style={{ top: box.top, left: box.left }}
     >
       <div className="flex gap-2">

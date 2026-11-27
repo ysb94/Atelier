@@ -50,7 +50,7 @@ export function WorkRequestAcceptDialog({
       <div
         role="dialog"
         aria-modal="true"
-        className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-2xl"
+        className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-lg"
       >
         <h2 className="text-base font-semibold">요청 수락</h2>
         <p className="mt-1 text-sm text-muted-foreground">

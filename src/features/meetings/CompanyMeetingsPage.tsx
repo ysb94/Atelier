@@ -742,7 +742,7 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="meeting-create-title"
-            className="relative z-10 max-h-[92vh] w-full max-w-[1600px] overflow-auto rounded-xl border border-border bg-card p-5 shadow-lg"
+            className="relative z-10 max-h-[92vh] w-full max-w-[1600px] overflow-auto rounded-xl border border-border bg-card p-5 shadow-sm"
           >
             <div className="mb-4 flex items-center justify-between gap-3">
               <h2 id="meeting-create-title" className="text-base font-semibold">
@@ -2107,7 +2107,7 @@ function MeetingSeriesDeleteDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="meeting-delete-title"
-        className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-lg"
+        className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-sm"
       >
         <h2
           id="meeting-delete-title"

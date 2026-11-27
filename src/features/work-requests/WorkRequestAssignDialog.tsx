@@ -65,7 +65,7 @@ export function WorkRequestAssignDialog({
       <div
         role="dialog"
         aria-modal="true"
-        className="relative z-10 flex max-h-[min(36rem,calc(100vh-2rem))] w-full max-w-md flex-col rounded-xl border border-border bg-card shadow-2xl"
+        className="relative z-10 flex max-h-[min(36rem,calc(100vh-2rem))] w-full max-w-md flex-col rounded-xl border border-border bg-card shadow-lg"
       >
         <div className="border-b border-border px-5 py-4">
           <h2 className="text-base font-semibold">담당자 선택</h2>

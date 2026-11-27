@@ -135,7 +135,7 @@ export function VisualWorkRequestDrawer({
     feedbackHost={feedbackHost}
   />
   return (
-    <aside aria-label={title + ' 상세'} className="absolute inset-y-0 right-0 flex w-full max-w-5xl flex-col border-l border-border bg-card shadow-2xl lg:w-[calc(100%-3rem)]">
+    <aside aria-label={title + ' 상세'} className="absolute inset-y-0 right-0 flex w-full max-w-5xl flex-col border-l border-border bg-card shadow-lg lg:w-[calc(100%-3rem)]">
       {current && <div
         role="tablist" aria-label="Visual 업무 분류"
         className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-card p-2 lg:absolute lg:right-full lg:top-56 lg:max-h-[calc(100dvh-14rem)] lg:w-11 lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden lg:border-0 lg:bg-transparent lg:p-0"

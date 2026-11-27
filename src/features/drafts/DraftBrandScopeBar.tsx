@@ -194,10 +194,10 @@ function BrandStatCard({
       title={selected && label !== '전체' ? '다시 누르면 전체 브랜드' : label}
       onClick={onSelect}
       className={cn(
-        'inline-flex min-w-[168px] items-center gap-2 rounded-full border bg-white px-1.5 py-1 text-left',
+        'inline-flex min-w-[168px] items-center gap-2 rounded-full border bg-card px-1.5 py-1 text-left',
         selected
-          ? 'border-foreground shadow-sm'
-          : 'border-[#ead7c8] hover:border-[#d7c2ae]',
+          ? 'border-foreground'
+          : 'border-border hover:border-foreground/40',
       )}
     >
       <BrandAvatar

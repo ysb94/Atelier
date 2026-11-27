@@ -170,8 +170,8 @@ export function WarehousePage() {
               className={cn(
                 'rounded-lg border p-4 text-left transition-colors',
                 selected
-                  ? 'border-primary/40 bg-primary/5'
-                  : 'border-border bg-muted/20 hover:bg-muted/40',
+                  ? 'border-primary/40 bg-accent'
+                  : 'border-border bg-card hover:bg-muted',
               )}
             >
               <Icon

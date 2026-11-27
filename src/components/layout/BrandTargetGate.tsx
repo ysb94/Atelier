@@ -51,13 +51,13 @@ function BrandPickCard({
       aria-pressed={selected}
       onClick={() => onSelect(brand.slug)}
       className={cn(
-        'flex min-h-36 flex-col items-center justify-center gap-3 rounded-xl border px-4 py-6 text-center shadow-sm transition-all',
+        'flex min-h-36 flex-col items-center justify-center gap-3 rounded-xl border px-4 py-6 text-center transition-all',
         selected
-          ? 'border-primary bg-card text-foreground ring-2 ring-primary/20'
-          : 'border-border bg-card text-foreground hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md',
+          ? 'border-primary bg-card text-foreground'
+          : 'border-border bg-card text-foreground hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted',
         disabled &&
           !selected &&
-          'cursor-not-allowed opacity-50 hover:translate-y-0 hover:border-border hover:shadow-sm',
+          'cursor-not-allowed opacity-50 hover:translate-y-0 hover:border-border hover:bg-card',
       )}
     >
       <BrandAvatar brand={brand} className="size-14" textClassName="text-lg" />
