@@ -1,4 +1,4 @@
-import type { WarehouseStockPosition } from '@/lib/types'
+import type { RoomListStockPosition } from '@/lib/types'
 import { warehouseProductNameKey as roomListProductName, type FixedLocationRow } from '@/lib/warehouse/fixed-location-styles'
 import {
   EMPTY_WAREHOUSE_LOCATION_CODE,
@@ -19,7 +19,7 @@ function prefixOrder(code: string) {
   return rank < 0 ? LOCATION_PREFIXES.length : rank
 }
 
-type RoomListPositionOrder = Pick<WarehouseStockPosition, 'receivedOn' | 'receivedOnRaw' | 'zone' | 'locationCode' | 'sourceRowNumber'>
+type RoomListPositionOrder = Pick<RoomListStockPosition, 'receivedOn' | 'receivedOnRaw' | 'zone' | 'locationCode' | 'sourceRowNumber'>
 
 function receiptOrder(position: RoomListPositionOrder) {
   const raw = position.receivedOnRaw.trim()
@@ -41,9 +41,9 @@ export function compareRoomListPositions(left: RoomListPositionOrder, right: Roo
     left.sourceRowNumber - right.sourceRowNumber
 }
 
-export function indexRoomListLocations(positions: readonly WarehouseStockPosition[]) {
-  const groups = new Map<string, WarehouseStockPosition[]>()
-  const latestPositions = new Map<string, WarehouseStockPosition>()
+export function indexRoomListLocations<T extends RoomListStockPosition>(positions: readonly T[]) {
+  const groups = new Map<string, T[]>()
+  const latestPositions = new Map<string, T>()
   for (const position of positions) {
     if (position.zone !== 'picking' && position.zone !== 'box_storage') continue
     const name = roomListProductName(position.styleName)
@@ -82,7 +82,7 @@ export function indexRoomListLocations(positions: readonly WarehouseStockPositio
 
 export function indexRoomListStyleNumbers(
   fixedRows: readonly FixedLocationRow[],
-  positions: readonly Pick<WarehouseStockPosition, 'styleId' | 'styleNo' | 'styleName'>[],
+  positions: readonly Pick<RoomListStockPosition, 'styleId' | 'styleNo' | 'styleName'>[],
 ) {
   const matches = new Map<string, { styleId: string; styleNo: string } | null>()
   function add(name: string, styleId: string | null | undefined, styleNo: string | undefined) {
@@ -113,7 +113,7 @@ export function indexRoomListStyleNumbers(
 
 export function roomListLocationCodes(
   fixedRows: readonly FixedLocationRow[],
-  warehouseLocations: ReadonlyMap<string, readonly WarehouseStockPosition[]>,
+  warehouseLocations: ReadonlyMap<string, readonly RoomListStockPosition[]>,
 ) {
   const groups = new Map<string, Map<string, string>>()
   function add(name: string, code: string) {

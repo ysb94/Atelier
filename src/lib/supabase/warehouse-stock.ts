@@ -1,4 +1,5 @@
 import type {
+  RoomListStockPosition,
   WarehouseBox,
   WarehouseBoxAction,
   WarehouseBoxCompletionKind,
@@ -715,6 +716,50 @@ export async function listWarehouseStockPositions(
   return raw.map((row, index) =>
     toPosition(row, embeddedLocation(row), ranked[index]?.usageRank ?? null),
   )
+}
+
+const ROOM_LIST_POSITION_PAGE_SIZE = 250
+
+export async function listRoomListStockPositions(
+  brandId: string,
+  setId: string,
+  names: readonly string[],
+  signal: AbortSignal,
+  context?: DiagnosticContext,
+): Promise<RoomListStockPosition[]> {
+  type Row = Pick<PositionRow, 'warehouse_id' | 'style_id' | 'normalized_style_no' |
+    'source_style_no' | 'source_product_name' | 'received_on' | 'received_on_raw' |
+    'created_at' | 'source_row_number' | 'quantity_status' | 'units_per_box' | 'remaining_boxes' |
+    'opened_units'> & { zone: WarehouseZone; location_code: string }
+  if (!names.length) return []
+  const positions: RoomListStockPosition[] = []
+  const client = getSupabase()
+  for (let offset = 0; ; offset += ROOM_LIST_POSITION_PAGE_SIZE) {
+    signal.throwIfAborted()
+    const query = client.rpc('list_room_list_stock_positions', {
+      p_brand_id: brandId, p_set_id: setId, p_names: names, p_offset: offset,
+    }).abortSignal(signal)
+    const { data, error } = await tracedQuery(query, context)
+    if (error) {
+      throw new WarehouseStockStoreError(errorMessage(error, '창고 재고를 불러오지 못했습니다.'), { cause: error })
+    }
+    if (!Array.isArray(data)) throw new WarehouseStockStoreError('창고 위치 조회 응답을 확인해 주세요.')
+    const page = data as Row[]
+    for (const row of page) {
+      positions.push({
+        brandId, warehouseId: row.warehouse_id, zone: row.zone, locationCode: row.location_code,
+        styleId: row.style_id, styleNo: row.normalized_style_no, sourceStyleNo: row.source_style_no,
+        styleName: row.source_product_name, receivedOn: row.received_on, receivedOnRaw: row.received_on_raw,
+        createdAt: row.created_at, sourceRowNumber: row.source_row_number,
+        quantityStatus: isWarehouseQuantityKnown({
+          quantityStatus: row.quantity_status === 'unknown' ? 'unknown' : 'known',
+          unitsPerBox: row.units_per_box, remainingBoxes: row.remaining_boxes,
+        }) ? 'known' : 'unknown',
+        unitsPerBox: row.units_per_box, remainingBoxes: row.remaining_boxes, openedUnits: row.opened_units,
+      })
+    }
+    if (page.length < ROOM_LIST_POSITION_PAGE_SIZE) return positions
+  }
 }
 
 export function listWarehouseLocationProducts(

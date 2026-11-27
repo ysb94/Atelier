@@ -57,10 +57,16 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
   const [showGroups, setShowGroups] = useState(false)
   const [printScope, setPrintScope] = useState<'selection' | RoomArea | null>(null)
   const [roomSaveFailed, setRoomSaveFailed] = useState(false)
-  const hasNames = rows.some(([name]) => Boolean(name.trim()))
-  const warehouse = useRoomListWarehouseLocations(hasNames)
+  // Keep the committed name in the request until the product field loses focus.
+  const namesKey = JSON.stringify([...new Set(rows.map(([name], index) =>
+    editingName?.sourceIndex === index ? editingName.name : roomListProductName(name),
+  ).filter(Boolean))].sort())
+  const names = useMemo(() => JSON.parse(namesKey) as string[], [namesKey])
+  const hasNames = names.length > 0
+  const warehouse = useRoomListWarehouseLocations(userId, names)
   const { locationCodes, latestPositions, styleNumbers } = warehouse
   const locationsReady = !warehouse.error && !warehouse.loading
+  const pickingReady = locationsReady && !warehouse.styleLookupError && !editingName
   const visibleRows = useMemo(() => {
     const missing = []
     const zero = []
@@ -83,7 +89,7 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
   ), [roomGroups])
   const rooms = useMemo(() => {
     const grouped = new Map<string, RoomPickingRoom>()
-    if (!locationsReady) return grouped
+    if (!pickingReady) return grouped
     for (const item of visibleRows) {
       if (!item.name) continue
       const styleNo = styleNumbers.get(item.name) ?? ''
@@ -110,7 +116,7 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
       group.lines.sort((left, right) => compareWarehouseLocationCodeNatural(left.location, right.location))
     }
     return grouped
-  }, [locationsReady, groupsByPrefix, latestPositions, styleNumbers, visibleRows])
+  }, [pickingReady, groupsByPrefix, latestPositions, styleNumbers, visibleRows])
   const roomTabs = useMemo(() => [...rooms.values()].sort((a, b) =>
     Number(b.key === 'missing') - Number(a.key === 'missing') || ROOM_ORDER.compare(a.name, b.name),
   ), [rooms])
@@ -324,10 +330,13 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
                     {locationColumns.map(index => (
                       <td key={index} className="break-all border-b border-r border-border px-3 py-2 align-top tabular-nums last:border-r-0">
                         {matches?.[index]}
-                        {name && index === 0 && !warehouse.error && (
-                          matches?.length ? null
-                            : warehouse.loading ? <span className="text-xs text-muted-foreground">조회 중…</span>
-                              : <span className="text-xs text-muted-foreground">위치 없음</span>
+                        {name && index === 0 && !matches?.length && (
+                          <span className="text-xs text-muted-foreground">
+                            {editingName?.sourceIndex === sourceIndex ? null
+                              : warehouse.sourceLoading || warehouse.loadingNames.has(name) ? '조회 중…'
+                                : warehouse.sourceError || warehouse.failedNames.has(name) ? '위치 확인 필요'
+                                  : '위치 없음'}
+                          </span>
                         )}
                       </td>
                     ))}

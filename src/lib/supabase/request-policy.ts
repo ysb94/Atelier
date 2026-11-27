@@ -24,7 +24,7 @@ const SCREEN_READ_RPCS = new Set([
   'list_meeting_calendar', 'list_meeting_availability_with_todos', 'list_my_meeting_invitations', 'list_my_meeting_notice_context',
   'list_my_chat_rooms', 'list_chat_directory', 'list_chat_room_members', 'chat_storage_usage',
   'list_my_late_statement_notices', 'list_my_manageable_late_statements', 'count_late_statements_awaiting_hr',
-  'list_warehouse_activity',
+  'list_warehouse_activity', 'list_room_list_stock_positions',
   'list_late_arrival_appeals',
 ])
 
